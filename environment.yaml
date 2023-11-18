@@ -1,0 +1,32 @@
+channels:
+  - conda-forge
+  - pytorch
+  - nvidia
+  - defaults
+dependencies:
+  - python=3.11
+  - numpy
+  - scikit-learn
+  - pytorch::pytorch=2.1
+  - pytorch::pytorch-cuda=11.8
+  - pytorch::torchvision
+  - einops
+  - lightning
+  - torchmetrics
+  - transformers
+  - timm
+  - wandb
+  - llvm-openmp<16  # https://github.com/pytorch/pytorch/issues/99625
+  - pandas
+  - openpyxl
+  - seaborn
+  - nibabel
+  - pydicom
+
+  - pip
+  - pip:
+    - cytoolz
+    - jsonargparse[signatures, omegaconf]
+    - xformers --index-url https://download.pytorch.org/whl/cu118
+#    - -e third-party/nnUNet
+#    - git+https://github.com/FabianIsensee/hiddenlayer.git
