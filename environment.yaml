@@ -1,3 +1,4 @@
+name: mmmm
 channels:
   - conda-forge
   - pytorch
@@ -27,6 +28,3 @@ dependencies:
   - pip:
     - cytoolz
     - jsonargparse[signatures, omegaconf]
-    - xformers --index-url https://download.pytorch.org/whl/cu118
-#    - -e third-party/nnUNet
-#    - git+https://github.com/FabianIsensee/hiddenlayer.git
