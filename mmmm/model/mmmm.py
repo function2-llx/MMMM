@@ -1,10 +1,11 @@
+from dataclasses import dataclass
 from monai.losses import DiceFocalLoss
 import torch
 import torch.nn as nn
 from typing import List
-import torch.nn.functional as F
 
-from model.segment_anything_volumetric.build_sam import build_sam_vit_3d
+
+from model.segment_anything_volumetric import build_sam_vit_3d
 from model.cogvlm.modeling_cogvlm import CogVLMForCausalLM, CogVLMModel
 
 
@@ -16,7 +17,6 @@ class MMMMBaseModel:
 
         self._initialize_sam_model()
         self._initialize_text_projection_layer()
-
 
     def _initialize_sam_model(self):
         self.sam_model = build_sam_vit_3d(self.sam_pretrained)
@@ -44,6 +44,7 @@ class MMMMForCausalLM(CogVLMForCausalLM):
         self.post_init()
 
     def _setup_model_configurations(self, kwargs):
+        self.seg_token_idx = kwargs.get("seg_token_idx", None)
         self.ce_loss_weight = kwargs.get("ce_loss_weight", None)
         self.loss = DiceFocalLoss(
             sigmoid=True,
@@ -51,7 +52,6 @@ class MMMMForCausalLM(CogVLMForCausalLM):
             lambda_dice=kwargs.get("dice_loss_weight", None),
             lambda_focal=kwargs.get("focal_loss_weight", None),
         )
-        self.seg_token_idx = kwargs.get("seg_token_idx", None)
 
     def get_sam_model_embs(self, pixel_values):
         with torch.no_grad():
@@ -69,13 +69,14 @@ class MMMMForCausalLM(CogVLMForCausalLM):
         global_enc_images: torch.FloatTensor,
         grounding_enc_images: torch.FloatTensor,
         input_ids: torch.LongTensor,
+        token_type_ids: torch.LongTensor,
         labels: torch.LongTensor,
         attention_masks: torch.LongTensor,
         offset: torch.LongTensor,
         masks_list: List[torch.FloatTensor],
         label_list: List[torch.Tensor],
         resize_list: List[tuple],
-        inference: bool = False
+        inference: bool = False,
     ):
         # Extract grounding encoder image embeddings
         image_embeddings = self.get_sam_model_embs(grounding_enc_images)
@@ -86,14 +87,15 @@ class MMMMForCausalLM(CogVLMForCausalLM):
 
         # Handle inference or training paths
         if inference:
-            output_hidden_states = self._inference_path(input_ids, global_enc_images, attention_masks)
+            output_hidden_states = self._inference_path(input_ids, token_type_ids, global_enc_images, attention_masks)
         else:
             output, output_hidden_states = self._training_path(
-                global_enc_images, input_ids, labels, attention_masks, offset
+                input_ids, token_type_ids, global_enc_images, attention_masks, labels, offset
             )
+        output_hidden_states = output.hidden_states
 
         # Process hidden states
-        hidden_states, pred_embeddings = self._process_hidden_states(output_hidden_states, seg_token_mask, offset)
+        _, pred_embeddings = self._process_hidden_states(output_hidden_states, seg_token_mask, offset)
 
         # Generate and post-process masks
         pred_masks = self._generate_and_postprocess_masks(
@@ -105,15 +107,9 @@ class MMMMForCausalLM(CogVLMForCausalLM):
 
         # Calculate losses
         return self._compute_losses(pred_masks, masks_list, output)
-    
-    def _create_seg_token_mask(self, input_ids):
-        mask = input_ids[:, 1:] == self.seg_token_idx
-        return torch.cat(
-            [torch.zeros((mask.shape[0], 575)).bool().cuda(), mask, torch.zeros((mask.shape[0], 1)).bool().cuda()],
-            dim=1
-        )
 
-    def _inference_path(self, input_ids, global_enc_images, attention_masks):
+    
+    def _inference_path(self, input_ids, token_type_ids, global_enc_images, attention_masks):
         length = input_ids.shape[0]
         global_enc_images_extended = global_enc_images.expand(length, -1, -1, -1).contiguous()
 
@@ -121,9 +117,10 @@ class MMMMForCausalLM(CogVLMForCausalLM):
         output_hidden_states = []
         for i in range(input_ids.shape[0]):
             output_i = super().forward(
-                images=global_enc_images_extended[i:i + 1],
-                attention_mask=attention_masks[i:i + 1],
                 input_ids=input_ids[i:i + 1],
+                token_type_ids=token_type_ids[i:i + 1],
+                images=[global_enc_images_extended[i:i + 1]],
+                attention_mask=attention_masks[i:i + 1],
                 output_hidden_states=True
             )
             output_hidden_states.append(output_i.hidden_states)
@@ -133,26 +130,34 @@ class MMMMForCausalLM(CogVLMForCausalLM):
         output_hidden_states = [output_hidden_states]
         return output_hidden_states
 
-    def _training_path(self, global_enc_images, input_ids, labels, attention_masks, offset):
+    def _training_path(self, input_ids, token_type_ids, global_enc_images, attention_masks, labels, offset):
         global_enc_images = self._prepare_global_enc_image(global_enc_images, offset)
 
         output = super().forward(
+            input_ids=input_ids,
+            token_type_ids=token_type_ids,
             images=global_enc_images,
             attention_mask=attention_masks,
-            input_ids=input_ids,
             labels=labels,
             output_hidden_states=True
         )
         output_hidden_states = output.hidden_states
         return output, output_hidden_states
-
+    
+    def _create_seg_token_mask(self, input_ids):
+        mask = input_ids[:, 1:] == self.seg_token_idx
+        return torch.cat(
+            [torch.zeros((mask.shape[0], 575)).bool().cuda(), mask, torch.zeros((mask.shape[0], 1)).bool().cuda()],
+            dim=1
+        )
+    
     def _prepare_global_enc_image(self, global_enc_image, offset):
         global_enc_image_list = []
         for i in range(len(offset) - 1):
             start_i, end_i = offset[i], offset[i + 1]
             global_enc_image_i = global_enc_image[i].unsqueeze(0).expand(end_i - start_i, -1, -1, -1).contiguous()
             global_enc_image_list.append(global_enc_image_i)
-        return torch.cat(global_enc_image_list, dim=0)
+        return [[image] for image in torch.cat(global_enc_image_list, dim=0)]
 
     def _process_hidden_states(self, output_hidden_states, seg_token_mask, offset, infer=False):
         hidden_states = [self.model.text_hidden_fcs[0](output_hidden_states[-1])]
@@ -186,8 +191,7 @@ class MMMMForCausalLM(CogVLMForCausalLM):
             )
             orig_size = label_list[i].shape if not infer else label_list[i]
             # During inference, we have original size list in place of label list
-            pred_mask = self.model.sam_model.postprocess_masks(
-                low_res_masks, input_size=resize_list[i], original_size=orig_size, )
+            pred_mask = self.model.sam_model.postprocess_masks(low_res_masks, input_size=resize_list[i], original_size=orig_size)
             pred_masks.append(pred_mask[:, 0])
         return pred_masks
 
@@ -214,17 +218,19 @@ class MMMMForCausalLM(CogVLMForCausalLM):
 
         # Aggregate all loss components
         total_loss = ce_loss + mask_loss
-        return {
-            "loss": total_loss,
-            "ce_loss": ce_loss,
-            "mask_loss": mask_loss
-        }
+        return total_loss, ce_loss, mask_loss
 
-    def evaluate(self, global_enc_images, grounding_enc_images, input_ids, resize_list, orig_sizes, max_tokens_new=32):
+    def evaluate(self, input_ids, token_type_ids, global_enc_images, grounding_enc_images, resize_list, orig_sizes, max_tokens_new=32):
         with torch.no_grad():
             generation_outputs = self.generate(
-                images=global_enc_images, input_ids=input_ids, max_new_tokens=max_tokens_new,
-                num_beams=1, output_hidden_states=True, return_dict_in_generate=True, )
+                input_ids=input_ids,
+                token_type_ids=token_type_ids,
+                images=[[image] for image in global_enc_images],
+                max_new_tokens=max_tokens_new,
+                num_beams=1,
+                output_hidden_states=True,
+                return_dict_in_generate=True
+            )
 
             output_hidden_states = generation_outputs.hidden_states
             generated_output_ids = generation_outputs.sequences
@@ -236,7 +242,7 @@ class MMMMForCausalLM(CogVLMForCausalLM):
                 dim=1
             )
             # Process hidden states
-            hidden_states, predicted_embeddings = self._process_hidden_states(
+            _, predicted_embeddings = self._process_hidden_states(
                 output_hidden_states, seg_token_mask, None, infer=True
             )
             image_embeddings = self.get_sam_model_embs(grounding_enc_images)
