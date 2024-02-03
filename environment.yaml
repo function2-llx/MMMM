@@ -27,5 +27,5 @@ dependencies:
   - pip
   - pip:
     - cytoolz
-    - jsonargparse[signatures, omegaconf]
+    - jsonargparse[signatures, omegaconf, argcomplete]
     # - xformers --index-url https://download.pytorch.org/whl/cu118
