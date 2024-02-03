@@ -123,8 +123,9 @@ class Processor(ABC):
 
     def load_images(self, data_point: DataPoint):
         loader = self.get_image_loader()
+        device = get_cuda_device()
         return {
-            modality: loader(path)
+            modality: loader(path).to(device)
             for modality, path in data_point.images.items()
         }
 
@@ -139,9 +140,15 @@ class Processor(ABC):
         """
         loader = self.get_mask_loader()
         if isinstance(data_point, MultiLabelMultiFileDataPoint):
+            mask_paths = list(data_point.masks.values())
+            masks = process_map(
+                loader, mask_paths,
+                new_mapper=False, disable=True, max_workers=min(4, len(mask_paths)),
+            )
+            masks = torch.stack(masks).to(get_cuda_device())
             return {
-                name: loader(path)
-                for name, path in data_point.masks.items()
+                name: masks[i]
+                for i, name in enumerate(data_point.masks)
             }
         else:
             raise NotImplementedError
@@ -307,10 +314,7 @@ class Default3DLoaderMixin:
     reader = None
 
     def get_image_loader(self) -> ImageLoader:
-        return mt.Compose([
-            mt.LoadImage(self.reader, image_only=True, dtype=None, ensure_channel_first=True),
-            mt.ToDevice(get_cuda_device()),
-        ])
+        return mt.LoadImage(self.reader, image_only=True, dtype=None, ensure_channel_first=True)
 
     def get_mask_loader(self) -> ImageLoader:
-        return self.get_image_loader()
+        return mt.LoadImage(self.reader, image_only=True, dtype=torch.bool, ensure_channel_first=True)

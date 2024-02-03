@@ -6,6 +6,7 @@ from .base import Default3DLoaderMixin, MultiLabelMultiFileDataPoint, Processor
 class TotalSegmentatorProcessor(Default3DLoaderMixin, Processor):
     name = 'TotalSegmentator'
     orientation = 'SRA'
+    max_workers = 8
 
     @property
     def dataset_root(self):
