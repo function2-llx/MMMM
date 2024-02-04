@@ -107,16 +107,13 @@ class MMMMForCausalLM(CogVLMForCausalLM):
 
     
     def _inference_path(self, input_ids, token_type_ids, global_enc_images, attention_masks):
-        length = input_ids.shape[0]
-        global_enc_images_extended = global_enc_images.expand(length, -1, -1, -1, -1).contiguous()
-
         # Process and return inference output
         output_hidden_states = []
         for i in range(input_ids.shape[0]):
             output_i = super().forward(
                 input_ids=input_ids[i:i + 1],
                 token_type_ids=token_type_ids[i:i + 1],
-                images=[global_enc_images_extended[i:i + 1]],
+                images=[global_enc_images[i:i + 1]],
                 attention_mask=attention_masks[i:i + 1],
                 output_hidden_states=True
             )
@@ -213,7 +210,7 @@ class MMMMForCausalLM(CogVLMForCausalLM):
             generated_output_ids = generation_outputs.sequences
 
             seg_token_mask = generated_output_ids == self.seg_token_idx
-            
+
             # Process hidden states
             _, predicted_embeddings = self._process_hidden_states(
                 output_hidden_states, seg_token_mask, None, infer=True
