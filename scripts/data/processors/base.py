@@ -5,7 +5,9 @@ from logging import Logger
 from pathlib import Path
 
 import cytoolz
+import einops
 import numpy as np
+from numpy import typing as npt
 import pandas as pd
 from scipy.stats import norm
 import torch
@@ -92,6 +94,7 @@ class Processor(ABC):
     max_smaller_edge: int = 512
     min_aniso_ratio: float = 0.7
     """minimum value for spacing_z / spacing_xy"""
+    mask_batch_size: int = 8
 
     def __init__(self, seg_tax: dict[str, SegClass], logger: Logger, *, max_workers: int, chunksize: int, override: bool):
         self.seg_tax = seg_tax
@@ -243,7 +246,7 @@ class Processor(ABC):
             new_spacing = np.array([new_spacing_z, new_spacing_xy, new_spacing_xy])
             scale_z = new_spacing_z / sample_image.pixdim[0].item()
             scale = np.array([scale_z, scale_xy, scale_xy])
-            new_shape = np.round(np.array(sample_image.shape[1:]) / scale).astype(np.int32).tolist()
+            new_shape = np.round(np.array(sample_image.shape[1:]) / scale).astype(np.int32)
             # 4. apply resize & intensity normalization, save processed results
             save_dir = self.output_root / 'data' / key
             save_dir.mkdir(exist_ok=True, parents=True)
@@ -252,18 +255,20 @@ class Processor(ABC):
                 np.save(save_dir / f'{modality}.npy', image.cpu().numpy().astype(np.float16))
             masks_save_dir = save_dir / 'masks'
             masks_save_dir.mkdir(exist_ok=True, parents=True)
-            for name, mask in self.resize_masks(masks, new_shape).items():
+            masks, positive_classes = self.resize_masks(masks, new_shape)
+            for name, mask in masks.items():
                 np.save(masks_save_dir / f'{name}.npy', mask.cpu().numpy())
             info.update({
-                **{f'shape-{i}': s for i, s in enumerate(new_shape)},
+                **{f'shape-{i}': s.item() for i, s in enumerate(new_shape)},
                 **{f'space-{i}': s.item() for i, s in enumerate(new_spacing)},
             })
             meta = {
                 'key': data_point.key,
                 'spacing': new_spacing,
-                'shape': tuple(new_shape),
+                'shape': new_shape,
+                'positive_classes': positive_classes,
             }
-            return info, meta
+            return meta, info
         except Exception as e:
             self.logger.error(key)
             self.logger.error(e)
@@ -271,24 +276,24 @@ class Processor(ABC):
             self.logger.error(traceback.format_exc())
             return None
 
-    def normalize_image(self, img: torch.Tensor, modality: str, new_shape: list[int]):
+    def normalize_image(self, img: torch.Tensor, modality: str, new_shape: npt.NDArray[np.int32]):
         is_natural = is_natural_modality(modality)
         # 1. translate intensity to [0, ...] for padding during resizing
         if not is_natural:
             img = img - img.min()
         # 2. resize
         if new_shape[0] == img.shape[1]:
-            if tuple(new_shape[1:]) != img.shape[2:]:
+            if not np.array_equal(new_shape[1:], img.shape[2:]):
                 img = tvtf.resize(
-                    img, new_shape[1:], tvt.InterpolationMode.BICUBIC, antialias=True
+                    img, new_shape[1:].tolist(), tvt.InterpolationMode.BICUBIC, antialias=True,
                 )
         else:
-            scale = np.array(img.shape[1:]) / np.array(new_shape)
+            scale = img.shape[1:] / new_shape
             anti_aliasing_filter = mt.GaussianSmooth((scale - 1) / 2)
             filtered = anti_aliasing_filter(img)
             resizer = mt.Affine(
                 scale_params=scale.tolist(),
-                spatial_size=new_shape,
+                spatial_size=new_shape.tolist(),
                 mode=GridSampleMode.BICUBIC,
                 image_only=True,
             )
@@ -298,17 +303,25 @@ class Processor(ABC):
         maxv = 255 if is_natural else img.max()
         return img / maxv
 
-    def resize_masks(self, masks: dict[str, torch.Tensor], new_shape: list[int]) -> dict[str, torch.Tensor]:
-        if cytoolz.first(masks.values()).shape[1:] == tuple(new_shape):
-            return masks
-        batch_size = 8
-        masks = dict(masks)
-        for batch in cytoolz.partition_all(batch_size, masks.items()):
+    def resize_masks(self, masks: dict[str, torch.Tensor], new_shape: npt.NDArray[np.int32]) -> tuple[dict[str, torch.Tensor], list[str]]:
+        new_shape = tuple(new_shape.tolist())
+        do_resize = cytoolz.first(masks.values()).shape[1:] == new_shape
+        if do_resize:
+            masks = dict(masks)
+        positive_classes = []
+        for batch in cytoolz.partition_all(self.mask_batch_size, masks.items()):
             names, batch = zip(*batch)
-            batch = nnf.interpolate(torch.stack(batch).float(), tuple(new_shape), mode='trilinear')
+            batch = torch.stack(batch)
+            if do_resize:
+                batch = nnf.interpolate(batch.float(), new_shape, mode='trilinear')
+                batch = batch > 0.5
+            positive_mask = einops.reduce(batch, 'c ... -> c', 'any')
             for i, name in enumerate(names):
-                masks[name] = batch[i] > 0.5
-        return masks
+                if do_resize:
+                    masks[name] = batch[i]
+                if positive_mask[i]:
+                    positive_classes.append(name)
+        return masks, positive_classes
 
 class Default3DLoaderMixin:
     reader = None
