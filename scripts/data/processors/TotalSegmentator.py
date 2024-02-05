@@ -1,4 +1,9 @@
+import numpy as np
 import pandas as pd
+import torch
+
+from monai.data import MetaTensor
+from monai import transforms as mt
 
 from mmmm.data.defs import ORIGIN_DATA_ROOT
 
@@ -6,8 +11,30 @@ from .base import Default3DImageLoaderMixin, Binary3DMaskLoaderMixin, Processor,
 
 class TotalSegmentatorProcessor(Default3DImageLoaderMixin, Binary3DMaskLoaderMixin, Processor):
     name = 'TotalSegmentator'
-    orientation = 'SRA'
     max_workers = 8
+
+    def get_orientation(self, images: MetaTensor):
+        codes = ['RAS', 'ASR', 'SRA']
+        diff = np.empty(len(codes))
+        shape_diff = np.empty(len(codes), dtype=np.int32)
+        dummy = MetaTensor(torch.empty(1, *images.shape[1:]), images.affine)
+        for i, code in enumerate(codes):
+            orientation = mt.Orientation(code)
+            dummy_t: MetaTensor = orientation(dummy)
+            diff[i] = abs(dummy_t.pixdim[1] - dummy_t.pixdim[2])
+            shape_diff[i] = abs(dummy_t.shape[2] - dummy_t.shape[3])
+        if shape_diff.min().item() == 0 and shape_diff.max().item() != 0:
+            i = shape_diff.argmin().item()
+            if diff[i] > diff.min():
+                self.logger.info(f'{self.key}: min spacing diff not match isotropic in-plane shape')
+            orientation = codes[i]
+        elif diff.min() != diff.max():
+            orientation = codes[diff.argmin()]
+            self.logger.info(f'{self.key}: use min spacing diff')
+        else:
+            orientation = 'SRA'
+            self.logger.info(f'{self.key}: fall back to {orientation}')
+        return orientation
 
     @property
     def dataset_root(self):

@@ -182,24 +182,23 @@ class Processor(ABC):
         info.to_excel(info_path.with_suffix('.xlsx'), freeze_panes=(1, 1))
         meta.to_pickle(meta_path)
 
+    def get_orientation(self, images: MetaTensor):
+        if self.orientation is not None:
+            return self.orientation
+        codes = ['RAS', 'ASR', 'SRA']
+        diff = np.empty(len(codes))
+        dummy = MetaTensor(torch.empty(1, 1, 1, 1), images.affine)
+        for i, code in enumerate(codes):
+            orientation = mt.Orientation(code)
+            spacing = orientation(dummy).pixdim
+            diff[i] = abs(spacing[1] - spacing[2])
+        orientation = codes[diff.argmin()]
+        return orientation
+
     def orient(self, images: MetaTensor, masks: torch.BoolTensor) -> tuple[MetaTensor, torch.BoolTensor]:
-        if self.orientation is None:
-            # TODO: additionally determine from shape
-            codes = ['RAS', 'ASR', 'SRA']
-            diff = np.empty(len(codes))
-            dummy = MetaTensor(torch.empty(1, 1, 1, 1), images.affine)
-            for i, code in enumerate(codes):
-                orientation = mt.Orientation(code, lazy=True)
-                spacing = orientation(dummy).pixdim
-                diff[i] = abs(spacing[1] - spacing[2])
-            orientation = codes[diff.argmin()]
-        else:
-            orientation = self.orientation
-        trans = mt.Compose([
-            mt.Orientation(orientation),
-            mt.ToTensor(),
-        ])
-        images, masks = map(trans, [images, masks])
+        orientation = self.get_orientation(images)
+        trans = mt.Orientation(orientation)
+        images, masks = map(lambda x: trans(x).contiguous(), [images, masks])
         return images, masks
 
     def process_data_point(self, data_point: DataPoint) -> tuple[dict, dict] | None:
@@ -207,7 +206,7 @@ class Processor(ABC):
         Returns:
             (metadata, human-readable information saved in csv) if process success, else None
         """
-        key = data_point.key
+        self.key = key = data_point.key
         try:
             modalities, images = self.load_images(data_point)
             is_natural = is_natural_modality(modalities[0])
