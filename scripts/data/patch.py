@@ -1,6 +1,7 @@
 import itertools as it
 from pathlib import Path
 
+import einops
 import h5py
 import numpy as np
 import pandas as pd
@@ -10,13 +11,21 @@ from luolib.transforms import sliding_window_sum
 from luolib.types import tuple3_t
 from luolib.utils import get_cuda_device, process_map
 
-from mmmm.data.defs import PROCESSED_SEG_DATA_ROOT
+from mmmm.data.defs import PROCESSED_SEG_DATA_ROOT, encode_patch_size
 
 mask_batch_size: int = 4
 patch_size: tuple3_t[int] = (96, 224, 224)
 
 def _load_mask(mask_dir: Path, name: str):
     return name, np.load(mask_dir / f'{name}.npy')
+
+def _get_center_slices(shape: tuple3_t[int]):
+    ret = [
+        slice(None, None) if s <= ps
+        else slice(ps >> 1, s - ps + 1 + (ps >> 1))
+        for s, ps in zip(shape, patch_size)
+    ]
+    return ret
 
 def process_case(dataset_dir: Path, key: str):
     case_dir = dataset_dir / 'data' / key
@@ -29,26 +38,29 @@ def process_case(dataset_dir: Path, key: str):
         mask_sizes[i:i + mask_batch_size] = batch.sum(dim=(1, 2, 3), keepdim=True, dtype=dtype)
         patch_sum.append(sliding_window_sum(batch, patch_size, dtype))
     patch_sum = torch.cat(patch_sum)
-    # patch contains 50% of the mask or 1000 mask voxels is positive
-    positive_th = (mask_sizes * 0.5).clamp(max=1000)
-    positive_mask = patch_sum > positive_th
-    save_dir = dataset_dir / 'patch' / ','.join(map(str, patch_size)) / f'.{key}'
+    # a patch is "significant" for a class iff any:
+    # - contains at least 80% voxels of this class
+    # - center voxel is this class
+    significant_mask = (patch_sum > (mask_sizes * 0.8)) | masks[:, *_get_center_slices(masks.shape[1:])]
+    save_dir = dataset_dir / 'patch' / encode_patch_size(patch_size) / f'.{key}'
     save_dir.mkdir(exist_ok=True, parents=True)
-    np.save(save_dir / 'positive_mask.npy', positive_mask.cpu().numpy())
-    with h5py.File(save_dir / 'class_to_patch.h5', 'w') as f:
+    with h5py.File(save_dir / 'class_positions.h5', 'w') as f:
         for i in range(masks.shape[0]):
-            positions = positive_mask[i].nonzero().short()
+            positions = significant_mask[i].nonzero().short()
             f.create_dataset(str(i), data=positions.cpu().numpy())
+    # convert to channel last for efficient (position -> class) query
+    positive_mask = einops.rearrange(patch_sum > 0, 'c ... -> ... c')
+    np.save(save_dir / 'positive_mask.npy', positive_mask.cpu().numpy())
     save_dir.rename(save_dir.with_name(key))
 
 def process_dataset(dataset_dir: Path):
-    save_root = dataset_dir / 'patch' / ','.join(map(str, patch_size))
+    save_root = dataset_dir / 'patch' / encode_patch_size(patch_size)
     meta: pd.DataFrame = pd.read_pickle(dataset_dir / 'meta.pkl')
     keys = list(filter(lambda name: not (save_root / name).exists(), meta.index))
     process_map(
         process_case,
         it.repeat(dataset_dir), keys,
-        ncols=80, max_workers=3, chunksize=1, total=len(keys),
+        ncols=80, max_workers=4, chunksize=1, total=len(keys),
     )
 
 def main():
