@@ -4,7 +4,7 @@ import importlib
 import inspect
 import logging
 
-from mmmm.data.defs import PROCESSED_SEG_DATA_ROOT
+from mmmm.data.defs import PROCESSED_DATA_ROOT, PROCESSED_SEG_DATA_ROOT
 from mmmm.data.seg_tax import load_seg_tax
 from processors.base import Processor
 
@@ -18,7 +18,7 @@ def setup_logging():
 
     ch = logging.StreamHandler()
     ch.setLevel(logging.INFO)
-    log_dir = PROCESSED_SEG_DATA_ROOT / '.logs'
+    log_dir = PROCESSED_DATA_ROOT / '.logs' / 'image'
     log_dir.mkdir(parents=True, exist_ok=True)
     fh = logging.FileHandler(log_dir / f'{datetime.now().strftime("%Y-%m-%d-%H:%M:%S")}.log')
     fh.setLevel(logging.DEBUG)

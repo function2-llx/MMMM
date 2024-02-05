@@ -1,6 +1,7 @@
 import pandas as pd
 
 from mmmm.data.defs import ORIGIN_DATA_ROOT
+
 from .base import Default3DLoaderMixin, MultiLabelMultiFileDataPoint, Processor
 
 class TotalSegmentatorProcessor(Default3DLoaderMixin, Processor):
