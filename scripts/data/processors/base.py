@@ -47,42 +47,38 @@ class MultiLabelMultiFileDataPoint(DataPoint):
 _CLIP_LOWER = norm.cdf(-3)
 _CLIP_UPPER = norm.cdf(3)
 
-def clip_intensity(img: torch.Tensor, is_natural: bool) -> tuple[torch.Tensor, torch.Tensor]:
+def clip_intensity(img: torch.Tensor, is_natural: bool) -> torch.BoolTensor:
     """clip the intensity in-place
     Args:
         is_natural: whether the modality of the image is natural (RGB or gray scale)
     Returns:
-        intensity lower & upper threshold for clipping
+        the crop mask after clipping
     """
+    x = img.view(img.shape[0], -1)
     if is_natural:
         minv = img.new_tensor(0.)
-        maxv = img.new_tensor(255.)
     else:
-        minv = lt.quantile(img, _CLIP_LOWER)
-        maxv = lt.quantile(img, _CLIP_UPPER)
-        img.clamp_(minv, maxv)
-    return minv, maxv
+        minv = lt.quantile(x, _CLIP_LOWER, 1, True)
+        maxv = lt.quantile(x, _CLIP_UPPER, 1, True)
+        x.clamp_(minv, maxv)
+    crop_mask = img.new_zeros((1, *img.shape[1:]), dtype=torch.bool)
+    torch.any(x > minv, dim=0, keepdim=True, out=crop_mask.view(1, -1))
+    return crop_mask
 
-def crop(images: dict[str, MetaTensor], masks: dict[str, MetaTensor], crop_mask: torch.Tensor) -> tuple[dict[str, MetaTensor], dict[str, MetaTensor]]:
+def crop(images: MetaTensor, masks: torch.BoolTensor, crop_mask: torch.BoolTensor) -> tuple[MetaTensor, torch.BoolTensor]:
     data = {
-        **{
-            ('image', modality): image
-            for modality, image in images.items()
-        },
-        **{
-            ('mask', name): mask
-            for name, mask in masks.items()
-        },
+        'images': images,
+        'masks': masks,
         'crop_mask': crop_mask,
     }
-    data = mt.CropForegroundD(data.keys(), 'crop_mask', start_coord_key=None, end_coord_key=None)(data)
-    data.pop('crop_mask')
-    images = {modality: image for (image_type, modality), image in data.items() if image_type == 'image'}
-    masks = {name: mask for (image_type, name), mask in data.items() if image_type == 'mask'}
-    return images, masks
+    data = mt.CropForegroundD(['images', 'masks'], 'crop_mask', start_coord_key=None, end_coord_key=None)(data)
+    return data['images'], data['masks']
 
 def is_natural_modality(modality: str):
     return modality.startswith('RGB') or modality.startswith('gray')
+
+def is_rgb_modality(modality: str):
+    return modality.startswith('RGB')
 
 class Processor(ABC):
     name: str
@@ -94,7 +90,7 @@ class Processor(ABC):
     max_smaller_edge: int = 512
     min_aniso_ratio: float = 0.7
     """minimum value for spacing_z / spacing_xy"""
-    mask_batch_size: int = 8
+    mask_batch_size: int = 32
 
     def __init__(self, seg_tax: dict[str, SegClass], logger: Logger, *, max_workers: int, chunksize: int, override: bool):
         self.seg_tax = seg_tax
@@ -124,37 +120,38 @@ class Processor(ABC):
     def get_image_loader(self) -> ImageLoader:
         pass
 
-    def load_images(self, data_point: DataPoint):
+    def load_images(self, data_point: DataPoint) -> tuple[list[str], MetaTensor]:
         loader = self.get_image_loader()
-        device = get_cuda_device()
-        return {
-            modality: loader(path).to(device)
-            for modality, path in data_point.images.items()
-        }
+        modalities = []
+        images = []
+        for modality, path in data_point.images.items():
+            modalities.append(modality)
+            images.append(loader(path))
+        return modalities, torch.cat(images).to(get_cuda_device())
 
     @abstractmethod
     def get_mask_loader(self) -> ImageLoader:
         pass
 
-    def load_masks(self, data_point: DataPoint) -> dict[str, MetaTensor]:
+    def load_masks(self, data_point: DataPoint) -> tuple[list[str], torch.BoolTensor]:
         """
         Returns:
             seg-tax name ↦ segmentation mask
         """
         loader = self.get_mask_loader()
         if isinstance(data_point, MultiLabelMultiFileDataPoint):
-            mask_paths = list(data_point.masks.values())
+            masks = data_point.masks
+            classes, mask_paths = zip(*masks.items())
+            classes = list(classes)
+            # NOTE: make sure that mask loader returns bool tensor
             masks = process_map(
                 loader, mask_paths,
                 new_mapper=False, disable=True, max_workers=min(4, len(mask_paths)),
             )
-            masks = torch.stack(masks).to(get_cuda_device())
-            return {
-                name: masks[i]
-                for i, name in enumerate(data_point.masks)
-            }
+            masks = torch.cat(masks).to(get_cuda_device())
         else:
             raise NotImplementedError
+        return classes, masks
 
     def process(self):
         data_points = self.get_data_points()
@@ -185,12 +182,12 @@ class Processor(ABC):
         info.to_excel(info_path.with_suffix('.xlsx'), freeze_panes=(1, 1))
         meta.to_pickle(meta_path)
 
-    def orient(self, images: dict[str, MetaTensor], masks: dict[str, MetaTensor]):
+    def orient(self, images: MetaTensor, masks: torch.BoolTensor) -> tuple[MetaTensor, torch.BoolTensor]:
         if self.orientation is None:
-            image = cytoolz.first(images.values())
+            # TODO: additionally determine from shape
             codes = ['RAS', 'ASR', 'SRA']
             diff = np.empty(len(codes))
-            dummy = MetaTensor(torch.empty(1, 1, 1, 1), image.affine)
+            dummy = MetaTensor(torch.empty(1, 1, 1, 1), images.affine)
             for i, code in enumerate(codes):
                 orientation = mt.Orientation(code, lazy=True)
                 spacing = orientation(dummy).pixdim
@@ -198,14 +195,12 @@ class Processor(ABC):
             orientation = codes[diff.argmin()]
         else:
             orientation = self.orientation
-
-        def _apply(data: dict[str, MetaTensor]) -> dict[str, MetaTensor]:
-            keys = list(data.keys())
-            data = mt.OrientationD(keys, orientation)(data)
-            data = mt.ToTensorD(keys)(data)
-            return data
-
-        return _apply(images), _apply(masks)
+        trans = mt.Compose([
+            mt.Orientation(orientation),
+            mt.ToTensor(),
+        ])
+        images, masks = map(trans, [images, masks])
+        return images, masks
 
     def process_data_point(self, data_point: DataPoint) -> tuple[dict, dict] | None:
         """
@@ -214,59 +209,57 @@ class Processor(ABC):
         """
         key = data_point.key
         try:
-            images = self.load_images(data_point)
-            masks = self.load_masks(data_point)
+            modalities, images = self.load_images(data_point)
+            is_natural = is_natural_modality(modalities[0])
+            assert all(is_natural == is_natural_modality(modality) for modality in modalities[1:])
+            if any(is_rgb_modality(modality) for modality in modalities):
+                assert len(modalities) == 1, 'multiple RGB images is not supported'
+            classes, masks = self.load_masks(data_point)
             images, masks = self.orient(images, masks)
-            # check shape & spacing consistency
-            sample_image = cytoolz.first(images.values())
-            shape = sample_image.shape
-            assert all(image.shape == shape for image in images.values())
-            assert all(mask.shape == shape for mask in masks.values())
-
+            assert images.shape[1:] == masks.shape[1:]
             info = {
                 'key': key,
-                **{f'shape-o-{i}': s for i, s in enumerate(shape[1:])},
-                **{f'space-o-{i}': s.item() for i, s in enumerate(sample_image.pixdim)}
+                **{f'shape-o-{i}': s for i, s in enumerate(images.shape[1:])},
+                **{f'space-o-{i}': s.item() for i, s in enumerate(images.pixdim)}
             }
             # 1. clip intensity, compute crop mask
-            crop_mask = torch.zeros_like(sample_image, dtype=torch.bool)  # 0 for cropping
-            for modality, image in images.items():
-                minv, maxv = clip_intensity(image, is_natural_modality(modality))
-                crop_mask |= image > minv
+            crop_mask = clip_intensity(images, is_natural)
             # 2. crop images and masks
             images, masks = crop(images, masks, crop_mask)
             # 3. compute resize (adapt to self.max_smaller_edge and self.min_aniso_ratio)
-            sample_image = cytoolz.first(images.values())
-            if self.max_smaller_edge < (smaller_edge := min(sample_image.shape[2:])):
+            if self.max_smaller_edge < (smaller_edge := min(images.shape[2:])):
                 scale_xy = smaller_edge / self.max_smaller_edge
             else:
                 scale_xy = 1.
-            new_spacing_xy = sample_image.pixdim[2:].min().item() * scale_xy
-            new_spacing_z = max(sample_image.pixdim[0].item(), new_spacing_xy * self.min_aniso_ratio)
+            new_spacing_xy = images.pixdim[2:].min().item() * scale_xy
+            new_spacing_z = max(images.pixdim[0].item(), new_spacing_xy * self.min_aniso_ratio)
             new_spacing = np.array([new_spacing_z, new_spacing_xy, new_spacing_xy])
-            scale_z = new_spacing_z / sample_image.pixdim[0].item()
+            scale_z = new_spacing_z / images.pixdim[0].item()
             scale = np.array([scale_z, scale_xy, scale_xy])
-            new_shape = np.round(np.array(sample_image.shape[1:]) / scale).astype(np.int32)
-            # 4. apply resize & intensity normalization, save processed results
-            save_dir = self.output_root / 'data' / key
-            save_dir.mkdir(exist_ok=True, parents=True)
-            for modality, image in images.items():
-                image = self.normalize_image(image, modality, new_shape)
-                np.save(save_dir / f'{modality}.npy', image.cpu().numpy().astype(np.float16))
-            masks_save_dir = save_dir / 'masks'
-            masks_save_dir.mkdir(exist_ok=True, parents=True)
-            masks, positive_classes = self.resize_masks(masks, new_shape)
-            for name, mask in masks.items():
-                np.save(masks_save_dir / f'{name}.npy', mask.cpu().numpy())
+            new_shape = np.round(np.array(images.shape[1:]) / scale).astype(np.int32)
             info.update({
                 **{f'shape-{i}': s.item() for i, s in enumerate(new_shape)},
                 **{f'space-{i}': s.item() for i, s in enumerate(new_spacing)},
             })
+            # 4. apply resize & intensity normalization, save processed results
+            save_dir = self.output_root / 'data' / key
+            save_dir.mkdir(exist_ok=True, parents=True)
+            # for modality, image in images.items():
+            images = self.normalize_image(images, is_natural, new_shape)
+            np.save(save_dir / f'images.npy', images.cpu().numpy().astype(np.float16))
+            masks = self.resize_masks(masks, new_shape)
+            positive_mask: torch.BoolTensor = einops.reduce(masks > 0, 'c ... -> c', 'any')
+            masks = masks[positive_mask]
+            np.save(save_dir / 'masks.npy', masks.cpu().numpy())
+            positive_classes = [name for i, name in enumerate(classes) if positive_mask[i]]
+            negative_classes = [name for i, name in enumerate(classes) if not positive_mask[i]]
             meta = {
                 'key': data_point.key,
                 'spacing': new_spacing,
                 'shape': new_shape,
+                'modalities': modalities,
                 'positive_classes': positive_classes,
+                'negative_classes': negative_classes,
             }
             return meta, info
         except Exception as e:
@@ -276,58 +269,52 @@ class Processor(ABC):
             self.logger.error(traceback.format_exc())
             return None
 
-    def normalize_image(self, img: torch.Tensor, modality: str, new_shape: npt.NDArray[np.int32]):
-        is_natural = is_natural_modality(modality)
+    def normalize_image(self, images: torch.Tensor, is_natural: bool, new_shape: npt.NDArray[np.int32]):
         # 1. translate intensity to [0, ...] for padding during resizing
         if not is_natural:
-            img = img - img.min()
+            images = images - einops.reduce(images, 'c ... -> c', 'min')
         # 2. resize
-        if new_shape[0] == img.shape[1]:
-            if not np.array_equal(new_shape[1:], img.shape[2:]):
-                img = tvtf.resize(
-                    img, new_shape[1:].tolist(), tvt.InterpolationMode.BICUBIC, antialias=True,
+        if new_shape[0] == images.shape[1]:
+            if not np.array_equal(new_shape[1:], images.shape[2:]):
+                images = tvtf.resize(
+                    images, new_shape[1:].tolist(), tvt.InterpolationMode.BICUBIC, antialias=True,
                 )
         else:
-            scale = img.shape[1:] / new_shape
+            scale = images.shape[1:] / new_shape
             anti_aliasing_filter = mt.GaussianSmooth((scale - 1) / 2)
-            filtered = anti_aliasing_filter(img)
+            filtered = anti_aliasing_filter(images)
             resizer = mt.Affine(
                 scale_params=scale.tolist(),
                 spatial_size=new_shape.tolist(),
                 mode=GridSampleMode.BICUBIC,
                 image_only=True,
             )
-            img = resizer(filtered)
+            images = resizer(filtered)
         # 3. rescale intensity fo [0, 1]
-        img.clamp_(0)
-        maxv = 255 if is_natural else img.max()
-        return img / maxv
+        images.clamp_(0)
+        maxv = 255 if is_natural else einops.reduce(images, 'c ... -> c', 'max')
+        return images / maxv
 
-    def resize_masks(self, masks: dict[str, torch.Tensor], new_shape: npt.NDArray[np.int32]) -> tuple[dict[str, torch.Tensor], list[str]]:
+    def resize_masks(self, masks: torch.BoolTensor, new_shape: npt.NDArray[np.int32]) -> torch.BoolTensor:
         new_shape = tuple(new_shape.tolist())
-        do_resize = cytoolz.first(masks.values()).shape[1:] == new_shape
-        if do_resize:
-            masks = dict(masks)
-        positive_classes = []
-        for batch in cytoolz.partition_all(self.mask_batch_size, masks.items()):
-            names, batch = zip(*batch)
-            batch = torch.stack(batch)
-            if do_resize:
+        if masks.shape[1:] == new_shape:
+            resized_masks = masks
+        else:
+            resized_masks = masks.new_empty((masks.shape[0], *new_shape))
+            for i in range(0, masks.shape[0], self.mask_batch_size):
+                batch = masks[i:i + self.mask_batch_size]
                 batch = nnf.interpolate(batch.float(), new_shape, mode='trilinear')
-                batch = batch > 0.5
-            positive_mask = einops.reduce(batch, 'c ... -> c', 'any')
-            for i, name in enumerate(names):
-                if do_resize:
-                    masks[name] = batch[i]
-                if positive_mask[i]:
-                    positive_classes.append(name)
-        return masks, positive_classes
+                resized_masks[i:i + self.mask_batch_size] = batch > 0.5
+        return resized_masks
 
-class Default3DLoaderMixin:
-    reader = None
+class Default3DImageLoaderMixin:
+    image_reader = None
 
     def get_image_loader(self) -> ImageLoader:
-        return mt.LoadImage(self.reader, image_only=True, dtype=None, ensure_channel_first=True)
+        return mt.LoadImage(self.image_reader, image_only=True, dtype=None, ensure_channel_first=True)
+
+class Binary3DMaskLoaderMixin:
+    mask_reader = None
 
     def get_mask_loader(self) -> ImageLoader:
-        return mt.LoadImage(self.reader, image_only=True, dtype=torch.bool, ensure_channel_first=True)
+        return mt.LoadImage(self.mask_reader, image_only=True, dtype=torch.bool, ensure_channel_first=True)

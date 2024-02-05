@@ -2,9 +2,9 @@ import pandas as pd
 
 from mmmm.data.defs import ORIGIN_DATA_ROOT
 
-from .base import Default3DLoaderMixin, MultiLabelMultiFileDataPoint, Processor
+from .base import Default3DImageLoaderMixin, Binary3DMaskLoaderMixin, Processor, MultiLabelMultiFileDataPoint
 
-class TotalSegmentatorProcessor(Default3DLoaderMixin, Processor):
+class TotalSegmentatorProcessor(Default3DImageLoaderMixin, Binary3DMaskLoaderMixin, Processor):
     name = 'TotalSegmentator'
     orientation = 'SRA'
     max_workers = 8
