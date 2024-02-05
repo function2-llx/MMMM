@@ -2,3 +2,6 @@ from pathlib import Path
 
 DATA_ROOT = Path('data')
 ORIGIN_DATA_ROOT = DATA_ROOT / 'origin'
+PROCESSED_DATA_ROOT = DATA_ROOT / 'processed'
+ORIGIN_SEG_DATA_ROOT = ORIGIN_DATA_ROOT / 'image'
+PROCESSED_SEG_DATA_ROOT = PROCESSED_DATA_ROOT / 'image'

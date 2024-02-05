@@ -1,0 +1,1 @@
+from .TotalSegmentator import TotalSegmentatorProcessor

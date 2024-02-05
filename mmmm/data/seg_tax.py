@@ -18,7 +18,7 @@ class SegClass:
     parents: list[SegClass]
     children: list[SegClass]
 
-    def update(self, info: pd.Series, classes: dict[str, SegClass]):
+    def _update(self, info: pd.Series, classes: dict[str, SegClass]):
         self.synonyms = _split_items(info['synonyms'])
         self.parents = [
             classes[parent_name]
@@ -36,6 +36,5 @@ def load_seg_tax() -> dict[str, SegClass]:
         for name in tax.index
     }
     for name, row in tax.iterrows():
-        classes[name].update(row, classes)
-
+        classes[name]._update(row, classes)
     return classes
