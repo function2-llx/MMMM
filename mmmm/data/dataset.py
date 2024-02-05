@@ -1,8 +1,8 @@
 import torch
 
-from model.cogvlm.modeling_cogvlm import VISION_TOKEN_TYPE
-import model.conversation as conversation
-from .utils import IGNORE_INDEX
+from model.cogvlm import conversation as conversation_lib
+
+IGNORE_INDEX = -100
 
 
 def custom_collate_fn(batch, tokenizer=None, inference=False):
@@ -27,7 +27,7 @@ def custom_collate_fn(batch, tokenizer=None, inference=False):
     attention_masks = input_ids.ne(tokenizer.pad_token_id)
 
     # Preparing targets and handling conversation types
-    conv = conversation.default_conversation.copy()
+    conv = conversation_lib.default_conversation.copy()
     targets = input_ids.clone()
     sep = conv.sep + conv.roles[1] + ": "
     sep2 = conv.sep2
@@ -54,7 +54,6 @@ def custom_collate_fn(batch, tokenizer=None, inference=False):
         "resize_list": resize_list,
         "questions_list": questions_list,
         "inference": inferences[0],
-        "conversation_list": conversation_list
     }
 
 
