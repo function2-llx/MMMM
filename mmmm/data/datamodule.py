@@ -44,9 +44,9 @@ class SamplePatch(mt.RandomizableTransform):
 
     def gen_conversation(self, modality: str, classes: list[str], pos_classes: list[str], neg_classes: list[str]):
         assert len(classes) > 0
-        prompt = f"Output the segmentation masks on the given {modality} image for the following objects: {', '.join(classes)}."
+        prompt = f"Find and output the segmentation masks on the given {modality} image for the following objects: {', '.join(classes)}."
         if len(pos_classes) > 0:
-            response = f"The following requested objects are found and segmented: {', '.join(map(lambda name: f'<p> {name} </p> <SEG>', pos_classes))}"
+            response = f"The following requested objects are found and segmented: {', '.join(map(lambda name: f'<SEG> {name} </SEG>', pos_classes))}"
             if len(neg_classes) == 0:
                 response += '.'
             else:

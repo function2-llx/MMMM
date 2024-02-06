@@ -4,8 +4,8 @@ import torch.nn as nn
 from typing import List
 
 
-from model.segment_anything_volumetric import build_sam_vit_3d
-from model.cogvlm.modeling_cogvlm import CogVLMForCausalLM, CogVLMModel
+from .segment_anything_volumetric import build_sam_vit_3d
+from .cogvlm.modeling_cogvlm import CogVLMForCausalLM, CogVLMModel
 
 
 class MMMMBaseModel:
