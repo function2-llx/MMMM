@@ -6,6 +6,8 @@ import pandas as pd
 
 from .defs import ORIGIN_DATA_ROOT
 
+IGNORE_INDEX = -100
+
 def _split_items(items_str: str, sep: str = '; ') -> list[str]:
     return [] if pd.isna(items_str) else items_str.split(sep)
 
