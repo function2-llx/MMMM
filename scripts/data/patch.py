@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import torch
 
-from luolib.transforms import sliding_window_sum
+from luolib import transforms as lt
 from luolib.types import tuple3_t
 from luolib.utils import get_cuda_device, process_map
 
@@ -36,7 +36,7 @@ def process_case(dataset_dir: Path, key: str):
     for i in range(0, masks.shape[0], mask_batch_size):
         batch = masks[i:i + mask_batch_size]
         mask_sizes[i:i + mask_batch_size] = batch.sum(dim=(1, 2, 3), keepdim=True, dtype=dtype)
-        patch_sum.append(sliding_window_sum(batch, patch_size, dtype))
+        patch_sum.append(lt.sliding_window_sum(batch, patch_size, dtype))
     patch_sum = torch.cat(patch_sum)
     # a patch is "significant" for a class iff any:
     # - contains at least 80% voxels of this class
@@ -47,7 +47,12 @@ def process_case(dataset_dir: Path, key: str):
     save_dir.mkdir(exist_ok=True, parents=True)
     with h5py.File(save_dir / 'class_positions.h5', 'w') as f:
         for i in range(masks.shape[0]):
-            positions = significant_mask[i].nonzero().short()
+            if significant_mask[i].any():
+                positions = significant_mask[i].nonzero().short()
+            else:
+                # no position is significant for this class according to previous rules, use the 80% percentile instead
+                class_significant_mask = patch_sum[i] >= lt.quantile(patch_sum[i][patch_sum[i] > 0], 0.8)
+                positions = class_significant_mask.nonzero().short()
             assert positions.shape[0] > 0
             f.create_dataset(str(i), data=positions.cpu().numpy())
     # convert to channel last for efficient (position -> class) query
@@ -59,11 +64,10 @@ def process_dataset(dataset_dir: Path):
     save_root = dataset_dir / 'patch' / encode_patch_size(patch_size)
     meta: pd.DataFrame = pd.read_pickle(dataset_dir / 'meta.pkl')
     keys = list(filter(lambda name: not (save_root / name).exists(), meta.index))
-    keys = ['s0557']
     process_map(
         process_case,
         it.repeat(dataset_dir), keys,
-        ncols=80, max_workers=0, chunksize=1, total=len(keys),
+        ncols=80, max_workers=4, chunksize=1, total=len(keys),
     )
 
 def main():
