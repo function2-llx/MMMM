@@ -252,6 +252,7 @@ class Processor(ABC):
             np.save(save_dir / 'masks.npy', masks.cpu().numpy())
             positive_classes = [name for i, name in enumerate(classes) if positive_mask[i]]
             negative_classes = [name for i, name in enumerate(classes) if not positive_mask[i]]
+            # TODO: save mask sizes
             meta = {
                 'key': data_point.key,
                 'spacing': new_spacing,

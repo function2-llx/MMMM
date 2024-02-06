@@ -21,7 +21,7 @@ def _load_mask(mask_dir: Path, name: str):
 
 def _get_center_slices(shape: tuple3_t[int]):
     ret = [
-        slice(None, None) if s <= ps
+        slice(s >> 1, (s >> 1) + 1) if s <= ps
         else slice(ps >> 1, s - ps + 1 + (ps >> 1))
         for s, ps in zip(shape, patch_size)
     ]
@@ -42,14 +42,16 @@ def process_case(dataset_dir: Path, key: str):
     # - contains at least 80% voxels of this class
     # - center voxel is this class
     significant_mask = (patch_sum > (mask_sizes * 0.8)) | masks[:, *_get_center_slices(masks.shape[1:])]
+    positive_mask = patch_sum > 0
     save_dir = dataset_dir / 'patch' / encode_patch_size(patch_size) / f'.{key}'
     save_dir.mkdir(exist_ok=True, parents=True)
     with h5py.File(save_dir / 'class_positions.h5', 'w') as f:
         for i in range(masks.shape[0]):
             positions = significant_mask[i].nonzero().short()
+            assert positions.shape[0] > 0
             f.create_dataset(str(i), data=positions.cpu().numpy())
     # convert to channel last for efficient (position -> class) query
-    positive_mask = einops.rearrange(patch_sum > 0, 'c ... -> ... c')
+    positive_mask = einops.rearrange(positive_mask, 'c ... -> ... c')
     np.save(save_dir / 'positive_mask.npy', positive_mask.cpu().numpy())
     save_dir.rename(save_dir.with_name(key))
 
@@ -57,10 +59,11 @@ def process_dataset(dataset_dir: Path):
     save_root = dataset_dir / 'patch' / encode_patch_size(patch_size)
     meta: pd.DataFrame = pd.read_pickle(dataset_dir / 'meta.pkl')
     keys = list(filter(lambda name: not (save_root / name).exists(), meta.index))
+    keys = ['s0557']
     process_map(
         process_case,
         it.repeat(dataset_dir), keys,
-        ncols=80, max_workers=4, chunksize=1, total=len(keys),
+        ncols=80, max_workers=0, chunksize=1, total=len(keys),
     )
 
 def main():
