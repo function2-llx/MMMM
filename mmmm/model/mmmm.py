@@ -154,11 +154,12 @@ class MMMMForCausalLM(CogVLMForCausalLM):
         pred_masks = []
         for i, pred_embedding in enumerate(pred_embeddings):
             sparse_embeddings, dense_embeddings = self.model.sam_model.prompt_encoder(
-                points=None, boxes=None, masks=None, text_embeds=pred_embedding.unsqueeze(1)
+                points=None, boxes=None, masks=None, text_embedding=pred_embedding.unsqueeze(1)
             )
             sparse_embeddings = sparse_embeddings.to(pred_embedding.dtype)
             low_res_masks, _ = self.model.sam_model.mask_decoder(
                 image_embeddings=image_embeddings[i].unsqueeze(0),
+                text_embedding=pred_embedding.unsqueeze(1),
                 image_pe=self.model.sam_model.prompt_encoder.get_dense_pe(),
                 sparse_prompt_embeddings=sparse_embeddings, dense_prompt_embeddings=dense_embeddings,
                 multimask_output=False
