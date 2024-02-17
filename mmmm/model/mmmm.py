@@ -1,12 +1,10 @@
-from monai.losses import DiceFocalLoss
 import torch
 import torch.nn as nn
-from typing import List
 
+from monai.losses import DiceFocalLoss
 
-from .segment_anything_volumetric import build_sam_vit_3d
 from .cogvlm.modeling_cogvlm import CogVLMForCausalLM, CogVLMModel
-
+from .segment_anything_volumetric import build_sam_vit_3d
 
 class MMMMBaseModel:
     def __init__(self, config, **kwargs):
@@ -71,11 +69,25 @@ class MMMMForCausalLM(CogVLMForCausalLM):
         token_type_ids: torch.LongTensor,
         labels: torch.LongTensor,
         attention_masks: torch.LongTensor,
-        masks_list: List[torch.FloatTensor],
-        label_list: List[torch.Tensor],
-        resize_list: List[tuple],
+        masks_list: list[torch.FloatTensor],
+        label_list: list[torch.Tensor],
+        resize_list: list[tuple],
         inference: bool = False,
     ):
+        """
+        Args:
+            global_enc_images:
+            grounding_enc_images:
+            input_ids: (n, l)
+            token_type_ids:
+            labels:
+            attention_masks:
+            masks_list:
+            label_list:
+            resize_list:
+            inference:
+        Returns:
+        """
         # Extract grounding encoder image embeddings
         image_embeddings = self.get_sam_model_embs(grounding_enc_images)
 

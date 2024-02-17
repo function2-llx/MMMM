@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Sequence
@@ -43,16 +44,28 @@ class SamplePatch(mt.RandomizableTransform):
         self.pad = mt.SpatialPadD(['image', 'masks'], patch_size, lazy=True)
 
     def gen_conversation(self, modality: str, classes: list[str], pos_classes: list[str], neg_classes: list[str]):
+        def _convert_list(names: Iterable[str], mask: bool):
+            if mask:
+                names = map(lambda name: f'<MASK> {name} </MASK>', names)
+            return ', '.join(names)
+
         assert len(classes) > 0
-        prompt = f"Find and output the segmentation masks on the given {modality} image for the following objects: {', '.join(classes)}."
-        if len(pos_classes) > 0:
-            response = f"The following requested objects are found and segmented: {', '.join(map(lambda name: f'<SEG> {name} </SEG>', pos_classes))}"
-            if len(neg_classes) == 0:
-                response += '.'
-            else:
-                response += f", while the following requested objects are not found: {', '.join(neg_classes)}."
+        neg_mask = self.R.uniform() < 0.9
+        if neg_mask:
+            prompt = f"For the given {modality} image, find the following objects, and output segmentation masks for the found objects: {_convert_list(classes, False)}. "
         else:
-            response = 'None of the requested object is found.'
+            prompt = f'For the given {modality} image, output the segmentation masks for the following objects: {_convert_list(classes, False)}.'
+        if len(pos_classes) > 0:
+            if len(neg_classes) > 0:
+                response = f'The following objects are found: {_convert_list(pos_classes, True)}. ' + \
+                           f'The following objects are not found: {_convert_list(neg_classes, neg_mask)}. '
+            else:
+                response = f'All of the requested objects are found: {_convert_list(pos_classes, True)}. '
+        else:
+            if neg_mask:
+                response = f'None of the requested objects are found: {_convert_list(classes, True)}. '
+            else:
+                response = 'None of the requested objects are found. '
         return prompt, response
 
     def __call__(self, data: dict):

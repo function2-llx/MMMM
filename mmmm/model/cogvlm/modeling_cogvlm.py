@@ -217,14 +217,14 @@ class VisionExpertAttention(nn.Module):
         return tensor.permute(0, 2, 1, 3)
 
     def forward(
-            self,
-            hidden_states: torch.Tensor,
-            token_type_ids: torch.LongTensor,
-            position_ids: torch.LongTensor,
-            attention_mask: Optional[torch.Tensor] = None,
-            past_key_value: Optional[Tuple[torch.Tensor]] = None,
-            output_attentions: bool = False,
-            use_cache: bool = False,
+        self,
+        hidden_states: torch.Tensor,
+        token_type_ids: torch.LongTensor,
+        position_ids: torch.LongTensor,
+        attention_mask: Optional[torch.Tensor] = None,
+        past_key_value: Optional[Tuple[torch.Tensor]] = None,
+        output_attentions: bool = False,
+        use_cache: bool = False,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
         bsz, q_len, _ = hidden_states.size()
         vision_token_mask, language_token_mask = get_expert_mask(token_type_ids)
@@ -282,14 +282,14 @@ class CogVLMDecoderLayer(nn.Module):
         self.post_attention_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
     def forward(
-            self,
-            hidden_states: torch.Tensor,
-            token_type_ids: torch.LongTensor,
-            position_ids: torch.LongTensor,
-            attention_mask: Optional[torch.Tensor] = None,
-            past_key_value: Optional[Tuple[torch.Tensor]] = None,
-            output_attentions: Optional[bool] = False,
-            use_cache: Optional[bool] = False,
+        self,
+        hidden_states: torch.Tensor,
+        token_type_ids: torch.LongTensor,
+        position_ids: torch.LongTensor,
+        attention_mask: Optional[torch.Tensor] = None,
+        past_key_value: Optional[Tuple[torch.Tensor]] = None,
+        output_attentions: Optional[bool] = False,
+        use_cache: Optional[bool] = False,
     ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
         residual = hidden_states
 
@@ -388,31 +388,29 @@ class CogVLMModel(CogVLMPreTrainedModel):
         # Initialize weights and apply final processing
         self.post_init()
 
-    def encode_images(self, images: List[List[torch.Tensor]]) -> torch.Tensor:
-        images_list, images = images, []
-
+    def encode_images(self, image_lists: List[List[torch.Tensor]]) -> torch.Tensor:
         images = []
-        for image_list in images_list:
-            for image in image_list:
-                images.append(image)
+        for image_list in image_lists:
+            assert len(image_list) == 1  # only single image is supported
+            images.append(image_list[0])
 
         images = torch.stack(images)
         images_features = self.vision(images)
         return images_features
 
     def forward(
-            self,
-            input_ids: torch.LongTensor = None,
-            images: List[List[torch.Tensor]] = None,
-            token_type_ids: Optional[torch.LongTensor] = None,
-            attention_mask: Optional[torch.Tensor] = None,
-            position_ids: Optional[torch.LongTensor] = None,
-            past_key_values: Optional[List[torch.FloatTensor]] = None,
-            inputs_embeds: Optional[torch.FloatTensor] = None,
-            use_cache: Optional[bool] = None,
-            output_attentions: Optional[bool] = None,
-            output_hidden_states: Optional[bool] = None,
-            return_dict: Optional[bool] = None,
+        self,
+        input_ids: torch.LongTensor = None,
+        images: List[List[torch.Tensor]] = None,
+        token_type_ids: Optional[torch.LongTensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.LongTensor] = None,
+        past_key_values: Optional[List[torch.FloatTensor]] = None,
+        inputs_embeds: Optional[torch.FloatTensor] = None,
+        use_cache: Optional[bool] = None,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        return_dict: Optional[bool] = None,
     ) -> Union[Tuple, BaseModelOutputWithPast]:
         """take care of image_encode, token_type_ids, position_ids and (attention_mask = None is fine)"""
 
@@ -453,17 +451,17 @@ class CogVLMModel(CogVLMPreTrainedModel):
         )
 
     def llm_forward(
-            self,
-            input_ids: torch.LongTensor = None,
-            token_type_ids: torch.LongTensor = None,
-            attention_mask: Optional[torch.Tensor] = None,
-            position_ids: Optional[torch.LongTensor] = None,
-            past_key_values: Optional[List[torch.FloatTensor]] = None,
-            inputs_embeds: Optional[torch.FloatTensor] = None,
-            use_cache: Optional[bool] = None,
-            output_attentions: Optional[bool] = None,
-            output_hidden_states: Optional[bool] = None,
-            return_dict: Optional[bool] = None,
+        self,
+        input_ids: torch.LongTensor = None,
+        token_type_ids: torch.LongTensor = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.LongTensor] = None,
+        past_key_values: Optional[List[torch.FloatTensor]] = None,
+        inputs_embeds: Optional[torch.FloatTensor] = None,
+        use_cache: Optional[bool] = None,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        return_dict: Optional[bool] = None,
     ) -> Union[Tuple, BaseModelOutputWithPast]:
         """largely copy from llama forward and adapt for cogvlm with `token_type_ids`"""
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
@@ -636,19 +634,19 @@ class CogVLMForCausalLM(CogVLMPreTrainedModel):
         return self.model
 
     def forward(
-            self,
-            input_ids: torch.LongTensor = None,
-            images: List[List[torch.Tensor]] = None,
-            token_type_ids: Optional[torch.LongTensor] = None,
-            attention_mask: Optional[torch.Tensor] = None,
-            position_ids: Optional[torch.LongTensor] = None,
-            past_key_values: Optional[List[torch.FloatTensor]] = None,
-            inputs_embeds: Optional[torch.FloatTensor] = None,
-            use_cache: Optional[bool] = None,
-            output_attentions: Optional[bool] = None,
-            output_hidden_states: Optional[bool] = None,
-            return_dict: Optional[bool] = None,
-            labels: Optional[torch.LongTensor] = None,
+        self,
+        input_ids: torch.LongTensor = None,
+        images: List[List[torch.Tensor]] = None,
+        token_type_ids: Optional[torch.LongTensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.LongTensor] = None,
+        past_key_values: Optional[List[torch.FloatTensor]] = None,
+        inputs_embeds: Optional[torch.FloatTensor] = None,
+        use_cache: Optional[bool] = None,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        return_dict: Optional[bool] = None,
+        labels: Optional[torch.LongTensor] = None,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
