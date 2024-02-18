@@ -8,7 +8,7 @@ from .segment_anything_volumetric import build_sam_vit_3d
 
 class MMMMBaseModel:
     def __init__(self, config, **kwargs):
-        super(MMMMBaseModel, self).__init__(config)
+        super().__init__(config)
         self.config = config
         self.sam_pretrained = kwargs.get("sam_pretrained", None)
 
@@ -28,7 +28,7 @@ class MMMMBaseModel:
 
 class MMMMModel(MMMMBaseModel, CogVLMModel):
     def __init__(self, config, **kwargs):
-        super(MMMMModel, self).__init__(config, **kwargs)
+        super().__init__(config, **kwargs)
 
 
 class MMMMForCausalLM(CogVLMForCausalLM):
@@ -55,7 +55,6 @@ class MMMMForCausalLM(CogVLMForCausalLM):
             return torch.cat([self._encode_single_image(img) for img in pixel_values], dim=0)
 
     def _encode_single_image(self, image):
-        torch.cuda.empty_cache()
         return self.model.sam_model.image_encoder(image.unsqueeze(0))
     
     def forward(self, **kwargs):
@@ -67,27 +66,14 @@ class MMMMForCausalLM(CogVLMForCausalLM):
         grounding_enc_images: torch.FloatTensor,
         input_ids: torch.LongTensor,
         token_type_ids: torch.LongTensor,
-        labels: torch.LongTensor,
+        position_ids: torch.LongTensor,
+        lm_labels: torch.LongTensor,
         attention_masks: torch.LongTensor,
         masks_list: list[torch.FloatTensor],
         label_list: list[torch.Tensor],
         resize_list: list[tuple],
         inference: bool = False,
     ):
-        """
-        Args:
-            global_enc_images:
-            grounding_enc_images:
-            input_ids: (n, l)
-            token_type_ids:
-            labels:
-            attention_masks:
-            masks_list:
-            label_list:
-            resize_list:
-            inference:
-        Returns:
-        """
         # Extract grounding encoder image embeddings
         image_embeddings = self.get_sam_model_embs(grounding_enc_images)
 
@@ -96,10 +82,21 @@ class MMMMForCausalLM(CogVLMForCausalLM):
 
         # Handle inference or training paths
         if inference:
-            output_hidden_states = self._inference_path(input_ids, token_type_ids, global_enc_images, attention_masks)
+            output_hidden_states = self._inference_path(
+                input_ids,
+                token_type_ids,
+                global_enc_images,
+                attention_masks,
+            )
         else:
-            output = self._training_path(
-                input_ids, token_type_ids, global_enc_images, attention_masks, labels
+            output = super().forward(
+                input_ids=input_ids,
+                image=global_enc_images,
+                token_type_ids=token_type_ids,
+                attention_mask=attention_masks,
+                position_ids=position_ids,
+                labels=lm_labels,
+                output_hidden_states=True
             )
             output_hidden_states = output.hidden_states
 
@@ -117,7 +114,6 @@ class MMMMForCausalLM(CogVLMForCausalLM):
             # Calculate losses
             return self._compute_losses(pred_masks, masks_list, output)
 
-    
     def _inference_path(self, input_ids, token_type_ids, global_enc_images, attention_masks):
         # Process and return inference output
         output_hidden_states = []
@@ -125,7 +121,7 @@ class MMMMForCausalLM(CogVLMForCausalLM):
             output_i = super().forward(
                 input_ids=input_ids[i:i + 1],
                 token_type_ids=token_type_ids[i:i + 1],
-                images=[global_enc_images[i:i + 1]],
+                image=global_enc_images[i],
                 attention_mask=attention_masks[i:i + 1],
                 output_hidden_states=True
             )
@@ -135,17 +131,6 @@ class MMMMForCausalLM(CogVLMForCausalLM):
         output_hidden_states = torch.cat(output_hidden_states, dim=0)
         output_hidden_states = [output_hidden_states]
         return output_hidden_states
-
-    def _training_path(self, input_ids, token_type_ids, global_enc_images, attention_masks, labels, offset):
-        output = super().forward(
-            input_ids=input_ids,
-            token_type_ids=token_type_ids,
-            images=[[image] for image in global_enc_images],
-            attention_mask=attention_masks,
-            labels=labels,
-            output_hidden_states=True
-        )
-        return output
 
     def _process_hidden_states(self, output_hidden_states, seg_token_mask, infer=False):
         hidden_states = [self.model.text_hidden_fcs[0](output_hidden_states[-1])]

@@ -401,7 +401,7 @@ class CogVLMModel(CogVLMPreTrainedModel):
     def forward(
         self,
         input_ids: torch.LongTensor = None,
-        images: List[List[torch.Tensor]] = None,
+        image: torch.Tensor | None = None,
         token_type_ids: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
@@ -419,11 +419,11 @@ class CogVLMModel(CogVLMPreTrainedModel):
         else:
             # not allow for inputs_embeds, because we want to process image feature
             assert input_ids is not None and inputs_embeds is None, f"{input_ids} {inputs_embeds}"
-            if not is_empty(images):  # multi-modality
+            if image is not None:  # multi-modality
                 assert token_type_ids is not None, f"multi-modality requires `token_type_ids`!"
-                assert len(input_ids) == len(images), f"{len(input_ids)} {len(images)}"
+                assert len(input_ids) == len(image), f"{len(input_ids)} {len(image)}"
                 inputs_embeds = self.embed_tokens(input_ids)
-                images_features = self.encode_images(images)
+                images_features = self.vision(image)
                 images_features = rearrange(images_features, 'b n d -> (b n) d')
                 images_features = images_features.to(dtype=inputs_embeds.dtype, device=inputs_embeds.device)
                 inputs_embeds = inputs_embeds.index_put([token_type_ids == VISION_TOKEN_TYPE], images_features)
@@ -636,7 +636,7 @@ class CogVLMForCausalLM(CogVLMPreTrainedModel):
     def forward(
         self,
         input_ids: torch.LongTensor = None,
-        images: List[List[torch.Tensor]] = None,
+        image: torch.Tensor = None,
         token_type_ids: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
@@ -657,7 +657,7 @@ class CogVLMForCausalLM(CogVLMPreTrainedModel):
         # decoder outputs consists of (dec_features, layer_state, dec_hidden, dec_attn)
         outputs = self.model(
             input_ids=input_ids,
-            images=images,
+            images=image,
             token_type_ids=token_type_ids,
             attention_mask=attention_mask,
             position_ids=position_ids,
@@ -785,13 +785,13 @@ class CogVLMForCausalLM(CogVLMPreTrainedModel):
         return reordered_past
 
     def build_conversation_input_ids(
-            self,
-            tokenizer: "PreTrainedTokenizer",
-            *,
-            query: str,
-            history: Optional[List[Tuple[str, str]]] = None,
-            images: Optional[List["PIL.Image"]] = None,
-            template_version: Optional[Literal["base", "chat", "vqa"]] = None,
+        self,
+        tokenizer: "PreTrainedTokenizer",
+        *,
+        query: str,
+        history: Optional[List[Tuple[str, str]]] = None,
+        images: Optional[List["PIL.Image"]] = None,
+        template_version: Optional[Literal["base", "chat", "vqa"]] = None,
     ):
         image_size: int = self.config.vision_config['image_size']
         patch_size: int = self.config.vision_config['patch_size']

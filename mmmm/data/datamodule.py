@@ -9,22 +9,20 @@ from numpy import typing as npt
 import pandas as pd
 import torch
 from torch.types import Device
+from transformers import PreTrainedTokenizer
 
 from luolib.datamodule import ExpDataModuleBase
 from luolib.types import tuple3_t
 from monai import transforms as mt
 
+from mmmm.data.dataset import IGNORE_INDEX
 from mmmm.data.defs import Meta, PROCESSED_SEG_DATA_ROOT, encode_patch_size
+from mmmm.model.cogvlm.modeling_cogvlm import LANGUAGE_TOKEN_TYPE, VISION_TOKEN_TYPE
+from mmmm.model.tokenizer import MMMMTokenizer
 
 __all__ = [
     'MMMMDataModule',
 ]
-
-@dataclass
-class TransConf:
-    patch_size: tuple3_t[int] = (96, 224, 224)
-    num_pos: int = 10
-    num_neg: int = 10
 
 class SamplePatch(mt.RandomizableTransform):
     def __init__(
@@ -32,6 +30,7 @@ class SamplePatch(mt.RandomizableTransform):
         patch_size: tuple3_t[int],
         num_pos: int,
         num_neg: int,
+        tokenizer: MMMMTokenizer,
         force_fg_ratio: float = 1 / 3,
         device: Device = 'cpu',
     ):
@@ -39,16 +38,19 @@ class SamplePatch(mt.RandomizableTransform):
         self.patch_size = patch_size
         self.num_pos = num_pos
         self.num_neg = num_neg
+        self.tokenizer = tokenizer
         self.force_fg_ratio = force_fg_ratio
         self.device = device
         self.pad = mt.SpatialPadD(['image', 'masks'], patch_size, lazy=True)
 
     def gen_conversation(self, modality: str, classes: list[str], pos_classes: list[str], neg_classes: list[str]):
         def _convert_list(names: Iterable[str], mask: bool):
+            # FIXME: do not use special tokens explicitly in text
             if mask:
-                names = map(lambda name: f'<MASK> {name} </MASK>', names)
+                names = map(lambda name: f'{tokenizer.mask_open} {name} {tokenizer.mask_close}', names)
             return ', '.join(names)
 
+        tokenizer = self.tokenizer
         assert len(classes) > 0
         neg_mask = self.R.uniform() < 0.9
         if neg_mask:
@@ -66,7 +68,61 @@ class SamplePatch(mt.RandomizableTransform):
                 response = f'None of the requested objects are found: {_convert_list(classes, True)}. '
             else:
                 response = 'None of the requested objects are found. '
-        return prompt, response
+        return [(prompt, response)]
+
+    def prepare_vlm_inputs(self, conversation: list[tuple[str, str]]):
+        # TODO: refactor this function to support various VLM formats
+        tokenizer = self.tokenizer
+        # template: CogVLM `chat_old_history_to_prompt`
+        # just for viewing, don't tokenize it directly
+        text = '\n'.join(
+            f'{tokenizer.inst_open} {query} {tokenizer.inst_close} {answer}'
+            for query, answer in conversation
+        )
+        dtype = torch.long
+        text_ids = []
+        labels = []
+        for query, answer in conversation:
+            prompt = f'{tokenizer.inst_open} {query} {tokenizer.inst_close}'
+            prompt_ids = torch.tensor(tokenizer.encode(prompt, add_special_tokens=False))
+            answer_ids = torch.tensor(tokenizer.encode(answer, add_special_tokens=False))
+            text_ids.append(torch.cat([prompt_ids, answer_ids]))
+            labels.append(
+                torch.cat([
+                    torch.full((prompt_ids.shape[0] - 1, ), IGNORE_INDEX, dtype=dtype),
+                    answer_ids,
+                    torch.tensor([tokenizer.eos_token_id]),
+                ]),
+            )
+        text_ids = torch.cat(text_ids)
+        labels = torch.cat(labels)
+
+        # text_ids = torch.tensor(tokenizer.encode(text, add_special_tokens=False))
+        # TODO: dynamically adjust patch size according to image spacing
+        num_vision_tokens = np.prod([s // 16 for s in self.patch_size]).item() + 2  # including boi and eoi
+        input_ids = torch.cat([
+            torch.tensor([tokenizer.bos_token_id]),
+            torch.full((num_vision_tokens, ), 0, dtype=dtype),
+            text_ids,
+        ])
+        token_type_ids = torch.cat([
+            torch.tensor([LANGUAGE_TOKEN_TYPE]),
+            torch.full((num_vision_tokens, ), VISION_TOKEN_TYPE, dtype=dtype),
+            torch.full(text_ids.shape, LANGUAGE_TOKEN_TYPE, dtype=dtype),
+        ])
+        position_ids = torch.cat([
+            torch.tensor([0, 1]),  # bos and boi
+            torch.full((num_vision_tokens - 2, ), 2, dtype=dtype),
+            torch.tensor([3]),  # eoi
+            torch.arange(4, 4 + text_ids.shape[0]),
+        ])
+        labels = torch.cat([torch.full((1 + num_vision_tokens, ), IGNORE_INDEX, dtype=dtype), labels])
+        return {
+            'input_ids': input_ids,
+            'token_type_ids': token_type_ids,
+            'position_ids': position_ids,
+            'lm_labels': labels,
+        }
 
     def __call__(self, data: dict):
         dataset_dir: Path = data['dataset_dir']
@@ -129,8 +185,11 @@ class SamplePatch(mt.RandomizableTransform):
         masks = np.load(data_dir / 'masks.npy', 'r')[:, *patch_slice]
         masks = masks[pos_class_ids]
         masks = torch.as_tensor(np.array(masks), device=self.device)
+
+        # prepare sample output
         modality = modalities[modality_id]
-        prompt, response = self.gen_conversation(modality, classes, pos_classes, neg_classes)
+        conversation = self.gen_conversation(modality, classes, pos_classes, neg_classes)
+        vlm_inputs = self.prepare_vlm_inputs(conversation)
         data = {
             'image': image,
             'modality': modality,
@@ -138,19 +197,26 @@ class SamplePatch(mt.RandomizableTransform):
             # FIXME: https://github.com/pytorch/pytorch/issues/13246
             'requested_classes': classes,
             'pos_class_mask': pos_class_mask,
-            'prompt': prompt,
-            'response': response,
+            **vlm_inputs,
         }
         return self.pad(data)
+
+@dataclass
+class TransConf:
+    patch_size: tuple3_t[int] = (96, 224, 224)
+    num_pos: int = 10
+    num_neg: int = 10
 
 class MMMMDataModule(ExpDataModuleBase):
     def __init__(
         self,
         trans: TransConf,
+        tokenizer: PreTrainedTokenizer,
         data_root: Path = PROCESSED_SEG_DATA_ROOT,
         *args, **kwargs,
     ):
         super().__init__(*args, **kwargs)
+        self.tokenizer = tokenizer
         self.data_root = data_root
         self._train_data = []
         self.trans_conf = trans
