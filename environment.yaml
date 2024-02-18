@@ -16,6 +16,7 @@ dependencies:
   - lightning
   - torchmetrics
   - transformers
+  - sentencepiece
   - timm
   - wandb
   - llvm-openmp<16  # https://github.com/pytorch/pytorch/issues/99625
