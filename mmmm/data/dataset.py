@@ -2,7 +2,7 @@ import torch
 
 from model.cogvlm import conversation as conversation_lib
 
-IGNORE_INDEX = -100
+
 
 
 def custom_collate_fn(batch, tokenizer=None, inference=False):

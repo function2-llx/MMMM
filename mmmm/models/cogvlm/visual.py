@@ -1,9 +1,9 @@
+from argparse import Namespace
+
 import torch
 from torch import nn
-from argparse import Namespace
-import xformers.ops as xops
 from transformers.activations import ACT2FN
-
+import xformers.ops as xops
 
 class PatchEmbedding(nn.Module):
     def __init__(self, config):

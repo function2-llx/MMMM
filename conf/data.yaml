@@ -1,4 +1,4 @@
 class_path: mmmm.data.MMMMDataModule
 init_args:
   dataloader:
-    train_batch_size: 2
+    train_batch_size: 3
