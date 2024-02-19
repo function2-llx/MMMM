@@ -15,9 +15,9 @@ from luolib.datamodule import ExpDataModuleBase
 from luolib.types import tuple3_t
 from monai import transforms as mt
 
-from mmmm.data.defs import Meta, PROCESSED_SEG_DATA_ROOT, encode_patch_size
-from mmmm.model.cogvlm.modeling_cogvlm import LANGUAGE_TOKEN_TYPE, VISION_TOKEN_TYPE
-from mmmm.model.tokenizer import MMMMTokenizer
+from mmmm.models import MMMMTokenizer
+from mmmm.models.cogvlm import LANGUAGE_TOKEN_TYPE, VISION_TOKEN_TYPE
+from .defs import Meta, PROCESSED_SEG_DATA_ROOT, encode_patch_size
 
 __all__ = [
     'MMMMDataModule',

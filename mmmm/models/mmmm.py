@@ -6,9 +6,8 @@ from transformers.modeling_outputs import CausalLMOutputWithPast
 from luolib.lightning import LightningModule
 from monai.losses import DiceFocalLoss
 
-from .cogvlm.configuration_cogvlm import CogVLMConfig
-from .cogvlm.modeling_cogvlm import CogVLMForCausalLM
-from .segment_anything_volumetric import build_sam_vit_3d
+from .cogvlm import CogVLMConfig, CogVLMForCausalLM
+from .segvol import build_sam_vit_3d
 
 class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
     def __init__(
