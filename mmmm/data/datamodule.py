@@ -59,7 +59,7 @@ class SamplePatch(mt.RandomizableTransform):
         neg_classes = list(neg_classes)
         self.R.shuffle(neg_classes)
 
-        # merge positive and negative classes
+        # merge positive and negative classes with random order without shuffling
         pos_class_mask = torch.zeros(len(pos_classes) + len(neg_classes), dtype=torch.bool)
         pos_class_mask[self.R.choice(pos_class_mask.shape[0], len(pos_classes), replace=False)] = True
         pos_it, neg_it = map(iter, [pos_classes, neg_classes])
@@ -70,7 +70,7 @@ class SamplePatch(mt.RandomizableTransform):
 
         tokenizer = self.tokenizer
         assert len(classes) > 0
-        neg_mask = self.R.uniform() < 0.9
+        neg_mask = self.R.uniform() < 0.8
         if neg_mask:
             prompt = f'For the given {modality} image, output the segmentation masks for the following objects: {_convert_list(classes, False)}.'
         else:
@@ -79,21 +79,24 @@ class SamplePatch(mt.RandomizableTransform):
             if len(neg_classes) > 0:
                 response = f'The following objects are found: {_convert_list(pos_classes, True)}. ' + \
                            f'The following objects are not found: {_convert_list(neg_classes, neg_mask)}. '
+                mask_classes = pos_classes + (neg_classes if neg_mask else [])
             else:
-                response = f'All of the requested objects are found: {_convert_list(pos_classes, True)}. '
+                response = f'All of the requested objects are found: {_convert_list(classes, True)}. '
+                mask_classes = classes
         else:
             if neg_mask:
                 response = f'None of the requested objects are found: {_convert_list(classes, True)}. '
+                mask_classes = classes
             else:
                 response = 'None of the requested objects are found. '
-        # the list of classes that with masks, following the order occurring in the conversation
-        mask_classes = pos_classes + neg_classes
+                mask_classes = []
+        # mask_classes: the list of classes that with masks, following the order occurring in the conversation
         return [(prompt, response)], mask_classes
 
     def prepare_vlm_inputs(self, conversation: list[tuple[str, str]]):
         # TODO: refactor this function to support various VLM formats
         tokenizer = self.tokenizer
-        # template: CogVLM `chat_old_history_to_prompt`
+        # template: CogVLM `chat_history_to_prompt`
         # just for viewing, don't tokenize it directly
         text = '\n'.join(
             f'{tokenizer.inst_open} {query} {tokenizer.inst_close} {answer}'
@@ -205,8 +208,7 @@ class SamplePatch(mt.RandomizableTransform):
         masks = pos_masks.new_zeros((len(mask_classes), *pos_masks.shape[1:]))
         pos_class_to_idx = {name: i for i, name in enumerate(pos_classes)}
         for i, name in enumerate(mask_classes):
-            pos_idx = pos_class_to_idx.get(name, -1)
-            if pos_idx != -1:
+            if (pos_idx := pos_class_to_idx.get(name, -1)) != -1:
                 masks[i] = pos_masks[pos_idx]
 
         vlm_inputs, conversation_text = self.prepare_vlm_inputs(conversation)
