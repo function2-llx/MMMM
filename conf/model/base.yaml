@@ -1,1 +1,6 @@
-class_path: mmmm.
+class_path: mmmm.models.mmmm.from_pretrained
+init_args:
+  pretrained_model_name_or_path: THUDM/cogvlm-chat-hf
+  vision_override:
+    pos_embed_shape: [6, 35, 35]
+    pretrained_pos_embed_shape: [35, 35]

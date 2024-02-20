@@ -1,1 +1,2 @@
-data: ../data.yaml
+data: data.yaml
+tokenizer: ../tokenizer.yaml

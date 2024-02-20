@@ -1,23 +1,53 @@
 from argparse import Namespace
 
+from einops import einops
 import torch
 from torch import nn
+from torch.nn import functional as nnf
 from transformers.activations import ACT2FN
 import xformers.ops as xops
+
+from luolib.models import spadop
+from luolib.models.param import NoWeightDecayParameter
+from luolib.types import tuple2_t
 
 class PatchEmbedding(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.proj = nn.Conv2d(config.in_channels, config.hidden_size, kernel_size=config.patch_size, stride=config.patch_size)
-        self.cls_embedding = nn.Parameter(torch.zeros(1, config.hidden_size))
-        self.position_embedding = nn.Embedding(config.num_positions, config.hidden_size)
+        self.proj = spadop.Conv3d(
+            config.in_channels,
+            config.hidden_size,
+            config.patch_size,
+            config.patch_size,
+            adaptive=False,
+        )
+        self.pretrained_pos_embed_shape: tuple2_t[int] = config.pretrained_pos_embed_shape
+        self.cls_embedding = NoWeightDecayParameter(torch.zeros(1, config.hidden_size))
+        self.cls_pos_embed = NoWeightDecayParameter(torch.zeros(1, config.hidden_size))
+        self.pos_embed = NoWeightDecayParameter(torch.zeros(1, config.hidden_size, *config.pos_embed_shape))
+        # self.position_embedding = nn.Embedding(config.num_positions, config.hidden_size)
+
+    def _load_from_state_dict(self, state_dict, prefix, *args, **kwargs):
+        if (pos_embed := state_dict.get(f'{prefix}position_embedding.weight')) is not None:
+            state_dict[f'{prefix}cls_pos_embed'], pos_embed = pos_embed[0:1], pos_embed[1:]
+            h, w = self.pretrained_pos_embed_shape
+            pos_embed = nnf.interpolate(
+                einops.rearrange(pos_embed, '(h w) c -> 1 c h w', h=w, w=w),
+                self.pos_embed.shape[-2:],
+                mode='bicubic',
+            )
+            pos_embed = einops.repeat(pos_embed, '1 c h w -> 1 c d h w', d=self.pos_embed.shape[2])
+
+            state_dict[f'{prefix}pos_embed'] = pos_embed
+
+        return super()._load_from_state_dict(state_dict, prefix, *args, **kwargs)
 
     def forward(self, images: "tensor(B, C, H, W)") -> "tensor(B, L, D)":
         x = self.proj(images)
-        x = x.flatten(2).transpose(1, 2)
-        cls_token = self.cls_embedding.expand(x.shape[0], -1, -1)
+        cls_token = (self.cls_embedding + self.cls_pos_embed).expand(x.shape[0], -1, -1)
+        x += nnf.interpolate(self.pos_embed, x.shape[2:], mode='trilinear')
+        x = einops.rearrange(x, 'n c ... -> n (...) c')
         x = torch.cat((cls_token, x), dim=1)
-        x += self.position_embedding.weight.unsqueeze(0)
         return x
 
 

@@ -6,7 +6,6 @@ import math
 import torch
 from torch import nn
 from torch.nn import functional as F
-from torch.nn import CrossEntropyLoss
 from torchvision import transforms
 from einops import rearrange
 
@@ -606,8 +605,8 @@ def _history_to_prompt(signal_type, history, query):
 class CogVLMForCausalLM(CogVLMPreTrainedModel):
     _auto_class = "AutoModelForCausalLM"
 
-    def __init__(self, config):
-        super().__init__(config)
+    def __init__(self, config, *args, **kwargs):
+        super().__init__(config, *args, **kwargs)
         self.model = CogVLMModel(config)
         self.vocab_size = config.vocab_size
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
@@ -655,9 +654,9 @@ class CogVLMForCausalLM(CogVLMPreTrainedModel):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
         # decoder outputs consists of (dec_features, layer_state, dec_hidden, dec_attn)
-        outputs = self.model(
+        output: BaseModelOutputWithPast = self.model(
             input_ids=input_ids,
-            images=image,
+            image=image,
             token_type_ids=token_type_ids,
             attention_mask=attention_mask,
             position_ids=position_ids,
@@ -665,38 +664,26 @@ class CogVLMForCausalLM(CogVLMPreTrainedModel):
             inputs_embeds=inputs_embeds,
             use_cache=use_cache,
             output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
+            output_hidden_states=True,
+            return_dict=True,
         )
 
-        hidden_states = outputs[0]
-        logits = self.lm_head(hidden_states)
+        logits = self.lm_head(output.last_hidden_state)
         logits = logits.float()
 
         loss = None
         if labels is not None:
-            # Shift so that tokens < n predict n
-            shift_logits = logits[..., :-1, :].contiguous()
-            shift_labels = labels[..., 1:].contiguous()
-            # Flatten the tokens
-            loss_fct = CrossEntropyLoss()
-            shift_logits = shift_logits.view(-1, self.config.vocab_size)
-            shift_labels = shift_labels.view(-1)
-            # Enable model parallelism
-            shift_labels = shift_labels.to(shift_logits.device)
-            loss = loss_fct(shift_logits, shift_labels)
+            # the labels were already shifted in datamodule
+            loss = F.cross_entropy(logits.view(-1, logits.shape[-1]), labels.view(-1))
 
-        if not return_dict:
-            output = (logits,) + outputs[1:]
-            return (loss,) + output if loss is not None else output
-
-        return CausalLMOutputWithPast(
+        ret = CausalLMOutputWithPast(
             loss=loss,
             logits=logits,
-            past_key_values=outputs.past_key_values,
-            hidden_states=outputs.hidden_states,
-            attentions=outputs.attentions,
+            past_key_values=output.past_key_values,
+            hidden_states=output.hidden_states if output_hidden_states else None,
+            attentions=output.attentions,
         )
+        return ret if return_dict else ret.to_tuple()
 
     def _prepare_attention_mask_for_generation(
             self,

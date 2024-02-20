@@ -13,10 +13,12 @@ from torch.types import Device
 
 from luolib.datamodule import ExpDataModuleBase
 from luolib.types import tuple3_t
+from luolib.utils.misc import ensure_rgb
 from monai import transforms as mt
 
 from mmmm.models import MMMMTokenizer
 from mmmm.models.cogvlm import LANGUAGE_TOKEN_TYPE, VISION_TOKEN_TYPE
+from monai.data import MetaTensor
 from .defs import Meta, PROCESSED_SEG_DATA_ROOT, encode_patch_size
 
 __all__ = [
@@ -216,6 +218,14 @@ class SamplePatch(mt.RandomizableTransform):
         }
         return self.pad_image(data)
 
+class InputTransformD(mt.Transform):
+    def __call__(self, data: dict):
+        data = dict(data)
+        img: MetaTensor = data['image']
+        img_t, _ = ensure_rgb(img.as_tensor())
+        data['image'] = img_t
+        return data
+
 @dataclass
 class TransConf:
     patch_size: tuple3_t[int] = (96, 224, 224)
@@ -252,13 +262,16 @@ class MMMMDataModule(ExpDataModuleBase):
 
     def train_transform(self) -> Callable:
         conf = self.trans_conf
-        return SamplePatch(conf.patch_size, conf.num_pos, conf.num_neg, self.tokenizer)
+        return mt.Compose([
+            SamplePatch(conf.patch_size, conf.num_pos, conf.num_neg, self.tokenizer),
+            InputTransformD(),
+        ])
 
     def get_train_collate_fn(self):
         from luolib.data.utils import list_data_collate
 
         def collate_fn(batch: list[dict]):
-            list_data = {key: [] for key in ['pos_classes', 'masks', 'neg_classes']}
+            list_data = {key: [] for key in ['masks', 'modality']}
             batch_vlm_inputs: list[dict] = []
             for x in batch:
                 for key, data in list_data.items():

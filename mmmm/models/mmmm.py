@@ -1,34 +1,71 @@
+from dataclasses import dataclass
+import os
+
+from jsonargparse import class_from_function
 import torch
-import torch.nn as nn
 from torch.nn import functional as nnf
+import torch.nn as nn
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
 from luolib.lightning import LightningModule
+from luolib.types import tuple2_t, tuple3_t
 from monai.losses import DiceFocalLoss
-
 from .cogvlm import CogVLMConfig, CogVLMForCausalLM
 from .segvol import build_sam_vit_3d
+from .tokenizer import MMMMTokenizer
+
+@dataclass
+class VisionConf:
+    pos_embed_shape: tuple3_t[int]
+    pretrained_pos_embed_shape: tuple2_t[int] | None = None
+    patch_size: int = 16
 
 class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
+    @classmethod
+    def from_pretrained(
+        cls,
+        pretrained_model_name_or_path: str | os.PathLike | None,
+        *args,
+        lm_loss_weight: float = 1.,
+        mask_loss_weight: float = 1.,
+        vision_override: VisionConf,
+        tokenizer: MMMMTokenizer,
+        **kwargs,
+    ):
+        """make jsonargparse happy"""
+        return super().from_pretrained(
+            pretrained_model_name_or_path, *args,
+            lm_loss_weight=lm_loss_weight,
+            mask_loss_weight=mask_loss_weight,
+            vision_override=vision_override,
+            tokenizer=tokenizer,
+            **kwargs,
+        )
+
     def __init__(
         self,
         vlm_config: CogVLMConfig,
-        seg_proj_dim: int,
-        lm_loss_weight: float = 1.,
-        mask_loss_weight: float = 1.,
+        *,
+        lm_loss_weight: float,
+        mask_loss_weight: float,
+        vision_override: VisionConf,
+        tokenizer: MMMMTokenizer,
         **kwargs,
     ):
-        CogVLMForCausalLM.__init__(self, vlm_config)
+        # adapt vision config
+        vision_config: dict = vlm_config.vision_config
+        vision_config.update(vars(vision_override))
+        super().__init__(vlm_config, **kwargs)
+        self.sam_model = build_sam_vit_3d()
         self.seg_proj = nn.Sequential(
             nn.Linear(vlm_config.hidden_size, vlm_config.hidden_size),
             nn.ReLU(inplace=True),
-            nn.Linear(vlm_config.hidden_size, seg_proj_dim),
+            nn.Linear(vlm_config.hidden_size, self.sam_model.prompt_encoder.embed_dim),
         )
-        self.sam_model = build_sam_vit_3d(self.sam_pretrained)
-        LightningModule.__init__(self, **kwargs)
         self.mask_loss = DiceFocalLoss(sigmoid=True, reduction="none")
         self.lm_loss_weight = lm_loss_weight
         self.mask_loss_weight = mask_loss_weight
+        self.seg_token_id = tokenizer.mask_close_id
 
         self.post_init()
 
@@ -67,7 +104,8 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         attention_mask: torch.LongTensor,
     ):
         # VLM part
-        vlm_output: CausalLMOutputWithPast = CogVLMForCausalLM.__call__(
+        # CogVLMForCausalLM.__call__ will not work
+        vlm_output: CausalLMOutputWithPast = CogVLMForCausalLM.forward(
             self,
             image=global_enc_image,
             input_ids=input_ids,
@@ -82,7 +120,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         masks_logits = self._generate_and_postprocess_masks(
             grounding_enc_image,
             vlm_output.hidden_states[-1],
-            input_ids == self.seg_token_idx,
+            input_ids == self.seg_token_id,
         )
         return vlm_output, masks_logits
 
@@ -128,7 +166,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
                 dense_prompt_embeddings=dense_embeddings,
                 multimask_output=False,
             )
-            mask_logits = nnf.interpolate(mask_logits, image.shape[2:])
+            mask_logits = nnf.interpolate(mask_logits, image.shape[2:], mode='trilinear')
             masks_logits.append(mask_logits[:, 0])
         return masks_logits
 
@@ -175,3 +213,5 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
                 predicted_embeddings, image_embeddings, resize_list, orig_sizes, infer=True
             )
         return generated_output_ids, pred_masks
+
+from_pretrained = class_from_function(MMMMForCausalLM.from_pretrained, MMMMForCausalLM)

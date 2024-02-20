@@ -1,3 +1,3 @@
-class_path: mmmm.model.tokenizer.from_pretrained
+class_path: mmmm.models.tokenizer.from_pretrained
 init_args:
   pretrained_model_name_or_path: lmsys/vicuna-7b-v1.5
