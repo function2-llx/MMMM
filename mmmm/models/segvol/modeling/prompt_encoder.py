@@ -10,16 +10,14 @@ from torch import nn
 
 from typing import Any, Optional, Tuple, Type
 
+from luolib.types import tuple3_t
 from .common import LayerNorm2d
-import os
 
 class PromptEncoder(nn.Module):
     def __init__(
         self,
         embed_dim: int,
-        image_embedding_size: Tuple[int, int, int],
-        input_image_size: Tuple[int, int, int],
-        mask_in_chans: int,
+        mask_in_chans: int = 16,
         activation: Type[nn.Module] = nn.GELU,
     ) -> None:
         """
@@ -27,10 +25,6 @@ class PromptEncoder(nn.Module):
 
         Arguments:
           embed_dim (int): The prompts' embedding dimension
-          image_embedding_size (tuple(int, int)): The spatial size of the
-            image embedding, as (H, W).
-          input_image_size (int): The padded size of the image as input
-            to the image encoder, as (H, W).
           mask_in_chans (int): The number of hidden channels used for
             encoding input masks.
           activation (nn.Module): The activation to use when encoding
@@ -38,8 +32,6 @@ class PromptEncoder(nn.Module):
         """
         super().__init__()
         self.embed_dim = embed_dim
-        self.input_image_size = input_image_size
-        self.image_embedding_size = image_embedding_size
         self.pe_layer = PositionEmbeddingRandom(embed_dim // 2)
 
         self.num_point_embeddings: int = 4  # pos/neg point + 2 box corners
@@ -47,7 +39,7 @@ class PromptEncoder(nn.Module):
         self.point_embeddings = nn.ModuleList(point_embeddings)
         self.not_a_point_embed = nn.Embedding(1, embed_dim)
 
-        self.mask_input_size = (4 * image_embedding_size[0], 4 * image_embedding_size[1], 4 * image_embedding_size[2])
+        # keep them though they are not used at all in SegVol
         self.mask_downscaling = nn.Sequential(
             nn.Conv2d(1, mask_in_chans // 4, kernel_size=2, stride=2),
             LayerNorm2d(mask_in_chans // 4),
@@ -59,7 +51,7 @@ class PromptEncoder(nn.Module):
         )
         self.no_mask_embed = nn.Embedding(1, embed_dim)
 
-    def get_dense_pe(self) -> torch.Tensor:
+    def get_dense_pe(self, image_embedding_shape: tuple3_t[int]) -> torch.Tensor:
         """
         Returns the positional encoding used to encode point prompts,
         applied to a dense set of points the shape of the image encoding.
@@ -68,7 +60,7 @@ class PromptEncoder(nn.Module):
           torch.Tensor: Positional encoding with shape
             1x(embed_dim)x(embedding_h)x(embedding_w)
         """
-        return self.pe_layer(self.image_embedding_size).unsqueeze(0)
+        return self.pe_layer(image_embedding_shape).unsqueeze(0)
 
     def _embed_points(
         self,
@@ -130,12 +122,12 @@ class PromptEncoder(nn.Module):
 
     def forward(
         self,
-        points: Optional[Tuple[torch.Tensor, torch.Tensor]],
-        boxes: Optional[torch.Tensor],
-        masks: Optional[torch.Tensor],
-        text_embedding: Optional[torch.Tensor],
+        image_embed_shape: tuple3_t[int],
+        points: tuple[torch.Tensor, torch.Tensor] | None = None,
+        boxes: torch.Tensor | None = None,
+        masks: torch.Tensor | None = None,
+        text_embedding: torch.Tensor | None = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        
         bs = self._get_batch_size(points, boxes, masks, text_embedding)
         sparse_embeddings = torch.empty((bs, 0, self.embed_dim), device=self._get_device())
 
@@ -154,9 +146,7 @@ class PromptEncoder(nn.Module):
         if masks is not None:
             dense_embeddings = self._embed_masks(masks)
         else:
-            dense_embeddings = self.no_mask_embed.weight.reshape(1, -1, 1, 1, 1).expand(
-                bs, -1, int(self.image_embedding_size[0]), int(self.image_embedding_size[1]), int(self.image_embedding_size[2])
-            )
+            dense_embeddings = self.no_mask_embed.weight.reshape(1, -1, 1, 1, 1).expand(bs, -1, *image_embed_shape)
 
         return sparse_embeddings, dense_embeddings
 
@@ -165,6 +155,8 @@ class PositionEmbeddingRandom(nn.Module):
     """
     Positional encoding using random spatial frequencies.
     """
+
+    positional_encoding_gaussian_matrix: torch.Tensor
 
     def __init__(self, num_pos_feats: int = 64, scale: Optional[float] = None) -> None:
         super().__init__()
@@ -187,8 +179,7 @@ class PositionEmbeddingRandom(nn.Module):
     def forward(self, size: Tuple[int, int, int]) -> torch.Tensor:
         """Generate positional encoding for a grid of the specified size."""
         h, w, d = size
-        device: Any = self.positional_encoding_gaussian_matrix.device
-        grid = torch.ones((h, w, d), device=device, dtype=torch.float32)
+        grid = self.positional_encoding_gaussian_matrix.new_ones(h, w, d)
         y_embed = grid.cumsum(dim=0) - 0.5
         x_embed = grid.cumsum(dim=1) - 0.5
         z_embed = grid.cumsum(dim=2) - 0.5

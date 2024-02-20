@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 import os
 
+import einops
 from jsonargparse import class_from_function
 import torch
 from torch.nn import functional as nnf
@@ -10,14 +11,15 @@ from transformers.modeling_outputs import CausalLMOutputWithPast
 from luolib.lightning import LightningModule
 from luolib.types import tuple2_t, tuple3_t
 from monai.losses import DiceFocalLoss
+
 from .cogvlm import CogVLMConfig, CogVLMForCausalLM
-from .segvol import build_sam_vit_3d
+from .segvol import SamArgs, build_sam_vit_3d
 from .tokenizer import MMMMTokenizer
 
 @dataclass
 class VisionConf:
     pos_embed_shape: tuple3_t[int]
-    pretrained_pos_embed_shape: tuple2_t[int] | None = None
+    pt_pos_embed_shape: tuple2_t[int] | None = None
     patch_size: int = 16
 
 class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
@@ -30,6 +32,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         mask_loss_weight: float = 1.,
         vision_override: VisionConf,
         tokenizer: MMMMTokenizer,
+        sam: SamArgs,
         **kwargs,
     ):
         """make jsonargparse happy"""
@@ -39,6 +42,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             mask_loss_weight=mask_loss_weight,
             vision_override=vision_override,
             tokenizer=tokenizer,
+            sam_args=sam,
             **kwargs,
         )
 
@@ -50,19 +54,20 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         mask_loss_weight: float,
         vision_override: VisionConf,
         tokenizer: MMMMTokenizer,
+        sam_args: SamArgs,
         **kwargs,
     ):
         # adapt vision config
         vision_config: dict = vlm_config.vision_config
         vision_config.update(vars(vision_override))
         super().__init__(vlm_config, **kwargs)
-        self.sam_model = build_sam_vit_3d()
+        self.sam_model = build_sam_vit_3d(sam_args)
         self.seg_proj = nn.Sequential(
             nn.Linear(vlm_config.hidden_size, vlm_config.hidden_size),
             nn.ReLU(inplace=True),
             nn.Linear(vlm_config.hidden_size, self.sam_model.prompt_encoder.embed_dim),
         )
-        self.mask_loss = DiceFocalLoss(sigmoid=True, reduction="none")
+        self.mask_loss = DiceFocalLoss(sigmoid=True, reduction='none')
         self.lm_loss_weight = lm_loss_weight
         self.mask_loss_weight = mask_loss_weight
         self.seg_token_id = tokenizer.mask_close_id
@@ -151,39 +156,36 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         sam = self.sam_model
         # TODO: check grad vs no_grad
         image_embeddings = sam.image_encoder(image)
-        masks_logits = []
+        masks_logits_list = []
         for i in range(hidden_states.shape[0]):
-            text_embedding = self.seg_proj(hidden_states[i:i + 1, seg_token_mask[i]])
+            text_embedding = self.seg_proj(hidden_states[i, seg_token_mask[i]])
             sparse_embeddings, dense_embeddings = sam.prompt_encoder(
-                points=None, boxes=None, masks=None, text_embedding=text_embedding,
+                image_embeddings.shape[2:], text_embedding=text_embedding,
             )
             sparse_embeddings = sparse_embeddings.to(text_embedding.dtype)
-            mask_logits, _ = sam.mask_decoder.forward(
+            masks_logits, _ = sam.mask_decoder(
                 image_embeddings=image_embeddings[i:i + 1],
-                # FIXME: get PE by image size
-                image_pe=sam.prompt_encoder.get_dense_pe(),
+                text_embedding=text_embedding,  # make SegVol happy
+                image_pe=sam.prompt_encoder.get_dense_pe(image_embeddings.shape[2:]),
                 sparse_prompt_embeddings=sparse_embeddings,
                 dense_prompt_embeddings=dense_embeddings,
                 multimask_output=False,
             )
-            mask_logits = nnf.interpolate(mask_logits, image.shape[2:], mode='trilinear')
-            masks_logits.append(mask_logits[:, 0])
-        return masks_logits
+            masks_logits = nnf.interpolate(masks_logits, image.shape[2:], mode='trilinear')
+            masks_logits_list.append(masks_logits[:, 0])
+        return masks_logits_list
 
     def _compute_mask_loss(self, masks_logits: list[torch.Tensor], masks_label: list[torch.BoolTensor]):
-        batch_size = len(masks_logits)
-        assert len(masks_label) == batch_size
-        num_masks = 0
-        loss = None
+        assert (batch_size := len(masks_label)) == len(masks_logits)
+        loss_list = []
         for i in range(batch_size):
-            num_masks += masks_logits[i].shape[0]
-            loss_i = self.mask_loss(masks_logits[i][None], masks_label[i][None])
-            if loss is None:
-                loss = loss_i
-            else:
-                loss += loss_i
-
-        loss = loss.sum() / num_masks
+            loss_list.append(
+                einops.reduce(
+                    self.mask_loss(masks_logits[i][None], masks_label[i][None]),
+                    'n c ... -> c', 'mean',
+                )
+            )
+        loss = torch.cat(loss_list).mean()
         return loss
 
     def evaluate(self, input_ids, token_type_ids, global_enc_images, grounding_enc_images, resize_list, orig_sizes, max_tokens_new=32):

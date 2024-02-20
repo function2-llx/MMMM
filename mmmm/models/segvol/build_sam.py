@@ -1,85 +1,54 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-
-# This source code is licensed under the license found in the
-# LICENSE file in the root directory of this source tree.
-from functools import partial
+from dataclasses import dataclass
 from pathlib import Path
-import urllib.request
+
 import torch
 
-from .modeling import (
-    ImageEncoderViT,
-    MaskDecoder,
-    PromptEncoder,
-    Sam,
-    TwoWayTransformer,
-)
-import numpy as np
-from .modeling.image_encoder_swin import SwinTransformer
-from monai.networks.nets import ViT
-from monai.networks.nets.swin_unetr import SwinTransformer as SwinViT
+from luolib.types import tuple3_t
 
-from monai.utils import ensure_tuple_rep, optional_import
+from .modeling import ImageEncoderViT, MaskDecoder, PromptEncoder, Sam, TwoWayTransformer
 
-def build_sam_vit_3d(args, checkpoint=None):
-    print('build_sam_vit_3d...')
+@dataclass
+class SamArgs:
+    pos_embed_shape: tuple3_t[int]
+    pt_in_channels: int | None = None
+    pt_patch_size: tuple3_t[int] | None = None
+    pt_pos_embed_shape: tuple3_t[int] | None = None
+    checkpoint: Path | None = None
+
+def build_sam_vit_3d(args: SamArgs):
     return _build_sam(
-        image_encoder_type='vit',
-        embed_dim = 768,
-        patch_size=args.patch_size,
-        checkpoint=checkpoint,
-        image_size=args.spatial_size,
+        embed_dim=768,
+        encoder_num_layers=12,
+        num_heads=12,
+        args=args,
     )
-
-sam_model_registry = {
-    "vit": build_sam_vit_3d,
-}
-
 
 def _build_sam(
-    image_encoder_type,
-    embed_dim,
-    patch_size,
-    checkpoint,
-    image_size,
+    embed_dim: int,
+    encoder_num_layers: int,
+    num_heads: int,
+    args: SamArgs,
 ):
-    mlp_dim = 3072
-    num_layers = 12
-    num_heads = 12
-    pos_embed = 'perceptron'
+    mlp_ratio = 4
+    mlp_dim = embed_dim * mlp_ratio
     dropout_rate = 0.0
-    
-    image_encoder=ViT(
-        in_channels=1,
-        img_size=image_size,
-        patch_size=patch_size,
-        hidden_size=embed_dim,
-        mlp_dim=mlp_dim,
-        num_layers=num_layers,
-        num_heads=num_heads,
-        pos_embed=pos_embed,
-        classification=False,
-        dropout_rate=dropout_rate,
-    )
-    image_embedding_size = [int(item) for item in (np.array(image_size) / np.array(patch_size))]
 
-    if checkpoint is not None:
-        with open(checkpoint, "rb") as f:
-            state_dict = torch.load(f, map_location='cpu')['state_dict']
-            encoder_dict = {k.replace('model.encoder.', ''): v for k, v in state_dict.items() if 'model.encoder.' in k}
-        image_encoder.load_state_dict(encoder_dict)
-        print(f'===> image_encoder.load_param: {checkpoint}')
     sam = Sam(
-        image_encoder=image_encoder,
-        prompt_encoder=PromptEncoder(
-            embed_dim=embed_dim,
-            image_embedding_size=image_embedding_size,
-            input_image_size=image_size,
-            mask_in_chans=16,
+        image_encoder=ImageEncoderViT(
+            in_channels=3,
+            pos_embed_shape=args.pos_embed_shape,
+            patch_size=16,
+            hidden_size=embed_dim,
+            mlp_dim=mlp_dim,
+            num_layers=encoder_num_layers,
+            num_heads=num_heads,
+            dropout_rate=dropout_rate,
+            pt_in_channels=args.pt_in_channels,
+            pt_patch_size=args.pt_patch_size,
+            pt_pos_embed_shape=args.pt_pos_embed_shape,
         ),
+        prompt_encoder=PromptEncoder(embed_dim=embed_dim),
         mask_decoder=MaskDecoder(
-            image_encoder_type=image_encoder_type,
             num_multimask_outputs=3,
             transformer=TwoWayTransformer(
                 depth=2,
@@ -90,11 +59,17 @@ def _build_sam(
             transformer_dim=embed_dim,
             iou_head_depth=3,
             iou_head_hidden_dim=256,
-            image_size=np.array(image_size),
-            patch_size=np.array(patch_size),
         ),
-        pixel_mean=[123.675, 116.28, 103.53],
-        pixel_std=[58.395, 57.12, 57.375],
     )
-    sam.eval()
+
+    if args.checkpoint is not None:
+        # load from SegVol checkpoint
+        state_dict = torch.load(args.checkpoint)['model']
+        prefix = 'module.'
+        state_dict = {
+            key[len(prefix):]: value
+            for key, value in state_dict.items() if key.startswith(prefix) and not key.startswith(f'{prefix}text_encoder')
+        }
+        sam.load_state_dict(state_dict)
+
     return sam
