@@ -1,2 +1,5 @@
 data: data.yaml
 tokenizer: ../tokenizer.yaml
+trainer:
+  max_steps: 100
+logger: logger.yaml
