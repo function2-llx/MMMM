@@ -3,7 +3,7 @@ from torch import nn
 def apply_prefix(prefix: str, name: str):
     return f'{prefix}{name}' if prefix.endswith('.') or not prefix else f'{prefix}.{name}'
 
-def get_lora_modules_default(module: nn.Module, prefix: str):
+def get_lora_modules_default(module: nn.Module, prefix: str = ''):
     target_modules, modules_to_save = [], []
 
     # noinspection PyShadowingNames

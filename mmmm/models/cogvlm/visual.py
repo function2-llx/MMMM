@@ -8,6 +8,7 @@ import xformers.ops as xops
 
 from luolib.models import spadop
 from luolib.models.param import NoWeightDecayParameter
+from luolib.models.utils import forward_gc
 from luolib.types import tuple2_t, tuple3_t
 
 from mmmm.utils import ParameterWrapper
@@ -122,11 +123,17 @@ class TransformerLayer(nn.Module):
 class Transformer(nn.Module):
     def __init__(self, config):
         super().__init__()
+        self.gradient_checkpointing = False
         self.layers = nn.ModuleList([TransformerLayer(config) for _ in range(config.num_hidden_layers)])
 
     def forward(self, hidden_states):
         for layer_module in self.layers:
-            hidden_states = layer_module(hidden_states)
+            hidden_states = forward_gc(
+                layer_module,
+                self.training and self.gradient_checkpointing,
+                self._gradient_checkpointing_func,
+                hidden_states,
+            )
         return hidden_states
 
 

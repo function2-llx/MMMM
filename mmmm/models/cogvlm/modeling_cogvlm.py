@@ -14,6 +14,7 @@ from transformers.utils.logging import get_logger
 from transformers.activations import ACT2FN
 from transformers.modeling_outputs import BaseModelOutputWithPast, CausalLMOutputWithPast
 
+from luolib.models.utils import forward_gc
 from mmmm.utils import apply_prefix, get_lora_modules_default
 from .configuration_cogvlm import CogVLMConfig
 from .visual import EVA2CLIPModel
@@ -341,7 +342,7 @@ class CogVLMDecoderLayer(nn.Module):
 class CogVLMPreTrainedModel(PreTrainedModel):
     config_class = CogVLMConfig
     base_model_prefix = "model"
-    supports_gradient_checkpointing = False
+    supports_gradient_checkpointing = True
     _no_split_modules = ["CogVLMDecoderLayer", "TransformerLayer"]
     _skip_keys_device_placement = "past_key_values"
 
@@ -496,6 +497,13 @@ class CogVLMModel(CogVLMPreTrainedModel):
         else:
             raise ValueError("You have to specify either decoder_input_ids or decoder_inputs_embeds")
 
+        if self.gradient_checkpointing and self.training:
+            if use_cache:
+                logger.warning_once(
+                    "`use_cache=True` is incompatible with gradient checkpointing. Setting `use_cache=False`..."
+                )
+                use_cache = False
+
         seq_length_with_past = seq_length
         past_key_values_length = 0
 
@@ -535,7 +543,10 @@ class CogVLMModel(CogVLMPreTrainedModel):
                 all_hidden_states += (hidden_states,)
 
             past_key_value = past_key_values[idx] if past_key_values is not None else None
-            layer_outputs = decoder_layer(
+            layer_outputs = forward_gc(
+                decoder_layer,
+                self.gradient_checkpointing and self.training,
+                self._gradient_checkpointing_func,
                 hidden_states,
                 token_type_ids=token_type_ids,
                 attention_mask=attention_mask,
