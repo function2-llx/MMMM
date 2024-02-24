@@ -3,13 +3,14 @@ from argparse import Namespace
 from einops import einops
 import torch
 from torch import nn
-from torch.nn import functional as nnf
 from transformers.activations import ACT2FN
 import xformers.ops as xops
 
 from luolib.models import spadop
 from luolib.models.param import NoWeightDecayParameter
-from luolib.types import tuple2_t
+from luolib.types import tuple2_t, tuple3_t
+
+from mmmm.utils import ParameterWrapper
 
 class PatchEmbedding(nn.Module):
     def __init__(self, config):
@@ -22,31 +23,37 @@ class PatchEmbedding(nn.Module):
             adaptive=False,
             interpolate_2d=True,
         )
+        self.pos_embed_shape: tuple3_t[int] = config.pos_embed_shape
         self.pt_pos_embed_shape: tuple2_t[int] = config.pt_pos_embed_shape
-        self.cls_embedding = NoWeightDecayParameter(torch.zeros(1, config.hidden_size))
-        self.cls_pos_embed = NoWeightDecayParameter(torch.zeros(1, config.hidden_size))
-        self.position_embedding = NoWeightDecayParameter(torch.zeros(1, config.hidden_size, *config.pos_embed_shape))
+        self.cls_embedding = ParameterWrapper(NoWeightDecayParameter(torch.zeros(1, config.hidden_size)))
+        # the position embedding might be interpolated, it may not be a good idea to apply LoRA to it, thus not representing with nn.Embedding
+        self.cls_pos_embed = ParameterWrapper(NoWeightDecayParameter(torch.zeros(1, config.hidden_size)))
+        self.position_embedding = ParameterWrapper(NoWeightDecayParameter(torch.zeros(1, config.hidden_size, *config.pos_embed_shape)))
 
     def _load_from_state_dict(self, state_dict: dict[str, torch.Tensor], prefix: str, *args, **kwargs):
         if (pos_embed := state_dict.get(f'{prefix}position_embedding.weight')) is not None:
-            state_dict[f'{prefix}cls_pos_embed'], pos_embed = pos_embed[0:1], pos_embed[1:]
+            cls_pos_embed, pos_embed = pos_embed[0:1], pos_embed[1:]
             h, w = self.pt_pos_embed_shape
             pos_embed = spadop.resample(
                 einops.rearrange(pos_embed, '(h w) c -> 1 c h w', h=h, w=w),
-                self.position_embedding.shape[-2:],
+                self.pos_embed_shape[-2:],
             )
-            pos_embed = einops.repeat(pos_embed, '1 c h w -> 1 c d h w', d=self.position_embedding.shape[2])
-
+            pos_embed = einops.repeat(pos_embed, '1 c h w -> 1 c d h w', d=self.pos_embed_shape[0])
+            state_dict[f'{prefix}cls_pos_embed'] = cls_pos_embed
             state_dict[f'{prefix}position_embedding'] = pos_embed
-
+        ParameterWrapper.wrap(self, state_dict, prefix)
         return super()._load_from_state_dict(state_dict, prefix, *args, **kwargs)
 
     def forward(self, images: "tensor(B, C, H, W)") -> "tensor(B, L, D)":
         x = self.proj(images)
-        cls_token = (self.cls_embedding + self.cls_pos_embed).expand(x.shape[0], -1, -1)
-        x += spadop.resample(self.position_embedding, x.shape[2:])
-        x = einops.rearrange(x, 'n c ... -> n (...) c')
-        x = torch.cat((cls_token, x), dim=1)
+        pos_embed = spadop.resample(self.position_embedding.weight, x.shape[2:])
+        x = torch.cat(
+            [
+                einops.repeat(self.cls_embedding.weight + self.cls_pos_embed.weight, '1 c -> n 1 c', n=x.shape[0]),
+                einops.rearrange(x + pos_embed, 'n c ... -> n (...) c'),
+            ],
+            dim=1,
+        ).contiguous()
         return x
 
 class Attention(nn.Module):
@@ -149,8 +156,8 @@ class EVA2CLIPModel(nn.Module):
         self.patch_embedding = PatchEmbedding(vision_config)
         self.transformer = Transformer(vision_config)
         self.linear_proj = GLU(config, in_features=vision_config.hidden_size)
-        self.boi = nn.Parameter(torch.zeros(1, 1, config.hidden_size))
-        self.eoi = nn.Parameter(torch.zeros(1, 1, config.hidden_size))
+        self.boi = NoWeightDecayParameter(torch.zeros(1, 1, config.hidden_size))
+        self.eoi = NoWeightDecayParameter(torch.zeros(1, 1, config.hidden_size))
 
     def forward(self, images: "tensor(B, C, H, W)") -> "tensor(B, L, D)":
         x = self.patch_embedding(images)

@@ -16,6 +16,8 @@ dependencies:
   - lightning
   - torchmetrics
   - transformers
+  - peft
+  - bitsandbytes
   - sentencepiece
   - timm
   - wandb

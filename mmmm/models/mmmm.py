@@ -16,6 +16,13 @@ from .cogvlm import CogVLMConfig, CogVLMForCausalLM
 from .segvol import SamArgs, build_sam_vit_3d
 from .tokenizer import MMMMTokenizer
 
+__all__ = [
+    'MMMMForCausalLM',
+    'from_pretrained',
+]
+
+from mmmm.utils import apply_prefix, get_lora_modules_default, get_lora_modules_finetune_all
+
 @dataclass
 class VisionConf:
     pos_embed_shape: tuple3_t[int]
@@ -74,9 +81,17 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
 
         self.post_init()
 
-    def _encode_single_image(self, image):
-        return self.model.sam_model.image_encoder(image.unsqueeze(0))
-    
+    def get_lora_modules(self, prefix: str):
+        # apply LoRA on VLM, fully finetune others
+        target_modules, modules_to_save = get_lora_modules_default(self.model, apply_prefix(prefix, 'model'))
+        for name, child in self.named_children():
+            if name == 'model':
+                continue
+            c_target_modules, c_modules_to_save = get_lora_modules_finetune_all(child, apply_prefix(prefix, name))
+            target_modules.extend(c_target_modules)
+            modules_to_save.extend(c_modules_to_save)
+        return target_modules, modules_to_save
+
     def forward(self, **kwargs):
         return super().forward(**kwargs) if "past_key_values" in kwargs else self.model_forward(**kwargs)
 

@@ -7,6 +7,7 @@ import torch.nn as nn
 from luolib.models import spadop
 from luolib.models.param import NoWeightDecayParameter
 from luolib.types import param3_t, tuple3_t
+from mmmm.utils import ParameterWrapper
 from monai.networks.blocks import TransformerBlock
 
 class PatchEmbeddingBlock(nn.Module):
@@ -45,7 +46,7 @@ class PatchEmbeddingBlock(nn.Module):
             in_channels=in_channels, out_channels=hidden_size, kernel_size=patch_size, stride=patch_size, adaptive=False,
         )
 
-        self.position_embeddings = NoWeightDecayParameter(torch.zeros(1, hidden_size, *pos_embed_shape))
+        self.position_embeddings = ParameterWrapper(NoWeightDecayParameter(torch.zeros(1, hidden_size, *pos_embed_shape)))
         self.dropout = nn.Dropout(dropout_rate, inplace=True)
 
         # for loading SegVol
@@ -56,7 +57,7 @@ class PatchEmbeddingBlock(nn.Module):
     def forward(self, x):
         x = self.proj(x)
         shape = x.shape[2:]
-        embeddings = x + spadop.resample(self.position_embeddings, shape)
+        embeddings = x + spadop.resample(self.position_embeddings.weight, shape)
         embeddings = einops.rearrange(embeddings, 'n c ... -> n (...) c').contiguous()
         embeddings = self.dropout(embeddings)
         return embeddings, shape
@@ -82,10 +83,10 @@ class PatchEmbeddingBlock(nn.Module):
                     state_dict[f'{prefix}position_embeddings'],
                     '1 (d h w) c -> 1 c d h w', d=d, h=h, w=w,
                 ),
-                self.position_embeddings.shape[2:],
+                self.position_embeddings.weight.shape[2:],
             )
             state_dict[f'{prefix}position_embeddings'] = pos_embed
-
+        ParameterWrapper.wrap(self, state_dict, prefix)
         return super()._load_from_state_dict(state_dict, prefix, *args, **kwargs)
 
 class ImageEncoderViT(nn.Module):

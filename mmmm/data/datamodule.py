@@ -259,7 +259,7 @@ class MMMMDataModule(ExpDataModuleBase):
             ])
 
     def train_data(self) -> Sequence:
-        # FIXME: https://github.com/pytorch/pytorch/issues/13246
+        # FIXME use a list as dataset with Python's multiprocessing can cause "memory leak": https://github.com/pytorch/pytorch/issues/13246
         return self._train_data
 
     def train_transform(self) -> Callable:
