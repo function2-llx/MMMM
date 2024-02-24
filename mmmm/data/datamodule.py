@@ -51,7 +51,7 @@ class SamplePatch(mt.RandomizableTransform):
         def _convert_list(names: Iterable[str], mask: bool):
             # FIXME: do not use special tokens explicitly in text
             if mask:
-                names = map(lambda name: f'{tokenizer.mask_open} {name} {tokenizer.mask_close}', names)
+                names = map(lambda name: f'{tokenizer.bop_token} {name} {tokenizer.eop_token} {tokenizer.seg_token}', names)
             return ', '.join(names)
         # copy the input list because the shuffling is in-place
         pos_classes = list(pos_classes)
@@ -99,14 +99,14 @@ class SamplePatch(mt.RandomizableTransform):
         # template: CogVLM `chat_history_to_prompt`
         # just for viewing, don't tokenize it directly
         text = '\n'.join(
-            f'{tokenizer.inst_open} {query} {tokenizer.inst_close} {answer}'
+            f'{tokenizer.usr_token} {query} {tokenizer.sys_token} {answer}'
             for query, answer in conversation
         )
         dtype = torch.long
         text_ids = []
         lm_targets = []
         for query, answer in conversation:
-            prompt = f'{tokenizer.inst_open} {query} {tokenizer.inst_close}'
+            prompt = f'{tokenizer.usr_token} {query} {tokenizer.sys_token}'
             prompt_ids = torch.tensor(tokenizer.encode(prompt, add_special_tokens=False))
             answer_ids = torch.tensor(tokenizer.encode(answer, add_special_tokens=False))
             text_ids.append(torch.cat([prompt_ids, answer_ids]))

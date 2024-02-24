@@ -40,6 +40,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         vision_override: VisionConf,
         tokenizer: MMMMTokenizer,
         sam: SamArgs,
+        torch_dtype: str | torch.dtype = 'auto',
         **kwargs,
     ):
         """make jsonargparse happy"""
@@ -50,6 +51,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             vision_override=vision_override,
             tokenizer=tokenizer,
             sam_args=sam,
+            torch_dtype=torch_dtype,
             **kwargs,
         )
 
@@ -77,7 +79,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         self.mask_loss = DiceFocalLoss(sigmoid=True, reduction='none')
         self.lm_loss_weight = lm_loss_weight
         self.mask_loss_weight = mask_loss_weight
-        self.seg_token_id = tokenizer.mask_close_id
+        self.seg_token_id = tokenizer.seg_token_id
 
         self.post_init()
 
