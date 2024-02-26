@@ -224,8 +224,9 @@ class InputTransformD(mt.Transform):
     def __call__(self, data: dict):
         data = dict(data)
         img: MetaTensor = data['image']
-        img_t, _ = ensure_rgb(img.as_tensor())
-        data['image'] = img_t
+        data['image'], _ = ensure_rgb(img.as_tensor())
+        masks: MetaTensor = data['masks']
+        data['masks'] = masks.as_tensor().round().bool()
         return data
 
 @dataclass

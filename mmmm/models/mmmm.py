@@ -7,11 +7,10 @@ import torch
 from torch.nn import functional as nnf
 import torch.nn as nn
 from transformers.modeling_outputs import CausalLMOutputWithPast
-from transformers.utils import ModelOutput
 
 from luolib.lightning import LightningModule
 from luolib.types import tuple2_t, tuple3_t
-from monai.losses import DiceFocalLoss
+from monai.losses import DiceFocalLoss as DiceFocalLossBase
 
 from .cogvlm import CogVLMConfig, CogVLMForCausalLM
 from .segvol import SamArgs, build_sam_vit_3d
@@ -29,6 +28,18 @@ class VisionConf:
     pos_embed_shape: tuple3_t[int]
     pt_pos_embed_shape: tuple2_t[int] | None = None
     patch_size: int = 16
+
+class DiceFocalLoss(DiceFocalLossBase):
+    """reduce the results to channel only"""
+
+    def __init__(self, **kwargs):
+        super().__init__(reduction='none', sigmoid=True, **kwargs)
+
+    def forward(self, input: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        dice_loss = einops.reduce(self.dice(input, target), 'n c ... -> c', 'mean')
+        focal_loss = einops.reduce(self.focal(input, target), 'n c ... -> c', 'mean')
+        total_loss: torch.Tensor = self.lambda_dice * dice_loss + self.lambda_focal * focal_loss
+        return total_loss
 
 @dataclass(kw_only=True)
 class MMMMOutputWithPast:
@@ -93,7 +104,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             nn.ReLU(inplace=True),
             nn.Linear(vlm_config.hidden_size, self.sam_model.prompt_encoder.embed_dim),
         )
-        self.mask_loss = DiceFocalLoss(sigmoid=True, reduction='none')
+        self.mask_loss = DiceFocalLoss()
         self.lm_loss_weight = lm_loss_weight
         self.mask_loss_weight = mask_loss_weight
         self.seg_token_id = tokenizer.seg_token_id
@@ -155,12 +166,11 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
 
     def training_step(self, batch: dict, *args, **kwargs):
         image = batch['image']
-        vlm_inputs = batch['vlm_inputs']
         output: MMMMOutputWithPast = self(
             global_enc_image=image,
             grounding_enc_image=image,
             masks=batch['masks'],
-            **vlm_inputs,
+            **batch['vlm_inputs'],
         )
         loss = output.lm_loss * self.lm_loss_weight + output.mask_loss * self.mask_loss_weight
         self.log_dict({
@@ -220,12 +230,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         assert (batch_size := len(masks_label)) == len(masks_logits)
         loss_list = []
         for i in range(batch_size):
-            loss_list.append(
-                einops.reduce(
-                    self.mask_loss(masks_logits[i][None], masks_label[i][None]),
-                    'n c ... -> c', 'mean',
-                )
-            )
+            loss_list.append(self.mask_loss(masks_logits[i][None], masks_label[i][None]))
         loss = torch.cat(loss_list).mean()
         return loss
 
