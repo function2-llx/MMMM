@@ -7,6 +7,7 @@ import torch
 from torch.nn import functional as nnf
 import torch.nn as nn
 from transformers.modeling_outputs import CausalLMOutputWithPast
+from transformers.utils import ModelOutput
 
 from luolib.lightning import LightningModule
 from luolib.types import tuple2_t, tuple3_t
@@ -29,6 +30,20 @@ class VisionConf:
     pt_pos_embed_shape: tuple2_t[int] | None = None
     patch_size: int = 16
 
+@dataclass(kw_only=True)
+class MMMMOutputWithPast:
+    """modified from CausalLMOutputWithPast
+    inheriting from ModelOutput will cause some trouble (e.g., "should not have more than one required field")
+    """
+    lm_logits: torch.Tensor
+    lm_loss: torch.Tensor | None = None
+    past_key_values: tuple[tuple[torch.Tensor, ...], ...] | None = None
+    hidden_states: tuple[torch.Tensor, ...] | None = None
+    attentions: tuple[torch.Tensor, ...] | None = None
+
+    masks_logits: list[torch.Tensor]
+    mask_loss: torch.Tensor | None
+
 class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
     @classmethod
     def from_pretrained(
@@ -43,7 +58,9 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         torch_dtype: str | torch.dtype = 'auto',
         **kwargs,
     ):
-        """make jsonargparse happy"""
+        """make jsonargparse happy
+        This works thanks to that AST does not support this (according to the debug information)
+        """
         return super().from_pretrained(
             pretrained_model_name_or_path, *args,
             lm_loss_weight=lm_loss_weight,
@@ -94,49 +111,30 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             modules_to_save.extend(c_modules_to_save)
         return target_modules, modules_to_save
 
-    def forward(self, **kwargs):
-        return super().forward(**kwargs) if "past_key_values" in kwargs else self.model_forward(**kwargs)
-
-    def training_step(self, batch: dict, *args, **kwargs):
-        image = batch['image']
-        vlm_inputs = batch['vlm_inputs']
-        vlm_output, masks_logits = self.model_forward(
-            global_enc_image=image,
-            grounding_enc_image=image,
-            **vlm_inputs,
-        )
-        lm_loss = vlm_output.loss
-        mask_loss = self._compute_mask_loss(masks_logits, batch['masks'])
-        loss = lm_loss * self.lm_loss_weight + mask_loss * self.mask_loss_weight
-        self.log_dict({
-            'train/lm_loss': lm_loss,
-            'train/mask_loss': mask_loss,
-            'train/loss': loss,
-        })
-        return loss
-
-    def model_forward(
+    def forward(
         self,
+        *,
         global_enc_image: torch.FloatTensor,
         grounding_enc_image: torch.FloatTensor,
+        masks: list[torch.BoolTensor] | None = None,
         input_ids: torch.LongTensor,
-        token_type_ids: torch.LongTensor,
-        position_ids: torch.LongTensor,
-        lm_targets: torch.LongTensor,
-        attention_mask: torch.LongTensor,
-    ):
+        lm_targets: torch.LongTensor | None = None,
+        **kwargs,
+    ) -> MMMMOutputWithPast:
+        """
+        TODO:
+         - make it compatible with HF interface, e.g., adapt return_dict
+         - support cache for segmentation output
+        """
         # VLM part
-        # CogVLMForCausalLM.__call__ will not work
         vlm_output: CausalLMOutputWithPast = CogVLMForCausalLM.forward(
             self,
-            image=global_enc_image,
             input_ids=input_ids,
-            token_type_ids=token_type_ids,
-            attention_mask=attention_mask,
-            position_ids=position_ids,
+            image=global_enc_image,
             labels=lm_targets,
-            output_hidden_states=True,
             return_dict=True,
+            output_hidden_states=True,
+            **kwargs,
         )
         # SAM part
         masks_logits = self._generate_and_postprocess_masks(
@@ -144,7 +142,33 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             vlm_output.hidden_states[-1],
             input_ids == self.seg_token_id,
         )
-        return vlm_output, masks_logits
+        mask_loss = None if masks is None else self._compute_mask_loss(masks_logits, masks)
+        return MMMMOutputWithPast(
+            lm_loss=vlm_output.loss,
+            lm_logits=vlm_output.logits,
+            past_key_values=vlm_output.past_key_values,
+            hidden_states=vlm_output.hidden_states,
+            attentions=vlm_output.attentions,
+            masks_logits=masks_logits,
+            mask_loss=mask_loss,
+        )
+
+    def training_step(self, batch: dict, *args, **kwargs):
+        image = batch['image']
+        vlm_inputs = batch['vlm_inputs']
+        output: MMMMOutputWithPast = self(
+            global_enc_image=image,
+            grounding_enc_image=image,
+            masks=batch['masks'],
+            **vlm_inputs,
+        )
+        loss = output.lm_loss * self.lm_loss_weight + output.mask_loss * self.mask_loss_weight
+        self.log_dict({
+            'train/lm_loss': output.lm_loss,
+            'train/mask_loss': output.mask_loss,
+            'train/loss': loss,
+        })
+        return loss
 
     def _inference_path(self, input_ids, token_type_ids, global_enc_images, attention_masks):
         # Process and return inference output

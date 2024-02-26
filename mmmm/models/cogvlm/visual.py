@@ -124,6 +124,7 @@ class Transformer(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.gradient_checkpointing = False
+        self._gradient_checkpointing_func = None
         self.layers = nn.ModuleList([TransformerLayer(config) for _ in range(config.num_hidden_layers)])
 
     def forward(self, hidden_states):

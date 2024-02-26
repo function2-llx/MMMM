@@ -400,6 +400,7 @@ class CogVLMModel(CogVLMPreTrainedModel):
         self.vision = EVA2CLIPModel(config)
 
         self.gradient_checkpointing = False
+        self._gradient_checkpointing_func = None
         # Initialize weights and apply final processing
         self.post_init()
 
