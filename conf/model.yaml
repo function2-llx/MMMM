@@ -1,0 +1,18 @@
+model:
+  class_path: mmmm.models.mmmm.from_pretrained
+  init_args:
+    pretrained_model_name_or_path: THUDM/cogvlm-chat-hf
+    vision_override:
+      pos_embed_shape: [6, 32, 32]
+      pt_pos_embed_shape: [35, 35]
+    sam:
+      pos_embed_shape: [6, 32, 32]
+      pt_in_channels: 1
+      pt_patch_size: [4, 16, 16]
+      pt_pos_embed_shape: [8, 16, 16]
+      checkpoint: pre-trained/SegVol_v1.pth
+lora:
+  r: 8
+  lora_alpha: 8
+  lora_dropout: 0
+
