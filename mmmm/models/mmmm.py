@@ -71,6 +71,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
     ):
         """make jsonargparse happy
         This works thanks to that AST does not support this (according to the debug information)
+        TODO: refactor the construction of PreTrainedModel
         """
         return super().from_pretrained(
             pretrained_model_name_or_path, *args,
@@ -82,6 +83,11 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             torch_dtype=torch_dtype,
             **kwargs,
         )
+
+    def on_after_backward(self):
+        for name, param in self.named_parameters():
+            if param.requires_grad and param.grad is None:
+                print(f'[rank {self.trainer.global_rank}] none grad', name)
 
     def __init__(
         self,
@@ -109,7 +115,18 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         self.mask_loss_weight = mask_loss_weight
         self.seg_token_id = tokenizer.seg_token_id
 
+        self._setup_sam_requires_grad()
+
         self.post_init()
+
+    def _setup_sam_requires_grad(self):
+        # make DDP work
+        # if this dissatisfies you, go and construct it
+        sam = self.sam_model
+        sam.prompt_encoder.point_embeddings.requires_grad_(False)
+        sam.prompt_encoder.not_a_point_embed.requires_grad_(False)
+        sam.prompt_encoder.mask_downscaling.requires_grad_(False)
+        sam.mask_decoder.iou_prediction_head.requires_grad_(False)
 
     def get_lora_modules(self, prefix: str):
         # apply LoRA on VLM, fully finetune others
@@ -171,6 +188,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             grounding_enc_image=image,
             masks=batch['masks'],
             **batch['vlm_inputs'],
+            use_cache=False,
         )
         loss = output.lm_loss * self.lm_loss_weight + output.mask_loss * self.mask_loss_weight
         self.log_dict({

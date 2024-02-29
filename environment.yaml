@@ -10,8 +10,9 @@ dependencies:
   - h5py
   - scikit-learn
   - pytorch::pytorch=2.2
-  - pytorch::pytorch-cuda=11.8
+  - pytorch::pytorch-cuda=12.1
   - pytorch::torchvision
+  - ocl-icd-system  # https://github.com/conda-forge/openvino-feedstock/pull/73
   - einops
   - lightning
   - torchmetrics

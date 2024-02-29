@@ -2,7 +2,9 @@ from lightning.pytorch.cli import LightningArgumentParser
 from peft import LoraConfig, get_peft_model
 
 from luolib.lightning.cli import LightningCLI as CLIBase
+from luolib.lightning.trainer import PeftTrainer
 
+from mmmm.data import MMMMDataModule
 from mmmm.models import MMMMForCausalLM, MMMMTokenizer
 from mmmm.utils import get_lora_modules_default
 
@@ -29,7 +31,11 @@ class CLI(CLIBase):
         model.peft_model = get_peft_model(model, lora_config)
 
 def main():
-    CLI()
+    CLI(
+        model_class=MMMMForCausalLM,
+        datamodule_class=MMMMDataModule,
+        trainer_class=PeftTrainer,
+    )
 
 if __name__ == '__main__':
     main()
