@@ -1,14 +1,14 @@
 import einops
-import numpy as np
 import torch
-from torch.nn import functional as nnf
 import torch.nn as nn
 
 from luolib.models import spadop
 from luolib.models.param import NoWeightDecayParameter
+from luolib.models.utils import forward_gc
 from luolib.types import param3_t, tuple3_t
-from mmmm.utils import ParameterWrapper
 from monai.networks.blocks import TransformerBlock
+
+from mmmm.utils import ParameterWrapper
 
 class PatchEmbeddingBlock(nn.Module):
     """
@@ -62,8 +62,8 @@ class PatchEmbeddingBlock(nn.Module):
         embeddings = self.dropout(embeddings)
         return embeddings, shape
 
-    def _load_from_state_dict(self, state_dict: dict, prefix: str, *args, **kwargs):
-        if (proj_weight := state_dict.pop(f'{prefix}patch_embeddings.1.weight')) is not None and proj_weight.ndim == 2:
+    def _load_from_state_dict(self, state_dict: dict[str, torch.Tensor], prefix: str, *args, **kwargs):
+        if (proj_weight := state_dict.pop(f'{prefix}patch_embeddings.1.weight', None)) is not None and proj_weight.ndim == 2:
             # load from SegVol checkpoint
             p0, p1, p2 = self.pt_patch_size
             proj_weight = spadop.resample(
@@ -154,11 +154,15 @@ class ImageEncoderViT(nn.Module):
             ]
         )
         self.norm = nn.LayerNorm(hidden_size)
+        self.gradient_checkpointing = False
+        self._gradient_checkpointing_func = None
 
     def forward(self, x):
         x, (d, h, w) = self.patch_embedding(x)
         for blk in self.blocks:
-            x = blk(x)
+            x = forward_gc(
+                blk, self.training and self.gradient_checkpointing, self._gradient_checkpointing_func, x,
+            )
         x = self.norm(x)
         x = einops.rearrange(x, 'n (d h w) c -> n c d h w', d=d, h=h, w=w).contiguous()
         return x

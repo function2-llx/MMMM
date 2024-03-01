@@ -10,8 +10,9 @@ from torch import Tensor, nn
 import math
 from typing import Tuple, Type
 
-from .common import MLPBlock
+from luolib.models.utils import forward_gc
 
+from .common import MLPBlock
 
 class TwoWayTransformer(nn.Module):
     def __init__(
@@ -59,6 +60,9 @@ class TwoWayTransformer(nn.Module):
         )
         self.norm_final_attn = nn.LayerNorm(embedding_dim)
 
+        self.gradient_checkpointing = False
+        self._gradient_checkpointing_func = None
+
     def forward(
         self,
         image_embedding: Tensor,
@@ -89,7 +93,10 @@ class TwoWayTransformer(nn.Module):
 
         # Apply transformer blocks and final layernorm
         for layer in self.layers:
-            queries, keys = layer(
+            queries, keys = forward_gc(
+                layer,
+                self.training and self.gradient_checkpointing,
+                self._gradient_checkpointing_func,
                 queries=queries,
                 keys=keys,
                 query_pe=point_embedding,
