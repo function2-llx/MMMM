@@ -84,11 +84,6 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             **kwargs,
         )
 
-    def on_after_backward(self):
-        for name, param in self.named_parameters():
-            if param.requires_grad and param.grad is None:
-                print(f'[rank {self.trainer.global_rank}] none grad', name)
-
     def __init__(
         self,
         vlm_config: CogVLMConfig,
@@ -227,21 +222,24 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         image_embeddings = sam.image_encoder(image)
         masks_logits_list = []
         for i in range(hidden_states.shape[0]):
-            text_embedding = self.seg_proj(hidden_states[i, seg_token_mask[i]])
-            sparse_embeddings, dense_embeddings = sam.prompt_encoder(
-                image_embeddings.shape[2:], text_embedding=text_embedding,
-            )
-            sparse_embeddings = sparse_embeddings.to(text_embedding.dtype)
-            masks_logits, _ = sam.mask_decoder(
-                image_embeddings=image_embeddings[i:i + 1],
-                text_embedding=text_embedding,  # make SegVol happy
-                image_pe=sam.prompt_encoder.get_dense_pe(image_embeddings.shape[2:]),
-                sparse_prompt_embeddings=sparse_embeddings,
-                dense_prompt_embeddings=dense_embeddings,
-                multimask_output=False,
-            )
-            masks_logits = nnf.interpolate(masks_logits, image.shape[2:], mode='trilinear')
-            masks_logits_list.append(masks_logits[:, 0])
+            if seg_token_mask[i].any():
+                text_embedding = self.seg_proj(hidden_states[i, seg_token_mask[i]])
+                sparse_embeddings, dense_embeddings = sam.prompt_encoder(
+                    image_embeddings.shape[2:], text_embedding=text_embedding,
+                )
+                sparse_embeddings = sparse_embeddings.to(text_embedding.dtype)
+                masks_logits, _ = sam.mask_decoder(
+                    image_embeddings=image_embeddings[i:i + 1],
+                    text_embedding=text_embedding,  # make SegVol happy
+                    image_pe=sam.prompt_encoder.get_dense_pe(image_embeddings.shape[2:]),
+                    sparse_prompt_embeddings=sparse_embeddings,
+                    dense_prompt_embeddings=dense_embeddings,
+                    multimask_output=False,
+                )
+                masks_logits = nnf.interpolate(masks_logits, image.shape[2:], mode='trilinear')
+                masks_logits_list.append(masks_logits[:, 0])
+            else:
+                masks_logits_list.append(image.new_empty(0, *image.shape[2:]))
         return masks_logits_list
 
     def _compute_mask_loss(self, masks_logits: list[torch.Tensor], masks_label: list[torch.BoolTensor]):
