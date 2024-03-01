@@ -70,7 +70,8 @@ class SamplePatch(mt.RandomizableTransform):
 
         tokenizer = self.tokenizer
         assert len(classes) > 0
-        neg_mask = self.R.uniform() < 0.8
+        p_use_neg_mask = 0.9
+        neg_mask = self.R.uniform() < p_use_neg_mask
         if neg_mask:
             prompt = f'For the given {modality} image, output the segmentation masks for the following objects: {_convert_list(classes, False)}.'
         else:
