@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from jsonargparse import class_from_function
 from transformers import LlamaTokenizer
 
@@ -21,4 +23,10 @@ class MMMMTokenizer(LlamaTokenizer):
             )
         )
 
-from_pretrained = class_from_function(MMMMTokenizer.from_pretrained, MMMMTokenizer)
+    @classmethod
+    def build(cls, hf_model_path: Path):
+        # no type hint (https://github.com/huggingface/transformers/blob/v4.38.2/src/transformers/tokenization_utils_base.py#L1827)
+        # will cause jsonargparse fail (https://github.com/omni-us/jsonargparse/issues/454).
+        return cls.from_pretrained(hf_model_path)
+
+build = class_from_function(MMMMTokenizer.build, MMMMTokenizer)
