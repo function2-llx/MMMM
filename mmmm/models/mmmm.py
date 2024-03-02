@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 import os
+from typing import Self
 
 import einops
 from jsonargparse import class_from_function
@@ -35,11 +36,16 @@ class DiceFocalLoss(DiceFocalLossBase):
     def __init__(self, **kwargs):
         super().__init__(reduction='none', sigmoid=True, **kwargs)
 
-    def forward(self, input: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    def forward(self, input: torch.Tensor, target: torch.Tensor) -> dict[str, torch.Tensor]:
+        input = input.float()
         dice_loss = einops.reduce(self.dice(input, target), 'n c ... -> c', 'mean')
         focal_loss = einops.reduce(self.focal(input, target), 'n c ... -> c', 'mean')
         total_loss: torch.Tensor = self.lambda_dice * dice_loss + self.lambda_focal * focal_loss
-        return total_loss
+        return {
+            'dice': dice_loss,
+            'focal': focal_loss,
+            'total': total_loss,
+        }
 
 @dataclass(kw_only=True)
 class MMMMOutputWithPast:
@@ -53,7 +59,7 @@ class MMMMOutputWithPast:
     attentions: tuple[torch.Tensor, ...] | None = None
 
     masks_logits: list[torch.Tensor]
-    mask_loss: torch.Tensor | None
+    mask_loss: dict[str, torch.Tensor] | None
 
 class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
     @classmethod
@@ -73,7 +79,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         This works thanks to that AST does not support this (according to the debug information)
         TODO: refactor the construction of PreTrainedModel
         """
-        return super().from_pretrained(
+        self: Self = super().from_pretrained(
             pretrained_model_name_or_path, *args,
             lm_loss_weight=lm_loss_weight,
             mask_loss_weight=mask_loss_weight,
@@ -83,6 +89,10 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             torch_dtype=torch_dtype,
             **kwargs,
         )
+        self.resize_token_embeddings(len(tokenizer))
+        # make the `from_pretrained` interface consistent
+        self.eval()
+        return self
 
     def __init__(
         self,
@@ -105,7 +115,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             nn.ReLU(inplace=True),
             nn.Linear(vlm_config.hidden_size, self.sam_model.prompt_encoder.embed_dim),
         )
-        self.mask_loss = DiceFocalLoss()
+        self.mask_loss = DiceFocalLoss(lambda_focal=0)
         self.lm_loss_weight = lm_loss_weight
         self.mask_loss_weight = mask_loss_weight
         self.seg_token_id = tokenizer.seg_token_id
@@ -113,6 +123,16 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         self._setup_sam_requires_grad()
 
         self.post_init()
+
+    def on_fit_start(self) -> None:
+        super().on_fit_start()
+        # model.train() will not be called anymore in fit loop: https://github.com/Lightning-AI/pytorch-lightning/pull/18951
+        # and from_pretrained call .eval() by default https://github.com/huggingface/transformers/blob/v4.38.2/src/transformers/modeling_utils.py#L3523-L3524
+        # also see: https://huggingface.co/docs/transformers/v4.38.2/en/main_classes/model#transformers.PreTrainedModel (search "model.eval()")
+        self.train()
+        # self.model will be adapted by LoRA
+        self.model.eval()
+        self.gradient_checkpointing_enable({'use_reentrant': False})
 
     def _setup_sam_requires_grad(self):
         # make DDP work
@@ -185,11 +205,12 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             **batch['vlm_inputs'],
             use_cache=False,
         )
-        loss = output.lm_loss * self.lm_loss_weight + output.mask_loss * self.mask_loss_weight
+        loss = output.lm_loss * self.lm_loss_weight + output.mask_loss['total'] * self.mask_loss_weight
         self.log_dict({
             'train/lm_loss': output.lm_loss,
-            'train/mask_loss': output.mask_loss,
+            'train/mask_loss': output.mask_loss['total'],
             'train/loss': loss,
+            **{f'train/{k}_loss': v for k, v in output.mask_loss.items() if k != 'total'},
         })
         return loss
 
@@ -242,13 +263,14 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
                 masks_logits_list.append(image.new_empty(0, *image.shape[2:]))
         return masks_logits_list
 
-    def _compute_mask_loss(self, masks_logits: list[torch.Tensor], masks_label: list[torch.BoolTensor]):
+    def _compute_mask_loss(self, masks_logits: list[torch.Tensor], masks_label: list[torch.BoolTensor]) -> dict[str, torch.Tensor]:
         assert (batch_size := len(masks_label)) == len(masks_logits)
-        loss_list = []
+        mask_loss_list: dict[str, list[torch.Tensor]] = {}
         for i in range(batch_size):
-            loss_list.append(self.mask_loss(masks_logits[i][None], masks_label[i][None]))
-        loss = torch.cat(loss_list).mean()
-        return loss
+            for k, v in self.mask_loss(masks_logits[i][None], masks_label[i][None]).items():
+                mask_loss_list.setdefault(k, []).append(v)
+        mask_loss = {k: torch.cat(v).mean() for k, v in mask_loss_list.items()}
+        return mask_loss
 
     def evaluate(self, input_ids, token_type_ids, global_enc_images, grounding_enc_images, resize_list, orig_sizes, max_tokens_new=32):
         with torch.no_grad():

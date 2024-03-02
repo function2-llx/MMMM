@@ -131,7 +131,7 @@ class Transformer(nn.Module):
         for layer_module in self.layers:
             hidden_states = forward_gc(
                 layer_module,
-                self.training and self.gradient_checkpointing,
+                self.gradient_checkpointing,
                 self._gradient_checkpointing_func,
                 hidden_states,
             )

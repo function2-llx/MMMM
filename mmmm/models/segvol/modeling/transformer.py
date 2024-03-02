@@ -95,7 +95,7 @@ class TwoWayTransformer(nn.Module):
         for layer in self.layers:
             queries, keys = forward_gc(
                 layer,
-                self.training and self.gradient_checkpointing,
+                self.gradient_checkpointing,
                 self._gradient_checkpointing_func,
                 queries=queries,
                 keys=keys,

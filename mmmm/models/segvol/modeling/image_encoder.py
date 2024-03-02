@@ -161,7 +161,7 @@ class ImageEncoderViT(nn.Module):
         x, (d, h, w) = self.patch_embedding(x)
         for blk in self.blocks:
             x = forward_gc(
-                blk, self.training and self.gradient_checkpointing, self._gradient_checkpointing_func, x,
+                blk, self.gradient_checkpointing, self._gradient_checkpointing_func, x,
             )
         x = self.norm(x)
         x = einops.rearrange(x, 'n (d h w) c -> n c d h w', d=d, h=h, w=w).contiguous()

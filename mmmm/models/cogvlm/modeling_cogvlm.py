@@ -546,7 +546,7 @@ class CogVLMModel(CogVLMPreTrainedModel):
             past_key_value = past_key_values[idx] if past_key_values is not None else None
             layer_outputs = forward_gc(
                 decoder_layer,
-                self.gradient_checkpointing and self.training,
+                self.gradient_checkpointing,
                 self._gradient_checkpointing_func,
                 hidden_states,
                 token_type_ids=token_type_ids,

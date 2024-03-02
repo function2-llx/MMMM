@@ -23,9 +23,6 @@ class CLI(CLIBase):
         super().instantiate_classes()
         model = self.model
         config = self.config_init[self.subcommand]
-        tokenizer: MMMMTokenizer = config.tokenizer
-        model.resize_token_embeddings(len(tokenizer))
-        model.gradient_checkpointing_enable({'use_reentrant': False})
         lora_config: LoraConfig = config.lora
         lora_config.target_modules, lora_config.modules_to_save = get_lora_modules_default(model)
         model.peft_model = get_peft_model(model, lora_config)
