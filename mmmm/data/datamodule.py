@@ -35,7 +35,7 @@ class SamplePatch(mt.RandomizableTransform):
         num_pos: int,
         num_neg: int,
         tokenizer: MMMMTokenizer,
-        force_fg_ratio: float = 1 / 3,
+        force_fg_ratio: float = 2 / 3,
         device: Device = 'cpu',
     ):
         super().__init__()
@@ -233,8 +233,8 @@ class InputTransformD(mt.Transform):
 @dataclass
 class TransConf:
     patch_size: tuple3_t[int] = (96, 224, 224)
-    num_pos: int = 10
-    num_neg: int = 10
+    num_pos: int = 64
+    num_neg: int = 4
 
 class MMMMDataModule(ExpDataModuleBase):
     def __init__(
