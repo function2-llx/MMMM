@@ -4,7 +4,6 @@ from einops import einops
 import torch
 from torch import nn
 from transformers.activations import ACT2FN
-import xformers.ops as xops
 
 from luolib.models import spadop
 from luolib.models.param import NoWeightDecayParameter
@@ -73,6 +72,7 @@ class Attention(nn.Module):
         qkv = qkv.reshape(B, L, 3, self.num_heads, -1).permute(2, 0, 1, 3, 4)  # 3, B, L, H, D
         q, k, v = qkv[0], qkv[1], qkv[2]
 
+        from xformers import ops as xops
         out = xops.memory_efficient_attention(
             q, k, v, scale=self.scale,
         )
