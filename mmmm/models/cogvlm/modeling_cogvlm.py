@@ -404,6 +404,17 @@ class CogVLMModel(CogVLMPreTrainedModel):
         # Initialize weights and apply final processing
         self.post_init()
 
+    def get_lora_modules(self, prefix: str):
+        # Let's fine-tune the whole embedding layer
+        target_modules, modules_to_save = [], [apply_prefix(prefix, 'embed_tokens')]
+        for name, child in self.named_children():
+            if name == 'embed_tokens':
+                continue
+            c_target_modules, c_modules_to_save = get_lora_modules_default(child, apply_prefix(prefix, name))
+            target_modules.extend(c_target_modules)
+            modules_to_save.extend(c_modules_to_save)
+        return target_modules, modules_to_save
+
     def encode_images(self, image_lists: List[List[torch.Tensor]]) -> torch.Tensor:
         images = []
         for image_list in image_lists:
