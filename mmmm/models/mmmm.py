@@ -115,7 +115,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             nn.ReLU(inplace=True),
             nn.Linear(vlm_config.hidden_size, self.sam_model.prompt_encoder.embed_dim),
         )
-        self.mask_loss = DiceFocalLoss(lambda_focal=0)
+        self.mask_loss = DiceFocalLoss()
         self.lm_loss_weight = lm_loss_weight
         self.mask_loss_weight = mask_loss_weight
         self.seg_token_id = tokenizer.seg_token_id

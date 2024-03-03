@@ -15,10 +15,10 @@ from luolib.datamodule import ExpDataModuleBase
 from luolib.types import tuple3_t
 from luolib.utils.misc import ensure_rgb
 from monai import transforms as mt
+from monai.data import MetaTensor
 
 from mmmm.models import MMMMTokenizer
 from mmmm.models.cogvlm import LANGUAGE_TOKEN_TYPE, VISION_TOKEN_TYPE
-from monai.data import MetaTensor
 from .defs import Meta, PROCESSED_SEG_DATA_ROOT, encode_patch_size
 
 __all__ = [
@@ -233,7 +233,7 @@ class InputTransformD(mt.Transform):
 @dataclass
 class TransConf:
     patch_size: tuple3_t[int] = (96, 224, 224)
-    num_pos: int = 64
+    num_pos: int = 48
     num_neg: int = 4
 
 class MMMMDataModule(ExpDataModuleBase):
