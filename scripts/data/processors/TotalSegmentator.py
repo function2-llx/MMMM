@@ -44,8 +44,8 @@ class TotalSegmentatorProcessor(Default3DImageLoaderMixin, Binary3DMaskLoaderMix
         ret = []
         suffix = '.nii.gz'
         tax = pd.read_excel(ORIGIN_DATA_ROOT / 'seg-tax.xlsx')
-        tax = tax[~tax['TS-v2 name'].isna()]
-        tax.set_index('TS-v2 name', inplace=True)
+        tax = tax[~tax['TS-v2 key'].isna()]
+        tax.set_index('TS-v2 key', inplace=True)
         for case_dir in self.dataset_root.iterdir():
             if not case_dir.is_dir():
                 continue

@@ -316,8 +316,12 @@ class Processor(ABC):
             mean = images.new_tensor([[[[0.48145466, 0.4578275, 0.40821073]]]])
             std = images.new_tensor([[[[0.26862954, 0.26130258, 0.27577711]]]])
         else:
-            mean = images.mean(dim=(1, 2, 3), keepdim=True)
-            std = images.std(dim=(1, 2, 3), keepdim=True)
+            mean = images.as_tensor().new_empty(images.shape[0], 1, 1, 1)
+            std = images.as_tensor().new_empty(images.shape[0], 1, 1, 1)
+            for i in range(images.shape[0]):
+                fg = images[i][images[i] > 0]
+                mean[i] = fg.mean()
+                std[i] = fg.std()
         images = (images - mean) / std
         return images
 
