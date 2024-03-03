@@ -18,9 +18,10 @@ def setup_logging():
 
     ch = logging.StreamHandler()
     ch.setLevel(logging.INFO)
-    log_dir = PROCESSED_DATA_ROOT / '.logs' / 'image'
+    now = datetime.now()
+    log_dir = PROCESSED_DATA_ROOT / '.logs' / 'image' / now.strftime("%Y-%m-%d")
     log_dir.mkdir(parents=True, exist_ok=True)
-    fh = logging.FileHandler(log_dir / f'{datetime.now().strftime("%Y-%m-%d-%H:%M:%S")}.log')
+    fh = logging.FileHandler(log_dir / f'{now.strftime("%H:%M:%S")}.log')
     fh.setLevel(logging.DEBUG)
 
     # Create formatter and add it to the handlers

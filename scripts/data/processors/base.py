@@ -44,6 +44,11 @@ class MultiLabelMultiFileDataPoint(DataPoint):
     masks: dict[str, Path]
     """map: seg-tax name ↦ path to the segmentation mask in the image"""
 
+@dataclass
+class MultiClassDataPoint(DataPoint):
+    label: Path
+    class_mapping: dict[int, str]
+
 _CLIP_LOWER = norm.cdf(-3)
 _CLIP_UPPER = norm.cdf(3)
 
@@ -139,6 +144,7 @@ class Processor(ABC):
             seg-tax name ↦ segmentation mask
         """
         loader = self.get_mask_loader()
+        device = get_cuda_device()
         if isinstance(data_point, MultiLabelMultiFileDataPoint):
             masks = data_point.masks
             classes, mask_paths = zip(*masks.items())
@@ -148,7 +154,16 @@ class Processor(ABC):
                 loader, mask_paths,
                 new_mapper=False, disable=True, max_workers=min(4, len(mask_paths)),
             )
-            masks = torch.cat(masks).to(get_cuda_device())
+            masks = torch.cat(masks).to(dtype=torch.bool, device=device)
+        elif isinstance(data_point, MultiClassDataPoint):
+            class_mapping = data_point.class_mapping
+            label = loader(data_point.label).to(dtype=torch.int16, device=device)
+            assert label.shape[0] == 1
+            class_ids = torch.tensor([c for c in class_mapping], dtype=torch.int16, device=device)
+            for _ in range(label.ndim - 1):
+                class_ids = class_ids[..., None]  # make broadcastable
+            classes = list(class_mapping.values())
+            masks = label == class_ids
         else:
             raise NotImplementedError
         return classes, masks
@@ -214,6 +229,8 @@ class Processor(ABC):
             if any(is_rgb_modality(modality) for modality in modalities):
                 assert len(modalities) == 1, 'multiple RGB images is not supported'
             classes, masks = self.load_masks(data_point)
+            for name in classes:
+                assert name in self.seg_tax
             images, masks = self.orient(images, masks)
             assert images.shape[1:] == masks.shape[1:]
             info = {
@@ -293,7 +310,16 @@ class Processor(ABC):
         # 3. rescale intensity fo [0, 1]
         images.clamp_(0)
         maxv = 255 if is_natural else einops.reduce(images, 'c ... -> c', 'max')
-        return images / maxv
+        images = images / maxv
+        # 4. Z-score normalization or by pre-defined statistics
+        if is_natural:
+            mean = images.new_tensor([[[[0.48145466, 0.4578275, 0.40821073]]]])
+            std = images.new_tensor([[[[0.26862954, 0.26130258, 0.27577711]]]])
+        else:
+            mean = images.mean(dim=(1, 2, 3), keepdim=True)
+            std = images.std(dim=(1, 2, 3), keepdim=True)
+        images = (images - mean) / std
+        return images
 
     def resize_masks(self, masks: torch.BoolTensor, new_shape: npt.NDArray[np.int32]) -> torch.BoolTensor:
         new_shape = tuple(new_shape.tolist())
@@ -302,9 +328,9 @@ class Processor(ABC):
         else:
             resized_masks = masks.new_empty((masks.shape[0], *new_shape))
             for i in range(0, masks.shape[0], self.mask_batch_size):
-                batch = masks[i:i + self.mask_batch_size]
+                batch = masks[None, i:i + self.mask_batch_size]
                 batch = nnf.interpolate(batch.float(), new_shape, mode='trilinear')
-                resized_masks[i:i + self.mask_batch_size] = batch > 0.5
+                resized_masks[i:i + self.mask_batch_size] = batch[0] > 0.5
         return resized_masks
 
 class Default3DImageLoaderMixin:
@@ -318,3 +344,9 @@ class Binary3DMaskLoaderMixin:
 
     def get_mask_loader(self) -> ImageLoader:
         return mt.LoadImage(self.mask_reader, image_only=True, dtype=torch.bool, ensure_channel_first=True)
+
+class MultiClass3DMaskLoaderMixin:
+    mask_reader = None
+
+    def get_mask_loader(self) -> ImageLoader:
+        return mt.LoadImage(self.mask_reader, image_only=True, dtype=torch.int16, ensure_channel_first=True)
