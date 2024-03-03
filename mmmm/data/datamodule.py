@@ -97,17 +97,19 @@ class SamplePatch(mt.RandomizableTransform):
     def prepare_vlm_inputs(self, conversation: list[tuple[str, str]]):
         # TODO: refactor this function to support various VLM formats
         tokenizer = self.tokenizer
-        # template: CogVLM `chat_history_to_prompt`
+        # template: CogVLM `chat_old_history_to_prompt`
         # just for viewing, don't tokenize it directly
+        user_start = 'Answer:'
+        sys_start = 'Question:'
         text = '\n'.join(
-            f'{tokenizer.usr_token} {query} {tokenizer.sys_token} {answer}'
+            f'{user_start} {query} {sys_start} {answer}'
             for query, answer in conversation
         )
         dtype = torch.long
         text_ids = []
         lm_targets = []
         for query, answer in conversation:
-            prompt = f'{tokenizer.usr_token} {query} {tokenizer.sys_token}'
+            prompt = f'{user_start} {query} {sys_start}'
             prompt_ids = torch.tensor(tokenizer.encode(prompt, add_special_tokens=False))
             answer_ids = torch.tensor(tokenizer.encode(answer, add_special_tokens=False))
             text_ids.append(torch.cat([prompt_ids, answer_ids]))
@@ -176,7 +178,7 @@ class SamplePatch(mt.RandomizableTransform):
         # sample negative classes
         neg_class_ids, = (~positive_mask).nonzero()
         neg_classes = [all_pos_classes[i] for i in neg_class_ids] + meta['negative_classes']
-        neg_class_ids = self.R.choice(min(len(neg_classes), self.num_neg), self.num_neg, replace=False)
+        neg_class_ids = self.R.choice(len(neg_classes), min(len(neg_classes), self.num_neg), replace=False)
         neg_classes = [neg_classes[i] for i in neg_class_ids]
 
         # sample positive classes
@@ -214,6 +216,7 @@ class SamplePatch(mt.RandomizableTransform):
 
         vlm_inputs, conversation_text = self.prepare_vlm_inputs(conversation)
         data = {
+            'key': key,
             'image': image,
             'modality': modality,
             'masks': masks,
@@ -250,6 +253,8 @@ class MMMMDataModule(ExpDataModuleBase):
         self._train_data = []
         self.trans_conf = trans
         for dataset_dir in data_root.iterdir():
+            if dataset_dir.name != 'AMOS22':
+                continue
             dataset_meta: pd.DataFrame = pd.read_pickle(dataset_dir / 'meta.pkl')
             self._train_data.extend([
                 {
@@ -275,7 +280,7 @@ class MMMMDataModule(ExpDataModuleBase):
         from luolib.data.utils import list_data_collate
 
         def collate_fn(batch: list[dict]):
-            list_data = {key: [] for key in ['masks', 'modality']}
+            list_data = {key: [] for key in ['key', 'masks', 'modality']}
             batch_vlm_inputs: list[dict] = []
             for x in batch:
                 for key, data in list_data.items():
