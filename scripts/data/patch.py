@@ -31,7 +31,7 @@ def process_case(dataset_dir: Path, key: str):
     case_dir = dataset_dir / 'data' / key
     masks = torch.as_tensor(np.load(case_dir / 'masks.npy'), device=get_cuda_device())
     patches_sum = []
-    # TODO: only process positive classes
+    dtype = torch.int32 if masks[0].numel() < torch.iinfo(torch.int32).max else torch.int64
     mask_sizes = masks.new_empty((masks.shape[0], 1, 1, 1), dtype=dtype)
     for i in range(0, masks.shape[0], mask_batch_size):
         batch = masks[i:i + mask_batch_size]
@@ -72,7 +72,7 @@ def process_dataset(dataset_dir: Path):
     )
 
 def main():
-    process_dataset(PROCESSED_SEG_DATA_ROOT / 'TotalSegmentator')
+    process_dataset(PROCESSED_SEG_DATA_ROOT / 'AMOS22')
     # for dataset_dir in PROCESSED_SEG_DATA_ROOT.iterdir():
     #     print(dataset_dir.name)
 
