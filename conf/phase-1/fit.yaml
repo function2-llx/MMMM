@@ -2,7 +2,7 @@ data: data.yaml
 tokenizer: ../tokenizer.yaml
 logger: logger.yaml
 trainer:
-  max_steps: 10000
+  max_steps: 80000
   log_every_n_steps: 10
   precision: bf16-true
   gradient_clip_val: 10
@@ -11,7 +11,7 @@ trainer:
   callbacks:
   - class_path: luolib.lightning.callbacks.ModelCheckpoint
     init_args:
-      every_n_train_steps: 200
+      every_n_train_steps: 1000
       filename: "{step}"
       save_top_k: -1
       save_last: true
