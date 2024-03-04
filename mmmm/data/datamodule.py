@@ -159,7 +159,7 @@ class SamplePatch(mt.RandomizableTransform):
         patch_dir = dataset_dir / 'patch' / encode_patch_size(self.patch_size) / key
         # all positive classes on the whole image
         image_pos_classes = meta['positive_classes']
-        patches_pos_class_mask: npt.NDArray[np.bool_] = np.load(patch_dir / 'positive_mask.npy', 'r')
+        patches_class_mask: npt.NDArray[np.bool_] = np.load(patch_dir / 'patches_class_mask.npy', 'r')
 
         # sample patch position
         position: npt.NDArray[np.int16]
@@ -172,8 +172,8 @@ class SamplePatch(mt.RandomizableTransform):
         else:
             # sample a random patch position
             c = None
-            position = np.array([self.R.randint(s) for s in patches_pos_class_mask.shape[:-1]], dtype=np.int16)
-        pos_class_mask = np.array(patches_pos_class_mask[*position, :])
+            position = np.array([self.R.randint(s) for s in patches_class_mask.shape[:-1]], dtype=np.int16)
+        pos_class_mask = np.array(patches_class_mask[*position, :])
 
         # sample negative classes
         neg_class_ids, = (~pos_class_mask).nonzero()

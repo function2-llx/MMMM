@@ -30,19 +30,20 @@ def _get_center_slices(shape: tuple3_t[int]):
 def process_case(dataset_dir: Path, key: str):
     case_dir = dataset_dir / 'data' / key
     masks = torch.as_tensor(np.load(case_dir / 'masks.npy'), device=get_cuda_device())
-    patch_sum = []
-    dtype = torch.int32 if masks[0].numel() < torch.iinfo(torch.int32).max else torch.int64
+    patches_sum = []
+    # TODO: only process positive classes
     mask_sizes = masks.new_empty((masks.shape[0], 1, 1, 1), dtype=dtype)
     for i in range(0, masks.shape[0], mask_batch_size):
         batch = masks[i:i + mask_batch_size]
         mask_sizes[i:i + mask_batch_size] = batch.sum(dim=(1, 2, 3), keepdim=True, dtype=dtype)
-        patch_sum.append(lt.sliding_window_sum(batch, patch_size, dtype))
-    patch_sum = torch.cat(patch_sum)
+        patches_sum.append(lt.sliding_window_sum(batch, patch_size, dtype))
+    patches_sum = torch.cat(patches_sum)
     # a patch is "significant" for a class iff any:
     # - contains at least 80% voxels of this class
     # - center voxel is this class
-    significant_mask = (patch_sum > (mask_sizes * 0.8)) | masks[:, *_get_center_slices(masks.shape[1:])]
-    positive_mask = patch_sum > 0
+    significant_mask = (patches_sum > (mask_sizes * 0.8)) | masks[:, *_get_center_slices(masks.shape[1:])]
+    patches_class_mask = patches_sum > 0
+
     save_dir = dataset_dir / 'patch' / encode_patch_size(patch_size) / f'.{key}'
     save_dir.mkdir(exist_ok=True, parents=True)
     with h5py.File(save_dir / 'class_positions.h5', 'w') as f:
@@ -51,13 +52,13 @@ def process_case(dataset_dir: Path, key: str):
                 positions = significant_mask[i].nonzero().short()
             else:
                 # no position is significant for this class according to previous rules, use the 80% percentile instead
-                class_significant_mask = patch_sum[i] >= lt.quantile(patch_sum[i][patch_sum[i] > 0], 0.8)
+                class_significant_mask = patches_sum[i] >= lt.quantile(patches_sum[i][patches_sum[i] > 0], 0.8)
                 positions = class_significant_mask.nonzero().short()
             assert positions.shape[0] > 0
             f.create_dataset(str(i), data=positions.cpu().numpy())
     # convert to channel last for efficient (position -> class) query
-    positive_mask = einops.rearrange(positive_mask, 'c ... -> ... c')
-    np.save(save_dir / 'positive_mask.npy', positive_mask.cpu().numpy())
+    patches_class_mask = einops.rearrange(patches_class_mask, 'c ... -> ... c')
+    np.save(save_dir / 'patches_class_mask.npy', patches_class_mask.cpu().numpy())
     save_dir.rename(save_dir.with_name(key))
 
 def process_dataset(dataset_dir: Path):

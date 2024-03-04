@@ -223,6 +223,7 @@ class Processor(ABC):
         """
         self.key = key = data_point.key
         try:
+            # TODO: control images.dtype
             modalities, images = self.load_images(data_point)
             is_natural = is_natural_modality(modalities[0])
             assert all(is_natural == is_natural_modality(modality) for modality in modalities[1:])
