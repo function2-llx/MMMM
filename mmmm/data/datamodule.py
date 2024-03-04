@@ -158,38 +158,40 @@ class SamplePatch(mt.RandomizableTransform):
         meta: Meta = data['meta']
         patch_dir = dataset_dir / 'patch' / encode_patch_size(self.patch_size) / key
         # all positive classes on the whole image
-        all_pos_classes = meta['positive_classes']
-        positive_mask: npt.NDArray[np.bool_] = np.load(patch_dir / 'positive_mask.npy', 'r')
+        image_pos_classes = meta['positive_classes']
+        patches_pos_class_mask: npt.NDArray[np.bool_] = np.load(patch_dir / 'positive_mask.npy', 'r')
 
         # sample patch position
         position: npt.NDArray[np.int16]
         if self.R.uniform() < self.force_fg_ratio:
             # foreground oversampling
-            c = self.R.randint(len(all_pos_classes))
+            c = self.R.randint(len(image_pos_classes))
             with h5py.File(patch_dir / 'class_positions.h5') as f:
                 positions: h5py.Dataset = f[str(c)]
                 position = positions[self.R.randint(positions.shape[0])]
         else:
             # sample a random patch position
             c = None
-            position = np.array([self.R.randint(s) for s in positive_mask.shape[:-1]], dtype=np.int16)
-        positive_mask = np.array(positive_mask[*position, :])
+            position = np.array([self.R.randint(s) for s in patches_pos_class_mask.shape[:-1]], dtype=np.int16)
+        pos_class_mask = np.array(patches_pos_class_mask[*position, :])
 
         # sample negative classes
-        neg_class_ids, = (~positive_mask).nonzero()
-        neg_classes = [all_pos_classes[i] for i in neg_class_ids] + meta['negative_classes']
-        neg_class_ids = self.R.choice(len(neg_classes), min(len(neg_classes), self.num_neg), replace=False)
-        neg_classes = [neg_classes[i] for i in neg_class_ids]
+        neg_class_ids, = (~pos_class_mask).nonzero()
+        # all negative classes for this patch:
+        # - positive classes in the whole image but not in this patch
+        # - negative classes for the whole image
+        neg_classes: list[str] = [image_pos_classes[i] for i in neg_class_ids] + meta['negative_classes']
+        neg_classes = self.R.choice(neg_classes, min(len(neg_classes), self.num_neg), replace=False).tolist()
 
         # sample positive classes
         if c is not None:
-            positive_mask[c] = False
-        pos_class_ids, = positive_mask.nonzero()
+            pos_class_mask[c] = False
+        pos_class_ids, = pos_class_mask.nonzero()
         num_pos = self.num_pos - (c is not None)
         pos_class_ids = self.R.choice(pos_class_ids, min(pos_class_ids.shape[0], num_pos), replace=False)
         if c is not None:
-            pos_class_ids = np.insert(pos_class_ids, self.R.randint(pos_class_ids.shape[0] + 1), c)
-        pos_classes = [all_pos_classes[i] for i in pos_class_ids]
+            pos_class_ids = np.insert(pos_class_ids, 0, c)
+        pos_classes: list[str] = [image_pos_classes[i] for i in pos_class_ids]
 
         # construct image & masks patch
         data_dir = dataset_dir / 'data' / key
@@ -220,8 +222,10 @@ class SamplePatch(mt.RandomizableTransform):
             'image': image,
             'modality': modality,
             'masks': masks,
+            'mask_classes': mask_classes,
             'vlm_inputs': vlm_inputs,
         }
+        # TODO: pad minimum value (-mean / std)
         return self.pad_image(data)
 
 class InputTransformD(mt.Transform):
@@ -266,7 +270,7 @@ class MMMMDataModule(ExpDataModuleBase):
             ])
 
     def train_data(self) -> Sequence:
-        # FIXME use a list as dataset with Python's multiprocessing can cause "memory leak": https://github.com/pytorch/pytorch/issues/13246
+        # FIXME: use a list as dataset with Python's multiprocessing can cause "memory leak": https://github.com/pytorch/pytorch/issues/13246
         return self._train_data
 
     def train_transform(self) -> Callable:
