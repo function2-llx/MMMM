@@ -130,10 +130,13 @@ class SamplePatch(mt.RandomizableTransform):
             torch.full((num_vision_tokens, ), 0),
             text_ids,
         ])
+        image_features_mask = torch.zeros(input_ids.shape[0], dtype=torch.bool)
+        image_features_mask[1:1 + num_vision_tokens] = True
         token_type_ids = torch.cat([
             torch.tensor([LANGUAGE_TOKEN_TYPE]),
             torch.full((num_vision_tokens, ), VISION_TOKEN_TYPE),
-            torch.full(text_ids.shape, LANGUAGE_TOKEN_TYPE),
+            # all new tokens will be processed by VE
+            torch.where(text_ids < tokenizer.base_vocab_size, LANGUAGE_TOKEN_TYPE, VISION_TOKEN_TYPE),
         ])
         position_ids = torch.cat([
             torch.tensor([0, 1]),  # bos and boi
@@ -145,6 +148,7 @@ class SamplePatch(mt.RandomizableTransform):
         lm_targets = torch.cat([torch.full((1 + num_vision_tokens, ), CE_IGNORE_INDEX), lm_targets])
         return {
             'input_ids': input_ids,
+            'image_features_mask': image_features_mask,
             'token_type_ids': token_type_ids,
             'position_ids': position_ids,
             'attention_mask': attention_mask,
@@ -213,15 +217,14 @@ class SamplePatch(mt.RandomizableTransform):
                 masks[i] = pos_masks[pos_idx]
 
         vlm_inputs, conversation_text = self.prepare_vlm_inputs(conversation)
-        if image.shape < self.patch_size:
+        if np.less(image.shape[1:], self.patch_size).any():
             mean, std = meta['mean'], meta['std']
-            padder = mt.SpatialPad(self.patch_size, lazy=True)
+            padder = mt.SpatialPad(self.patch_size)
             image = torch.cat([
                 padder(image[i:i + 1], value=-mean[i] / std[i])
                 for i in range(image.shape[0])
             ])
             masks = padder(masks)
-        torch.nn.functional.pad()
         data = {
             'key': key,
             'image': image,
@@ -235,10 +238,16 @@ class SamplePatch(mt.RandomizableTransform):
 class InputTransformD(mt.Transform):
     def __call__(self, data: dict):
         data = dict(data)
-        img: MetaTensor = data['image']
-        data['image'], _ = ensure_rgb(img.as_tensor())
-        masks: MetaTensor = data['masks']
-        data['masks'] = masks.as_tensor().round().bool()
+        img = data['image']
+        if isinstance(img, MetaTensor):
+            img = img.as_tensor()
+        data['image'], _ = ensure_rgb(img)
+        masks = data['masks']
+        if isinstance(masks, MetaTensor):
+            masks = masks.as_tensor()
+        if masks.dtype != torch.bool:
+            masks = masks.round().bool()
+        data['masks'] = masks
         return data
 
 @dataclass

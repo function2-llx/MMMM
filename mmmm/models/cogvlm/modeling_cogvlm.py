@@ -2,12 +2,12 @@
 import warnings
 from typing import TYPE_CHECKING, Optional, Tuple, List, Union, Literal, Dict, Any
 
+import einops
 import math
 import torch
 from torch import nn
 from torch.nn import functional as F
 from torchvision import transforms
-from einops import rearrange
 
 from transformers import PreTrainedModel, PreTrainedTokenizer
 from transformers.utils.logging import get_logger
@@ -15,6 +15,7 @@ from transformers.activations import ACT2FN
 from transformers.modeling_outputs import BaseModelOutputWithPast, CausalLMOutputWithPast
 
 from luolib.models.utils import forward_gc
+
 from mmmm.utils import apply_prefix, get_lora_modules_default
 from .configuration_cogvlm import CogVLMConfig
 from .visual import EVA2CLIPModel
@@ -26,6 +27,7 @@ logger = get_logger(__name__)
 
 LANGUAGE_TOKEN_TYPE = 0
 VISION_TOKEN_TYPE = 1
+"""tokens of `VISION_TOKEN_TYPE` will be processed by VE"""
 
 
 # Copied from transformers.models.bart.modeling_bart._make_causal_mask
@@ -89,13 +91,13 @@ class MLP(nn.Module):
         down_proj = self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
         return down_proj
 
-
 def get_expert_mask(token_type_ids: "torch.LongTensor(B, L)") -> "[torch.BoolTensor(B, L), torch.BoolTensor(B, L)]":
-    vision_token_mask = torch.zeros_like(token_type_ids, dtype=torch.bool)
-    vision_token_mask[:, :-1] = (token_type_ids[:, :-1] == VISION_TOKEN_TYPE) & (token_type_ids[:, 1:] == VISION_TOKEN_TYPE)
+    # Why????
+    # vision_token_mask = torch.zeros_like(token_type_ids, dtype=torch.bool)
+    # vision_token_mask[:, :-1] = (token_type_ids[:, :-1] == VISION_TOKEN_TYPE) & (token_type_ids[:, 1:] == VISION_TOKEN_TYPE)
+    vision_token_mask = token_type_ids == VISION_TOKEN_TYPE
     language_token_mask = ~vision_token_mask
     return vision_token_mask, language_token_mask
-
 
 class VisionExpertMLP(nn.Module):
     def __init__(self, config):
@@ -430,6 +432,7 @@ class CogVLMModel(CogVLMPreTrainedModel):
         input_ids: torch.LongTensor = None,
         image: torch.Tensor | None = None,
         token_type_ids: Optional[torch.LongTensor] = None,
+        image_features_mask: torch.BoolTensor | None = None,
         attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
         past_key_values: Optional[List[torch.FloatTensor]] = None,
@@ -445,19 +448,18 @@ class CogVLMModel(CogVLMPreTrainedModel):
             pass  # generate mode with past_key_values. the image features are already mapped
         else:
             # not allow for inputs_embeds, because we want to process image feature
-            assert input_ids is not None and inputs_embeds is None, f"{input_ids} {inputs_embeds}"
+            assert input_ids is not None and inputs_embeds is None
             if image is not None:  # multi-modality
                 assert token_type_ids is not None, f"multi-modality requires `token_type_ids`!"
-                assert len(input_ids) == len(image), f"{len(input_ids)} {len(image)}"
+                assert image_features_mask is not None
+                assert len(input_ids) == len(image), f"batch size mismatch: {len(input_ids)} {len(image)}"
                 inputs_embeds = self.embed_tokens(input_ids)
                 images_features = self.vision(image)
-                images_features = rearrange(images_features, 'b n d -> (b n) d')
-                images_features = images_features.to(dtype=inputs_embeds.dtype, device=inputs_embeds.device)
-                inputs_embeds = inputs_embeds.index_put([token_type_ids == VISION_TOKEN_TYPE], images_features)
+                inputs_embeds[image_features_mask] = einops.rearrange(images_features, 'n l d -> (n l) d')
             else:  # single-modality
                 if token_type_ids is None:
                     token_type_ids = torch.ones_like(input_ids, dtype=torch.long, device=input_ids.device) * LANGUAGE_TOKEN_TYPE
-                assert not (token_type_ids == VISION_TOKEN_TYPE).any(), f"{(token_type_ids == VISION_TOKEN_TYPE).sum()}"
+                assert not (token_type_ids == VISION_TOKEN_TYPE).any(), f"unexpected vision tokens for single-modality: {(token_type_ids == VISION_TOKEN_TYPE).sum()}"
                 inputs_embeds = self.embed_tokens(input_ids)
 
             if position_ids is None:
@@ -673,6 +675,7 @@ class CogVLMForCausalLM(CogVLMPreTrainedModel):
     def forward(
         self,
         input_ids: torch.LongTensor = None,
+        image_features_mask: torch.BoolTensor | None = None,
         image: torch.Tensor = None,
         token_type_ids: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
@@ -695,6 +698,7 @@ class CogVLMForCausalLM(CogVLMPreTrainedModel):
         output: BaseModelOutputWithPast = self.model(
             input_ids=input_ids,
             image=image,
+            image_features_mask=image_features_mask,
             token_type_ids=token_type_ids,
             attention_mask=attention_mask,
             position_ids=position_ids,
