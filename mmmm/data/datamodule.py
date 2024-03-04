@@ -45,7 +45,6 @@ class SamplePatch(mt.RandomizableTransform):
         self.tokenizer = tokenizer
         self.force_fg_ratio = force_fg_ratio
         self.device = device
-        self.pad_image = mt.SpatialPadD(['image', 'masks'], patch_size, lazy=True)
 
     def gen_conversation(self, modality: str, pos_classes: list[str], neg_classes: list[str]):
         def _convert_list(names: Iterable[str], mask: bool):
@@ -99,8 +98,8 @@ class SamplePatch(mt.RandomizableTransform):
         tokenizer = self.tokenizer
         # template: CogVLM `chat_old_history_to_prompt`
         # just for viewing, don't tokenize it directly
-        user_start = 'Answer:'
-        sys_start = 'Question:'
+        user_start = 'Question:'
+        sys_start = 'Answer:'
         text = '\n'.join(
             f'{user_start} {query} {sys_start} {answer}'
             for query, answer in conversation
@@ -197,10 +196,7 @@ class SamplePatch(mt.RandomizableTransform):
         data_dir = dataset_dir / 'data' / key
         modalities = meta['modalities']
         modality_id = self.R.randint(len(modalities))
-        patch_slice = [
-            slice(p, p + s)
-            for p, s in zip(position, self.patch_size)
-        ]
+        patch_slice = [slice(p, p + s) for p, s in zip(position, self.patch_size)]
         image = np.load(data_dir / 'images.npy', 'r')[modality_id:modality_id + 1, *patch_slice]
         image = torch.as_tensor(np.array(image), device=self.device)
         pos_masks = np.load(data_dir / 'masks.npy', 'r')[:, *patch_slice]
@@ -217,6 +213,15 @@ class SamplePatch(mt.RandomizableTransform):
                 masks[i] = pos_masks[pos_idx]
 
         vlm_inputs, conversation_text = self.prepare_vlm_inputs(conversation)
+        if image.shape < self.patch_size:
+            mean, std = meta['mean'], meta['std']
+            padder = mt.SpatialPad(self.patch_size, lazy=True)
+            image = torch.cat([
+                padder(image[i:i + 1], value=-mean[i] / std[i])
+                for i in range(image.shape[0])
+            ])
+            masks = padder(masks)
+        torch.nn.functional.pad()
         data = {
             'key': key,
             'image': image,
@@ -225,8 +230,7 @@ class SamplePatch(mt.RandomizableTransform):
             'mask_classes': mask_classes,
             'vlm_inputs': vlm_inputs,
         }
-        # TODO: pad minimum value (-mean / std)
-        return self.pad_image(data)
+        return data
 
 class InputTransformD(mt.Transform):
     def __call__(self, data: dict):
@@ -284,7 +288,7 @@ class MMMMDataModule(ExpDataModuleBase):
         from luolib.data.utils import list_data_collate
 
         def collate_fn(batch: list[dict]):
-            list_data = {key: [] for key in ['key', 'masks', 'modality']}
+            list_data = {key: [] for key in ['key', 'mask_classes', 'masks', 'modality']}
             batch_vlm_inputs: list[dict] = []
             for x in batch:
                 for key, data in list_data.items():
