@@ -21,7 +21,7 @@ from monai.data import MetaTensor
 from monai import transforms as mt
 from monai.utils import GridSampleMode
 
-from mmmm.data.defs import ORIGIN_SEG_DATA_ROOT, PROCESSED_SEG_DATA_ROOT
+from mmmm.data.defs import Meta, ORIGIN_SEG_DATA_ROOT, PROCESSED_SEG_DATA_ROOT
 from mmmm.data.seg_tax import SegClass
 
 ImageLoader: type = Callable[[Path], MetaTensor]
@@ -261,7 +261,7 @@ class Processor(ABC):
             save_dir = self.output_root / 'data' / key
             save_dir.mkdir(exist_ok=True, parents=True)
             # for modality, image in images.items():
-            images = self.normalize_image(images, is_natural, new_shape)
+            images, mean, std = self.normalize_image(images, is_natural, new_shape)
             np.save(save_dir / f'images.npy', images.cpu().numpy().astype(np.float16))
             masks = self.resize_masks(masks, new_shape)
             positive_mask: torch.BoolTensor = einops.reduce(masks > 0, 'c ... -> c', 'any')
@@ -270,10 +270,12 @@ class Processor(ABC):
             positive_classes = [name for i, name in enumerate(classes) if positive_mask[i]]
             negative_classes = [name for i, name in enumerate(classes) if not positive_mask[i]]
             # TODO: save mask sizes
-            meta = {
+            meta: Meta = {
                 'key': data_point.key,
                 'spacing': new_spacing,
                 'shape': new_shape,
+                'mean': mean.cpu().numpy(),
+                'std': std.cpu().numpy(),
                 'modalities': modalities,
                 'positive_classes': positive_classes,
                 'negative_classes': negative_classes,
@@ -323,7 +325,7 @@ class Processor(ABC):
                 mean[i] = fg.mean()
                 std[i] = fg.std()
         images = (images - mean) / std
-        return images
+        return images, mean[:, 0, 0, 0], std[:, 0, 0, 0]
 
     def resize_masks(self, masks: torch.BoolTensor, new_shape: npt.NDArray[np.int32]) -> torch.BoolTensor:
         new_shape = tuple(new_shape.tolist())

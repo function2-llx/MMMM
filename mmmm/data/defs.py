@@ -15,6 +15,8 @@ PROCESSED_SEG_DATA_ROOT = PROCESSED_DATA_ROOT / 'image'
 class Meta(TypedDict):
     spacing: npt.NDArray[np.float64]
     shape: npt.NDArray[np.int32]
+    mean: npt.NDArray[np.floating]
+    std: npt.NDArray[np.floating]
     modalities: list[str]
     positive_classes: list[str]
     negative_classes: list[str]
