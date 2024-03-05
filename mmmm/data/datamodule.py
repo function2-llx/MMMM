@@ -136,7 +136,8 @@ class SamplePatch(mt.RandomizableTransform):
             torch.tensor([LANGUAGE_TOKEN_TYPE]),
             torch.full((num_vision_tokens, ), VISION_TOKEN_TYPE),
             # all new tokens will be processed by VE
-            torch.where(text_ids < tokenizer.base_vocab_size, LANGUAGE_TOKEN_TYPE, VISION_TOKEN_TYPE),
+            # torch.where(text_ids < tokenizer.base_vocab_size, LANGUAGE_TOKEN_TYPE, VISION_TOKEN_TYPE),
+            torch.full((text_ids.shape[0], ), LANGUAGE_TOKEN_TYPE),
         ])
         position_ids = torch.cat([
             torch.tensor([0, 1]),  # bos and boi
