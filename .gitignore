@@ -163,3 +163,4 @@ cython_debug/
 /archive
 /pre-trained
 /output
+/nnUNet-data

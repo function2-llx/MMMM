@@ -1,14 +1,14 @@
 from lightning.pytorch.cli import LightningArgumentParser
 from peft import LoraConfig, get_peft_model
 
-from luolib.lightning.cli import LightningCLI as CLIBase
+from luolib.lightning.cli import LightningCLI
 from luolib.lightning.trainer import PeftTrainer
 
 from mmmm.data import MMMMDataModule
 from mmmm.models import MMMMForCausalLM, MMMMTokenizer
 from mmmm.utils import get_lora_modules_default
 
-class CLI(CLIBase):
+class CLI(LightningCLI):
     model: MMMMForCausalLM
 
     def add_arguments_to_parser(self, parser: LightningArgumentParser):
@@ -25,7 +25,7 @@ class CLI(CLIBase):
         config = self.config_init[self.subcommand]
         lora_config: LoraConfig = config.lora
         lora_config.target_modules, lora_config.modules_to_save = get_lora_modules_default(model)
-        model.peft_model = get_peft_model(model, lora_config)
+        model.set_peft_model(get_peft_model(model, lora_config))
 
 def main():
     CLI(

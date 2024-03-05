@@ -15,7 +15,7 @@ class SamArgs:
     pt_pos_embed_shape: tuple3_t[int] | None = None
     checkpoint: Path | None = None
 
-def build_sam_vit_3d(args: SamArgs):
+def build_sam_vit_3d(args: SamArgs) -> Sam:
     return _build_sam(
         embed_dim=768,
         encoder_num_layers=12,
@@ -28,7 +28,7 @@ def _build_sam(
     encoder_num_layers: int,
     num_heads: int,
     args: SamArgs,
-):
+) -> Sam:
     mlp_ratio = 4
     mlp_dim = embed_dim * mlp_ratio
     dropout_rate = 0.0
