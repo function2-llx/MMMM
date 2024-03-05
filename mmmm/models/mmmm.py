@@ -182,8 +182,9 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         # SAM part
         masks_logits = self._generate_and_postprocess_masks(
             grounding_enc_image,
-            vlm_output.hidden_states[-1],
-            input_ids == self.seg_token_id,
+            vlm_output.hidden_states[-1][:, :-1],
+            # shift as suggested by GLaMM: https://github.com/mbzuai-oryx/groundingLMM/issues/16
+            input_ids[:, 1:] == self.seg_token_id,
         )
         mask_loss = None if masks is None else self._compute_mask_loss(masks_logits, masks)
         return MMMMOutputWithPast(
