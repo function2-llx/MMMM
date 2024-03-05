@@ -101,6 +101,7 @@ class DataModule(ExpDataModuleBase):
         return mt.Compose(
             [
                 lt.nnUNetLoaderD('case', self.data_dir, unravel_class_locations=True),
+                mt.SpatialPadD(['img', 'seg'], self.patch_size),
                 lt.OneOf(
                     [
                         mt.RandSpatialCropD(['img', 'seg'], self.patch_size, random_center=True, random_size=False),
@@ -115,7 +116,6 @@ class DataModule(ExpDataModuleBase):
                     ],
                     weights=(2, 1),
                 ),
-                mt.SpatialPadD(['img', 'seg'], self.patch_size),
                 InputTransformD(self.num_fg_classes),
             ],
         )
