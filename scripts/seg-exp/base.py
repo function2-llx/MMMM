@@ -86,6 +86,7 @@ class DataModule(ExpDataModuleBase):
         R = np.random.RandomState(42)
         R.shuffle(ret)
         assert len(ret) == 360
+        ret = ret[:120]  # guess why
         return ret
 
     def train_data(self):

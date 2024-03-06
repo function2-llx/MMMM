@@ -20,11 +20,14 @@ class SAMForSemanticSeg(PreTrainedModel, SemanticSegModel):
         *,
         num_fg_classes: int = 15,
         sam: SamArgs,
+        freeze_sam: bool = False,
         hidden_size: int = 768,
         **kwargs,
     ):
         super().__init__(PretrainedConfig(), **kwargs)  # make HF happy
         self.sam = build_sam_vit_3d(sam)
+        if freeze_sam:
+            self.requires_grad_(False)
         self.cls_embeds = NoWeightDecayParameter(torch.randn(num_fg_classes, hidden_size))
         self.loss = DiceFocalLoss()
 
