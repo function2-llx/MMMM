@@ -1,7 +1,7 @@
 logger:
   class_path: lightning.pytorch.loggers.WandbLogger
   init_args:
-    name: sam
+    name: sam4
     save_dir: output/seg-exp
     project: MMMM
 data:
@@ -36,7 +36,7 @@ optimization:
 - optimizer:
     class_path: torch.optim.AdamW
     init_args:
-      lr: 5e-5
+      lr: 1e-4
       weight_decay: 5e-2
   lr_scheduler:
     scheduler:

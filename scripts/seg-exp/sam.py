@@ -22,6 +22,7 @@ class SAMForSemanticSeg(PreTrainedModel, SemanticSegModel):
         sam: SamArgs,
         freeze_sam: bool = False,
         hidden_size: int = 768,
+        lambda_focal: float = 1.,
         **kwargs,
     ):
         super().__init__(PretrainedConfig(), **kwargs)  # make HF happy
@@ -29,7 +30,7 @@ class SAMForSemanticSeg(PreTrainedModel, SemanticSegModel):
         if freeze_sam:
             self.requires_grad_(False)
         self.cls_embeds = NoWeightDecayParameter(torch.randn(num_fg_classes, hidden_size))
-        self.loss = DiceFocalLoss()
+        self.loss = DiceFocalLoss(lambda_focal=lambda_focal)
 
     def on_fit_start(self) -> None:
         super().on_fit_start()
