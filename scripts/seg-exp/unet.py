@@ -29,27 +29,11 @@ class UNetForSemanticSeg(PreTrainedModel, SemanticSegModel):
         super().on_fit_start()
         self.gradient_checkpointing_enable({'use_reentrant': False})
 
-    def training_step(self, batch: dict, *args: ..., **kwargs: ...):
-        image = batch['img']
+    def forward(self, image: torch.Tensor) -> torch.Tensor:
         feature_maps: list[torch.Tensor] = self.backbone(image)
         feature_maps = self.decoder(feature_maps)
         masks_logits = self.seg_head(feature_maps[0])
-        mask_loss = self.loss(masks_logits, batch['seg'])
-        dice_loss = mask_loss['dice']
-        self.log_dict({
-            f'train/dice/{self.class_names[i]}': (1 - dice_loss[i]) * 100
-            for i in range(dice_loss.shape[0])
-        })
-        mask_loss_reduced = {
-            k: v.mean()
-            for k, v in self.loss(masks_logits, batch['seg']).items()
-        }
-        loss = mask_loss_reduced['total']
-        self.log_dict({
-            'train/loss': loss,
-            **{f'train/{k}_loss': v for k, v in mask_loss_reduced.items() if k != 'total'},
-        })
-        return loss
+        return masks_logits
 
 class CLI(LightningCLI):
     pass

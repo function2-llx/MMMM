@@ -97,13 +97,29 @@ class DataModule(ExpDataModuleBase):
 class SemanticSegModel(LightningModule):
     datamodule: DataModule
 
-    @property
-    def class_names(self):
-        return self.datamodule.class_names
-
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.dice_metric = DiceMetric()
+
+    def training_step(self, batch: dict, *args: ..., **kwargs: ...):
+        image = batch['img']
+        masks_logits = self(image)
+        mask_loss = self.loss(masks_logits, batch['seg'])
+        dice_loss = mask_loss['dice']
+        self.log_dict({
+            f'train/dice/{self.class_names[i]}': (1 - dice_loss[i]) * 100
+            for i in range(dice_loss.shape[0])
+        })
+        mask_loss_reduced = {
+            k: v.mean()
+            for k, v in mask_loss.items()
+        }
+        loss = mask_loss_reduced['total']
+        self.log_dict({
+            'train/loss': loss,
+            **{f'train/{k}_loss': v for k, v in mask_loss_reduced.items() if k != 'total'},
+        })
+        return loss
 
     def on_validation_epoch_start(self) -> None:
         self.dice_metric.reset()
@@ -125,5 +141,5 @@ class SemanticSegModel(LightningModule):
     def on_validation_epoch_end(self) -> None:
         dice = self.dice_metric.aggregate(MetricReduction.MEAN_BATCH) * 100
         for i in range(dice.shape[0]):
-            self.log(f'val/dice/{class_names[i]}', dice[i])
+            self.log(f'val/dice/{self.datamodule.class_names[i]}', dice[i])
         self.log(f'val/dice/avg', dice.mean())
