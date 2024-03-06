@@ -12,6 +12,7 @@ class SamArgs:
     pos_embed_shape: tuple3_t[int]
     pt_in_channels: int | None = None
     pt_patch_size: tuple3_t[int] | None = None
+    patch_size: tuple3_t[int] | int = 16
     pt_pos_embed_shape: tuple3_t[int] | None = None
     checkpoint: Path | None = None
     text_sim: bool = True
@@ -38,7 +39,7 @@ def _build_sam(
         image_encoder=ImageEncoderViT(
             in_channels=3,
             pos_embed_shape=args.pos_embed_shape,
-            patch_size=16,
+            patch_size=args.patch_size,
             hidden_size=embed_dim,
             mlp_dim=mlp_dim,
             num_layers=encoder_num_layers,

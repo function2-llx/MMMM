@@ -5,16 +5,18 @@ logger:
     save_dir: output/seg-exp
     project: MMMM
 data:
-  patch_size: [96, 224, 224]
+  patch_size: [64, 256, 256]
   dataloader:
     train_batch_size: 8
 model:
   sam:
-    pos_embed_shape: [6, 14, 14]
+    patch_size: [4, 16, 16]
+    pos_embed_shape: [16, 16, 16]
     pt_in_channels: 1
     pt_patch_size: [4, 16, 16]
     pt_pos_embed_shape: [8, 16, 16]
     checkpoint: pre-trained/SegVol_v1.pth
+    text_sim: false
 trainer:
   max_steps: 60000
   val_check_interval: 100
