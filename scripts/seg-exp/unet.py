@@ -1,20 +1,14 @@
-import einops
 import torch
 from torch import nn
-from torch.nn import functional as nnf
 from transformers import PreTrainedModel, PretrainedConfig
 
-from luolib.lightning import LightningModule
 from luolib.lightning.cli import LightningCLI
 from luolib.models import PlainConvUNetDecoder, UNetBackbone
-from luolib.models.param import NoWeightDecayParameter
-
 from mmmm.models.mmmm import DiceFocalLoss
-from mmmm.models.segvol import SamArgs, build_sam_vit_3d
 
-from datamodule import DataModule
+from base import DataModule, SemanticSegModel
 
-class UNetForSemanticSeg(PreTrainedModel, LightningModule):
+class UNetForSemanticSeg(PreTrainedModel, SemanticSegModel):
     supports_gradient_checkpointing: bool = True
 
     def __init__(
@@ -40,14 +34,20 @@ class UNetForSemanticSeg(PreTrainedModel, LightningModule):
         feature_maps: list[torch.Tensor] = self.backbone(image)
         feature_maps = self.decoder(feature_maps)
         masks_logits = self.seg_head(feature_maps[0])
-        mask_loss = {
+        mask_loss = self.loss(masks_logits, batch['seg'])
+        dice_loss = mask_loss['dice']
+        self.log_dict({
+            f'train/dice/{self.class_names[i]}': (1 - dice_loss[i]) * 100
+            for i in range(dice_loss.shape[0])
+        })
+        mask_loss_reduced = {
             k: v.mean()
             for k, v in self.loss(masks_logits, batch['seg']).items()
         }
-        loss = mask_loss['total']
+        loss = mask_loss_reduced['total']
         self.log_dict({
             'train/loss': loss,
-            **{f'train/{k}_loss': v for k, v in mask_loss.items() if k != 'total'},
+            **{f'train/{k}_loss': v for k, v in mask_loss_reduced.items() if k != 'total'},
         })
         return loss
 

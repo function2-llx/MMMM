@@ -1,8 +1,8 @@
 logger:
   class_path: lightning.pytorch.loggers.WandbLogger
   init_args:
-    name: sam-exp
-    save_dir: output/sam-exp
+    name: sam
+    save_dir: output/seg-exp
     project: MMMM
 data:
   patch_size: [96, 224, 224]
@@ -17,6 +17,7 @@ model:
     checkpoint: pre-trained/SegVol_v1.pth
 trainer:
   max_steps: 60000
+  val_check_interval: 100
   log_every_n_steps: 10
   precision: bf16-true
   gradient_clip_val: 10

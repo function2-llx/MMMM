@@ -177,7 +177,7 @@ class MaskDecoder(nn.Module):
         masks = (hyper_in @ upscaled_embedding.view(b, c, h * w * d)).view(b, -1, h, w, d)
         # masks = einops.einsum(hyper_in, upscaled_embedding, 'n m c, n c ... -> n m ...')
 
-        if self.text_sim and self.text_embedding is not None:
+        if self.text_sim and text_embedding is not None:
             text_embedding_down = self.txt_align_upscaled_embedding(text_embedding).unsqueeze(dim=1)
             upscaled_embedding = upscaled_embedding.view(b, c, h * w * d)
             sim = (text_embedding_down @ upscaled_embedding).view(b, -1, h, w, d)

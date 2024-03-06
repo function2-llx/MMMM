@@ -3,17 +3,17 @@ import torch
 from torch.nn import functional as nnf
 from transformers import PreTrainedModel, PretrainedConfig
 
-from luolib.lightning import LightningModule
 from luolib.lightning.cli import LightningCLI
 from luolib.models.param import NoWeightDecayParameter
 
 from mmmm.models.mmmm import DiceFocalLoss
 from mmmm.models.segvol import SamArgs, build_sam_vit_3d
 
-from datamodule import DataModule
+from base import DataModule, SemanticSegModel
 
-class SAMForSemanticSeg(PreTrainedModel, LightningModule):
+class SAMForSemanticSeg(PreTrainedModel, SemanticSegModel):
     supports_gradient_checkpointing: bool = True
+    datamodule: DataModule
 
     def __init__(
         self,
@@ -32,8 +32,7 @@ class SAMForSemanticSeg(PreTrainedModel, LightningModule):
         super().on_fit_start()
         self.gradient_checkpointing_enable({'use_reentrant': False})
 
-    def training_step(self, batch: dict, *args: ..., **kwargs: ...):
-        image = batch['img']
+    def forward(self, image: torch.Tensor) -> torch.Tensor:
         sam = self.sam
         image_embeddings = sam.image_encoder(image)
         sparse_embeddings, dense_embeddings = sam.prompt_encoder(
@@ -52,14 +51,25 @@ class SAMForSemanticSeg(PreTrainedModel, LightningModule):
             masks_logits_list.append(masks_logits)
         masks_logits = einops.rearrange(masks_logits_list, 'n c 1 ... -> n c ...')
         masks_logits = nnf.interpolate(masks_logits, image.shape[2:], mode='trilinear')
-        mask_loss = {
+        return masks_logits
+
+    def training_step(self, batch: dict, *args: ..., **kwargs: ...):
+        image = batch['img']
+        masks_logits = self(image)
+        mask_loss = self.loss(masks_logits, batch['seg'])
+        dice_loss = mask_loss['dice']
+        self.log_dict({
+            f'train/dice/{self.class_names[i]}': (1 - dice_loss[i]) * 100
+            for i in range(dice_loss.shape[0])
+        })
+        mask_loss_reduced = {
             k: v.mean()
-            for k, v in self.loss(masks_logits, batch['seg']).items()
+            for k, v in mask_loss.items()
         }
-        loss = mask_loss['total']
+        loss = mask_loss_reduced['total']
         self.log_dict({
             'train/loss': loss,
-            **{f'train/{k}_loss': v for k, v in mask_loss.items() if k != 'total'},
+            **{f'train/{k}_loss': v for k, v in mask_loss_reduced.items() if k != 'total'},
         })
         return loss
 

@@ -57,7 +57,7 @@ optimization:
 - optimizer:
     class_path: torch.optim.AdamW
     init_args:
-      lr: 1e-4
+      lr: 3e-4
       weight_decay: 5e-2
   lr_scheduler:
     scheduler:
