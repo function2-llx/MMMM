@@ -107,7 +107,7 @@ class SemanticSegModel(LightningModule):
         mask_loss = self.loss(masks_logits, batch['seg'])
         dice_loss = mask_loss['dice']
         self.log_dict({
-            f'train/dice/{self.class_names[i]}': (1 - dice_loss[i]) * 100
+            f'train/dice/{self.datamodule.class_names[i]}': (1 - dice_loss[i]) * 100
             for i in range(dice_loss.shape[0])
         })
         mask_loss_reduced = {
