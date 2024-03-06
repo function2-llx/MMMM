@@ -15,7 +15,21 @@ model:
     pt_patch_size: [4, 16, 16]
     pt_pos_embed_shape: [8, 16, 16]
     checkpoint: pre-trained/SegVol_v1.pth
-trainer: trainer.yaml
+trainer:
+  max_steps: 60000
+  val_check_interval: 100
+  log_every_n_steps: 10
+  precision: bf16-true
+  gradient_clip_val: 10
+  gradient_clip_algorithm: norm
+  callbacks:
+  - class_path: luolib.lightning.callbacks.ModelCheckpoint
+    init_args:
+      every_n_train_steps: 1000
+      filename: "{step}"
+      save_top_k: -1
+      save_last: true
+      verbose: true
 optimization:
 - optimizer:
     class_path: torch.optim.AdamW
