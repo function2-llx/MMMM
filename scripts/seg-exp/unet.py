@@ -20,7 +20,7 @@ class UNetForSemanticSeg(PreTrainedModel, LightningModule):
     def __init__(
         self,
         *,
-        num_fg_classes: int,
+        num_fg_classes: int = 15,
         backbone: UNetBackbone,
         decoder: PlainConvUNetDecoder,
         **kwargs,
