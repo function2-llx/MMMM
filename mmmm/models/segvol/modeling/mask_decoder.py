@@ -39,6 +39,7 @@ class MaskDecoder(nn.Module):
         activation: Type[nn.Module] = nn.GELU,
         iou_head_depth: int = 3,
         iou_head_hidden_dim: int = 256,
+        text_sim: bool = True,
     ) -> None:
         """
         Predicts masks given an image and prompt embeddings, using a
@@ -88,6 +89,7 @@ class MaskDecoder(nn.Module):
         )
 
         self.txt_align_upscaled_embedding = nn.Linear(768, 96)
+        self.text_sim = text_sim
 
     def _load_from_state_dict(self, state_dict: dict[str, torch.Tensor], prefix: str, *args, **kwargs):
         ln_prefix = f'{prefix}output_upscaling.1.'
@@ -175,7 +177,7 @@ class MaskDecoder(nn.Module):
         masks = (hyper_in @ upscaled_embedding.view(b, c, h * w * d)).view(b, -1, h, w, d)
         # masks = einops.einsum(hyper_in, upscaled_embedding, 'n m c, n c ... -> n m ...')
 
-        if text_embedding is not None:
+        if self.text_sim and self.text_embedding is not None:
             text_embedding_down = self.txt_align_upscaled_embedding(text_embedding).unsqueeze(dim=1)
             upscaled_embedding = upscaled_embedding.view(b, c, h * w * d)
             sim = (text_embedding_down @ upscaled_embedding).view(b, -1, h, w, d)
