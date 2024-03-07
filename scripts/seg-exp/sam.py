@@ -21,9 +21,10 @@ class SAMForSemanticSeg(PreTrainedModel, SemanticSegModel):
         freeze_sam: bool = False,
         hidden_size: int = 768,
         empty_cache: bool = False,
+        lambda_focal: float = 1.,
         **kwargs,
     ):
-        super().__init__(PretrainedConfig(), **kwargs)  # make HF happy
+        super().__init__(PretrainedConfig(), lambda_focal=lambda_focal, **kwargs)  # make HF happy
         self.sam = build_sam_vit_3d(sam)
         if freeze_sam:
             self.requires_grad_(False)

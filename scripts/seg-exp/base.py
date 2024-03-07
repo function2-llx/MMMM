@@ -101,7 +101,7 @@ class DataModule(ExpDataModuleBase):
 class SemanticSegModel(LightningModule):
     datamodule: DataModule
 
-    def __init__(self, lambda_focal: float = 1., **kwargs):
+    def __init__(self, *, lambda_focal: float = 1., **kwargs):
         super().__init__(**kwargs)
         self.dice_metric = DiceMetric()
         self.loss = DiceFocalLoss(lambda_focal=lambda_focal)
