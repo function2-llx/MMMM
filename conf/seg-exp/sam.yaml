@@ -17,10 +17,12 @@ model:
     pt_pos_embed_shape: [8, 16, 16]
     checkpoint: pre-trained/SegVol_v1.pth
     text_sim: false
+  lambda_focal: 4
 trainer:
   max_steps: 60000
   val_check_interval: 100
   log_every_n_steps: 10
+  num_sanity_val_steps: 10
   precision: bf16-true
   gradient_clip_val: 1
   gradient_clip_algorithm: norm
@@ -44,7 +46,7 @@ optimization:
       init_args:
         t_initial: ${trainer.max_steps}
         t_in_epochs: false
-        warmup_t: 2000
+        warmup_t: 0
         warmup_prefix: true
     interval: step
     frequency: 200
