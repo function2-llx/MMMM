@@ -1,37 +1,37 @@
 name: mmmm
 channels:
-  - conda-forge
-  - pytorch
-  - nvidia
-  - defaults
+- conda-forge
+- pytorch
+- nvidia
+- defaults
 dependencies:
-  - python=3.11
-  - numpy
-  - h5py
-  - scikit-learn
-  - pytorch::pytorch=2.2.1
-  - pytorch::pytorch-cuda=12.1
-  - pytorch::torchvision
-  - ocl-icd-system  # https://github.com/conda-forge/openvino-feedstock/pull/73
-  - einops
-  - lightning
-  - torchmetrics
-  - transformers
-  - peft
-  - sentencepiece
-  - timm
-  - wandb
-  - llvm-openmp<16  # https://github.com/pytorch/pytorch/issues/99625
-  - pandas
-  - pyarrow  # https://github.com/pandas-dev/pandas/issues/54466
-  - openpyxl
-  - seaborn
-  - nibabel
-  - pydicom
-  - cytoolz
+- python=3.11
+- numpy
+- h5py
+- scikit-learn
+- pytorch::pytorch=2.2.1
+- pytorch::pytorch-cuda=12.1
+- pytorch::torchvision
+- ocl-icd-system  # https://github.com/conda-forge/openvino-feedstock/pull/73
+- einops
+- lightning
+- torchmetrics
+- transformers
+- peft
+- sentencepiece
+- timm
+- wandb
+- llvm-openmp<16  # https://github.com/pytorch/pytorch/issues/99625
+- pandas
+- pyarrow  # https://github.com/pandas-dev/pandas/issues/54466
+- openpyxl
+- seaborn
+- nibabel
+- pydicom
+- cytoolz
 
-  - pip
-  - pip:
-    - jsonargparse[signatures, omegaconf]
-    - bitsandbytes  # bitsandbytes plays strangely with conda, it still depends on cudatoolkit=11.8
-    - https://github.com/function2-llx/xformers-build/releases/download/0.0.25%2B7f8c290/xformers-0.0.25+7f8c290.d20240229+pt2.2.1+cu121-cp311-cp311-linux_x86_64.whl
+- pip
+- pip:
+  - jsonargparse[signatures, omegaconf]
+  - bitsandbytes  # bitsandbytes plays strangely with conda, it still depends on cudatoolkit=11.8
+  - https://github.com/function2-llx/xformers-build/releases/download/0.0.25%2B7f8c290/xformers-0.0.25+7f8c290.d20240229+pt2.2.1+cu121-cp311-cp311-linux_x86_64.whl
