@@ -1,8 +1,10 @@
 from functools import cached_property
 from pathlib import Path
 
+import einops
 import numpy as np
 import torch
+from torchmetrics import Precision, Recall
 
 from luolib.datamodule import ExpDataModuleBase
 from luolib.lightning import LightningModule
@@ -124,6 +126,7 @@ class SemanticSegModel(LightningModule):
 
     def on_validation_epoch_start(self) -> None:
         self.dice_metric.reset()
+        self.recall = []
 
     def validation_step(self, batch: dict, *args: ..., **kwargs: ...):
         image = batch['img']
@@ -137,10 +140,15 @@ class SemanticSegModel(LightningModule):
             progress=False,
         )
         pred = logits.sigmoid() > 0.5
-        self.dice_metric(pred, batch['seg'])
+        label = batch['seg']
+        self.dice_metric(pred, label)
+        recall = einops.reduce(pred & label, 'n c ... -> c', 'sum') / einops.reduce(label, 'n c ... -> c', 'sum')
+        self.recall.append(recall)
 
     def on_validation_epoch_end(self) -> None:
         dice = self.dice_metric.aggregate(MetricReduction.MEAN_BATCH) * 100
+        recall = einops.reduce(self.recall, 'n c -> c', 'mean')
         for i in range(dice.shape[0]):
             self.log(f'val/dice/{self.datamodule.class_names[i]}', dice[i])
+            self.log(f'val/recall/{self.datamodule.class_names[i]}', recall[i])
         self.log(f'val/dice/avg', dice.mean())
