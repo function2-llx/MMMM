@@ -23,6 +23,7 @@ class SAMForSemanticSeg(PreTrainedModel, SemanticSegModel):
         freeze_sam: bool = False,
         hidden_size: int = 768,
         lambda_focal: float = 1.,
+        empty_cache: bool = False,
         **kwargs,
     ):
         super().__init__(PretrainedConfig(), **kwargs)  # make HF happy
@@ -31,6 +32,7 @@ class SAMForSemanticSeg(PreTrainedModel, SemanticSegModel):
             self.requires_grad_(False)
         self.cls_embeds = NoWeightDecayParameter(torch.randn(num_fg_classes, hidden_size))
         self.loss = DiceFocalLoss(lambda_focal=lambda_focal)
+        self.empty_cache = empty_cache
 
     def on_fit_start(self) -> None:
         super().on_fit_start()
@@ -56,6 +58,11 @@ class SAMForSemanticSeg(PreTrainedModel, SemanticSegModel):
         masks_logits = einops.rearrange(masks_logits_list, 'n c 1 ... -> n c ...')
         masks_logits = nnf.interpolate(masks_logits, image.shape[2:], mode='trilinear')
         return masks_logits
+
+    def on_validation_epoch_end(self) -> None:
+        if self.empty_cache:
+            torch.cuda.empty_cache()
+        super().on_validation_epoch_end()
 
 class CLI(LightningCLI):
     pass

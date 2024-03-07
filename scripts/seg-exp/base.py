@@ -147,8 +147,9 @@ class SemanticSegModel(LightningModule):
 
     def on_validation_epoch_end(self) -> None:
         dice = self.dice_metric.aggregate(MetricReduction.MEAN_BATCH) * 100
-        recall = einops.reduce(self.recall, 'n c -> c', 'mean')
+        recall = einops.rearrange(self.recall, 'n c -> c n')
         for i in range(dice.shape[0]):
             self.log(f'val/dice/{self.datamodule.class_names[i]}', dice[i])
-            self.log(f'val/recall/{self.datamodule.class_names[i]}', recall[i])
+            r = recall[i][recall[i].isfinite()].mean() * 100
+            self.log(f'val/recall/{self.datamodule.class_names[i]}', r)
         self.log(f'val/dice/avg', dice.mean())
