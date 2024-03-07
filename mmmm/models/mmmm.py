@@ -11,9 +11,9 @@ from transformers.modeling_outputs import CausalLMOutputWithPast
 
 from luolib.lightning import LightningModule
 from luolib.types import tuple2_t, tuple3_t
-from monai.losses import DiceFocalLoss as DiceFocalLossBase
 
 from .cogvlm import CogVLMConfig, CogVLMForCausalLM
+from .loss import DiceFocalLoss
 from .segvol import SamArgs, build_sam_vit_3d
 from .tokenizer import MMMMTokenizer
 
@@ -29,23 +29,6 @@ class VisionConf:
     pos_embed_shape: tuple3_t[int]
     pt_pos_embed_shape: tuple2_t[int] | None = None
     patch_size: int = 16
-
-class DiceFocalLoss(DiceFocalLossBase):
-    """reduce the results to channel only"""
-
-    def __init__(self, **kwargs):
-        super().__init__(reduction='none', sigmoid=True, **kwargs)
-
-    def forward(self, input: torch.Tensor, target: torch.Tensor) -> dict[str, torch.Tensor]:
-        input = input.float()
-        dice_loss = einops.reduce(self.dice(input, target), 'n c ... -> c', 'mean')
-        focal_loss = einops.reduce(self.focal(input, target), 'n c ... -> c', 'mean')
-        total_loss: torch.Tensor = self.lambda_dice * dice_loss + self.lambda_focal * focal_loss
-        return {
-            'dice': dice_loss,
-            'focal': focal_loss,
-            'total': total_loss,
-        }
 
 @dataclass(kw_only=True)
 class MMMMOutputWithPast:

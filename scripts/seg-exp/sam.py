@@ -5,8 +5,6 @@ from transformers import PreTrainedModel, PretrainedConfig
 
 from luolib.lightning.cli import LightningCLI
 from luolib.models.param import NoWeightDecayParameter
-
-from mmmm.models.mmmm import DiceFocalLoss
 from mmmm.models.segvol import SamArgs, build_sam_vit_3d
 
 from base import DataModule, SemanticSegModel
@@ -22,7 +20,6 @@ class SAMForSemanticSeg(PreTrainedModel, SemanticSegModel):
         sam: SamArgs,
         freeze_sam: bool = False,
         hidden_size: int = 768,
-        lambda_focal: float = 1.,
         empty_cache: bool = False,
         **kwargs,
     ):
@@ -31,7 +28,6 @@ class SAMForSemanticSeg(PreTrainedModel, SemanticSegModel):
         if freeze_sam:
             self.requires_grad_(False)
         self.cls_embeds = NoWeightDecayParameter(torch.randn(num_fg_classes, hidden_size))
-        self.loss = DiceFocalLoss(lambda_focal=lambda_focal)
         self.empty_cache = empty_cache
 
     def on_fit_start(self) -> None:

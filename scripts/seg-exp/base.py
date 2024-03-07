@@ -4,18 +4,19 @@ from pathlib import Path
 import einops
 import numpy as np
 import torch
-from torchmetrics import Precision, Recall
 
+from luolib import transforms as lt
 from luolib.datamodule import ExpDataModuleBase
 from luolib.lightning import LightningModule
 from luolib.types import tuple3_t
-from luolib import transforms as lt
 from luolib.utils.misc import ensure_rgb
 from monai import transforms as mt
 from monai.inferers import sliding_window_inference
 from monai.metrics import DiceMetric
 from monai.networks import one_hot
 from monai.utils import BlendMode, MetricReduction
+
+from mmmm.models.loss import DiceFocalLoss
 
 class InputTransformD(mt.Transform):
     def __init__(self, num_fg_classes: int):
@@ -100,9 +101,10 @@ class DataModule(ExpDataModuleBase):
 class SemanticSegModel(LightningModule):
     datamodule: DataModule
 
-    def __init__(self, **kwargs):
+    def __init__(self, lambda_focal: float = 1., **kwargs):
         super().__init__(**kwargs)
         self.dice_metric = DiceMetric()
+        self.loss = DiceFocalLoss(lambda_focal=lambda_focal)
 
     def training_step(self, batch: dict, *args: ..., **kwargs: ...):
         image = batch['img']
