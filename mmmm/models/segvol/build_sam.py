@@ -15,7 +15,7 @@ class SamArgs:
     patch_size: tuple3_t[int] | int = 16
     pt_pos_embed_shape: tuple3_t[int] | None = None
     checkpoint: Path | None = None
-    text_sim: bool = True
+    text_sim: bool = False
 
 def build_sam_vit_3d(args: SamArgs) -> Sam:
     return _build_sam(

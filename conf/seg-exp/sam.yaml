@@ -17,7 +17,7 @@ model:
     pt_pos_embed_shape: [8, 16, 16]
     checkpoint: pre-trained/SegVol_v1.pth
     text_sim: false
-  lambda_focal: 4
+  lambda_focal: 1
 trainer:
   max_steps: 60000
   val_check_interval: 100

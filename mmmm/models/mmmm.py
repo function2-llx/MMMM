@@ -198,6 +198,8 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         })
         return loss
 
+
+
     def _inference_path(self, input_ids, token_type_ids, global_enc_images, attention_masks):
         # Process and return inference output
         output_hidden_states = []
@@ -253,6 +255,10 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         for i in range(batch_size):
             for k, v in self.mask_loss(masks_logits[i][None], masks_label[i][None]).items():
                 mask_loss_list.setdefault(k, []).append(v)
+            # this won't take long
+            pos_mask = einops.reduce(masks_label[i], 'c ... -> c', 'any')
+            mask_loss_list.setdefault('dice-pos', []).append(mask_loss_list['dice'][-1][pos_mask])  # sorry, I want to save some variable names
+
         mask_loss = {k: torch.cat(v).mean() for k, v in mask_loss_list.items()}
         return mask_loss
 

@@ -1,5 +1,6 @@
 from collections.abc import Iterable
 from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 from typing import Callable, Sequence
 
@@ -258,8 +259,8 @@ class InputTransformD(mt.Transform):
 class TransConf:
     patch_size: tuple3_t[int]
     vit_patch_size: param3_t[int]
-    num_pos: int = 48
-    num_neg: int = 4
+    num_pos: int = 20  # I've encountered cases setting this to larger than 48 causing NCCL timeout
+    num_neg: int = 20
 
 class MMMMDataModule(ExpDataModuleBase):
     def __init__(
@@ -272,13 +273,17 @@ class MMMMDataModule(ExpDataModuleBase):
         super().__init__(*args, **kwargs)
         self.tokenizer = tokenizer
         self.data_root = data_root
-        self._train_data = []
         self.trans_conf = trans
-        for dataset_dir in data_root.iterdir():
+
+    @cache
+    def fit_data(self):
+        # FIXME: use a list as dataset with Python's multiprocessing can cause "memory leak": https://github.com/pytorch/pytorch/issues/13246
+        ret = []
+        for dataset_dir in self.data_root.iterdir():
             if dataset_dir.name != 'AMOS22':
                 continue
             dataset_meta: pd.DataFrame = pd.read_pickle(dataset_dir / 'meta.pkl')
-            self._train_data.extend([
+            ret.extend([
                 {
                     'dataset_dir': dataset_dir,
                     'key': key,
@@ -286,10 +291,10 @@ class MMMMDataModule(ExpDataModuleBase):
                 }
                 for key, meta in dataset_meta.iterrows()
             ])
+        return ret
 
     def train_data(self) -> Sequence:
-        # FIXME: use a list as dataset with Python's multiprocessing can cause "memory leak": https://github.com/pytorch/pytorch/issues/13246
-        return self._train_data
+        return self.fit_data()
 
     def train_transform(self) -> Callable:
         conf = self.trans_conf
