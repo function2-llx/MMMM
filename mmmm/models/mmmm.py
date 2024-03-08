@@ -125,6 +125,8 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         sam.prompt_encoder.not_a_point_embed.requires_grad_(False)
         sam.prompt_encoder.mask_downscaling.requires_grad_(False)
         sam.mask_decoder.iou_prediction_head.requires_grad_(False)
+        if not sam.mask_decoder.text_sim:
+            sam.mask_decoder.txt_align_upscaled_embedding.requires_grad_(False)
 
     def get_lora_modules(self, prefix: str):
         # apply LoRA on VLM, fully finetune others
@@ -197,8 +199,6 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             **{f'train/{k}_loss': v for k, v in output.mask_loss.items() if k != 'total'},
         })
         return loss
-
-
 
     def _inference_path(self, input_ids, token_type_ids, global_enc_images, attention_masks):
         # Process and return inference output
