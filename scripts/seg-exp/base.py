@@ -105,6 +105,8 @@ class SemanticSegModel(LightningModule):
         super().__init__(**kwargs)
         self.dice_metric = DiceMetric()
         self.loss = DiceFocalLoss(lambda_focal=lambda_focal)
+        import numpy as np
+        np.load()
 
     def training_step(self, batch: dict, *args: ..., **kwargs: ...):
         image = batch['img']

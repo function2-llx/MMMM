@@ -12,13 +12,14 @@ from torch.nn.utils.rnn import pad_sequence
 from torch.types import Device
 
 from luolib.datamodule import ExpDataModuleBase
-from luolib.types import tuple3_t
+from luolib.types import param3_t, tuple3_t
 from luolib.utils.misc import ensure_rgb
 from monai import transforms as mt
 from monai.data import MetaTensor
 
 from mmmm.models import MMMMTokenizer
 from mmmm.models.cogvlm import LANGUAGE_TOKEN_TYPE, VISION_TOKEN_TYPE
+from monai.utils import ensure_tuple_rep
 from .defs import Meta, PROCESSED_SEG_DATA_ROOT, encode_patch_size
 
 __all__ = [
@@ -32,6 +33,7 @@ class SamplePatch(mt.RandomizableTransform):
     def __init__(
         self,
         patch_size: tuple3_t[int],
+        vit_patch_size: param3_t[int],
         num_pos: int,
         num_neg: int,
         tokenizer: MMMMTokenizer,
@@ -45,6 +47,7 @@ class SamplePatch(mt.RandomizableTransform):
         self.tokenizer = tokenizer
         self.force_fg_ratio = force_fg_ratio
         self.device = device
+        self.vit_patch_size = ensure_tuple_rep(vit_patch_size, 3)
 
     def gen_conversation(self, modality: str, pos_classes: list[str], neg_classes: list[str]):
         def _convert_list(names: Iterable[str], mask: bool):
@@ -124,7 +127,7 @@ class SamplePatch(mt.RandomizableTransform):
 
         # text_ids = torch.tensor(tokenizer.encode(text, add_special_tokens=False))
         # TODO: dynamically adjust patch size according to image spacing
-        num_vision_tokens = np.prod([s // 16 for s in self.patch_size]).item() + 2  # including boi and eoi
+        num_vision_tokens = np.prod([s // ps for s, ps in zip(self.patch_size, self.vit_patch_size)]).item() + 2  # including boi and eoi
         input_ids = torch.cat([
             torch.tensor([tokenizer.bos_token_id]),
             torch.full((num_vision_tokens, ), 0),
@@ -253,7 +256,8 @@ class InputTransformD(mt.Transform):
 
 @dataclass
 class TransConf:
-    patch_size: tuple3_t[int] = (96, 224, 224)
+    patch_size: tuple3_t[int]
+    vit_patch_size: param3_t[int]
     num_pos: int = 48
     num_neg: int = 4
 
@@ -290,7 +294,13 @@ class MMMMDataModule(ExpDataModuleBase):
     def train_transform(self) -> Callable:
         conf = self.trans_conf
         return mt.Compose([
-            SamplePatch(conf.patch_size, conf.num_pos, conf.num_neg, self.tokenizer),
+            SamplePatch(
+                conf.patch_size,
+                conf.vit_patch_size,
+                conf.num_pos,
+                conf.num_neg,
+                self.tokenizer
+            ),
             InputTransformD(),
         ])
 

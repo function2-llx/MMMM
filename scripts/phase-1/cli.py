@@ -16,7 +16,7 @@ class CLI(LightningCLI):
         parser.add_subclass_arguments(MMMMTokenizer, 'tokenizer')
         parser.link_arguments('tokenizer', 'data.init_args.tokenizer', apply_on='instantiate')
         parser.link_arguments('tokenizer', 'model.init_args.tokenizer', apply_on='instantiate')
-        # https://github.com/omni-us/jsonargparse/issues/287
+        # dataclass as class: https://github.com/omni-us/jsonargparse/issues/287
         parser.add_class_arguments(LoraConfig, 'lora')
 
     def instantiate_classes(self) -> None:

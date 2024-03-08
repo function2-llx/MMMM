@@ -1,3 +1,4 @@
+import gc
 import itertools as it
 from pathlib import Path
 
@@ -14,7 +15,7 @@ from luolib.utils import get_cuda_device, process_map
 from mmmm.data.defs import PROCESSED_SEG_DATA_ROOT, encode_patch_size
 
 mask_batch_size: int = 4
-patch_size: tuple3_t[int] = (96, 224, 224)
+patch_size: tuple3_t[int] = (48, 224, 224)
 
 def _load_mask(mask_dir: Path, name: str):
     return name, np.load(mask_dir / f'{name}.npy')
@@ -30,6 +31,8 @@ def _get_center_slices(shape: tuple3_t[int]):
 def process_case(dataset_dir: Path, key: str):
     case_dir = dataset_dir / 'data' / key
     masks = torch.as_tensor(np.load(case_dir / 'masks.npy'), device=get_cuda_device())
+    gc.collect()
+    torch.cuda.empty_cache()
     patches_sum = []
     dtype = torch.int32 if masks[0].numel() < torch.iinfo(torch.int32).max else torch.int64
     mask_sizes = masks.new_empty((masks.shape[0], 1, 1, 1), dtype=dtype)
@@ -68,7 +71,7 @@ def process_dataset(dataset_dir: Path):
     process_map(
         process_case,
         it.repeat(dataset_dir), keys,
-        ncols=80, max_workers=4, chunksize=1, total=len(keys),
+        ncols=80, max_workers=8, chunksize=1, total=len(keys),
     )
 
 def main():

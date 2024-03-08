@@ -1,4 +1,7 @@
 class_path: mmmm.data.MMMMDataModule
 init_args:
+  trans:
+    vit_patch_size: [8, 16, 16]
+    patch_size: [48, 224, 224]
   dataloader:
     train_batch_size: 4

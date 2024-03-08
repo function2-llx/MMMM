@@ -103,7 +103,7 @@ def patched_dice_forward(self, input: torch.Tensor, target: torch.Tensor):
     return f
 
 class DiceFocalLoss(_MONAIDiceFocalLoss):
-    """reduce the results to channel only"""
+    """reduce the results to channel only; also fix smooth issue of dice"""
 
     def __init__(self, **kwargs):
         super().__init__(reduction='none', smooth_nr=0, smooth_dr=0, sigmoid=True, **kwargs)

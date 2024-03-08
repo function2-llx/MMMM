@@ -10,7 +10,7 @@ import torch.nn as nn
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
 from luolib.lightning import LightningModule
-from luolib.types import tuple2_t, tuple3_t
+from luolib.types import param3_t, tuple2_t, tuple3_t
 
 from .cogvlm import CogVLMConfig, CogVLMForCausalLM
 from .loss import DiceFocalLoss
@@ -28,7 +28,7 @@ from mmmm.utils import apply_prefix, get_lora_modules_default, get_lora_modules_
 class VisionConf:
     pos_embed_shape: tuple3_t[int]
     pt_pos_embed_shape: tuple2_t[int] | None = None
-    patch_size: int = 16
+    patch_size: param3_t[int] = 16
 
 @dataclass(kw_only=True)
 class MMMMOutputWithPast:
@@ -73,7 +73,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             **kwargs,
         )
         self.resize_token_embeddings(len(tokenizer))
-        # make the `from_pretrained` interface consistent
+        # make the `from_pretrained` interface consistent, since `resize_token_embeddings` will create new modules without preserving original attributes
         self.eval()
         return self
 

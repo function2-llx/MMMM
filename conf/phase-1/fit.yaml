@@ -20,19 +20,37 @@ trainer:
 #    class_path: lightning.pytorch.strategies.DDPStrategy
 #    init_args:
 #      timeout: 0:0:45
-optimization:
-- optimizer:
-    class_path: torch.optim.AdamW
-    init_args:
-      lr: 1e-5
-      weight_decay: 5e-2
-  lr_scheduler:
-    scheduler:
-      class_path: timm.scheduler.CosineLRScheduler
+optim:
+  sam:
+    prefix: [sam_model, seg_proj]
+    optimizer:
+      class_path: torch.optim.AdamW
       init_args:
-        t_initial: ${trainer.max_steps}
-        t_in_epochs: false
-        warmup_t: 0
-        warmup_prefix: true
-    interval: step
-    frequency: 200
+        lr: 1e-4
+        weight_decay: 5e-2
+    lr_scheduler:
+      scheduler:
+        class_path: timm.scheduler.CosineLRScheduler
+        init_args:
+          t_initial: ${trainer.max_steps}
+          t_in_epochs: false
+          warmup_t: 0
+          warmup_prefix: true
+      interval: step
+      frequency: 200
+  else:
+    optimizer:
+      class_path: torch.optim.AdamW
+      init_args:
+        lr: 1e-5
+        weight_decay: 5e-2
+    lr_scheduler:
+      scheduler:
+        class_path: timm.scheduler.CosineLRScheduler
+        init_args:
+          t_initial: ${trainer.max_steps}
+          t_in_epochs: false
+          warmup_t: 0
+          warmup_prefix: true
+      interval: step
+      frequency: 200
