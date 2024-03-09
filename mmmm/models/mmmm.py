@@ -10,7 +10,7 @@ import torch.nn as nn
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
 from luolib.lightning import LightningModule
-from luolib.transforms import dict
+from luolib.lightning.utils import OptimizationConf
 from luolib.types import param3_t, tuple2_t, tuple3_t
 
 from .cogvlm import CogVLMConfig, CogVLMForCausalLM
