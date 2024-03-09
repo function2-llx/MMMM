@@ -10,6 +10,7 @@ import torch.nn as nn
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
 from luolib.lightning import LightningModule
+from luolib.transforms import dict
 from luolib.types import param3_t, tuple2_t, tuple3_t
 
 from .cogvlm import CogVLMConfig, CogVLMForCausalLM
@@ -44,6 +45,12 @@ class MMMMOutputWithPast:
     masks_logits: list[torch.Tensor]
     mask_loss: dict[str, torch.Tensor] | None
 
+@dataclass
+class SlidingWindow:
+    patch_size: tuple3_t[int]
+    batch_size: int
+    overlap: float = 0.5
+
 class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
     @classmethod
     def from_pretrained(
@@ -56,6 +63,8 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         tokenizer: MMMMTokenizer,
         sam: SamArgs,
         torch_dtype: str | torch.dtype = 'auto',
+        mask_loss: DiceFocalLoss | None = None,
+        val_sw: SlidingWindow | None = None,
         **kwargs,
     ):
         """make jsonargparse happy
@@ -70,6 +79,8 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             tokenizer=tokenizer,
             sam_args=sam,
             torch_dtype=torch_dtype,
+            mask_loss=mask_loss,
+            val_sw=val_sw,
             **kwargs,
         )
         self.resize_token_embeddings(len(tokenizer))
@@ -86,6 +97,8 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         vision_override: VisionConf,
         tokenizer: MMMMTokenizer,
         sam_args: SamArgs,
+        mask_loss: DiceFocalLoss | None,
+        val_sw: SlidingWindow | None,
         **kwargs,
     ):
         # adapt vision config
@@ -98,11 +111,11 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             nn.ReLU(inplace=True),
             nn.Linear(vlm_config.hidden_size, self.sam_model.prompt_encoder.embed_dim),
         )
-        self.mask_loss = DiceFocalLoss()
         self.lm_loss_weight = lm_loss_weight
         self.mask_loss_weight = mask_loss_weight
         self.seg_token_id = tokenizer.seg_token_id
-
+        self.mask_loss = mask_loss
+        self.val_sw = val_sw
         self._setup_sam_requires_grad()
 
         self.post_init()
@@ -200,6 +213,35 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         })
         return loss
 
+    # def sw_predictor(self, patch: torch.Tensor):
+    #     output: MMMMOutputWithPast = self(
+    #         global_enc_image=patch,
+    #         grounding_enc_image=patch,
+    #         **self._val_vlm_inputs,
+    #         use_cache=False,
+    #     )
+    #     return output.masks_logits[0][None]
+    #
+    # def on_validation_epoch_start(self) -> None:
+    #     self.dice_metric = DiceMetric(reduction=MetricReduction.MEAN_BATCH)
+    #
+    # def validation_step(self, batch: dict, *args, **kwargs):
+    #     # the interface of sliding_window_inference only accepts image as input
+    #     self._val_vlm_inputs = batch['vlm_inputs']
+    #     conf = self.val_sw
+    #     logits = sliding_window_inference(
+    #         batch['image'],
+    #         conf.patch_size,
+    #         conf.batch_size,
+    #         self.sw_predictor,
+    #         conf.overlap,
+    #         BlendMode.GAUSSIAN,
+    #     )
+    #     pred = logits.sigmoid() > 0.5
+    #     dice = self.dice_metric(pred, batch['masks'])
+    #     for i, name in enumerate(batch['mask_classes']):
+    #         self.log(f'val/dice/{name}', dice[i])
+
     def _inference_path(self, input_ids, token_type_ids, global_enc_images, attention_masks):
         # Process and return inference output
         output_hidden_states = []
@@ -255,7 +297,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         for i in range(batch_size):
             for k, v in self.mask_loss(masks_logits[i][None], masks_label[i][None]).items():
                 mask_loss_list.setdefault(k, []).append(v)
-            # this won't take long
+            # this won't take long, right?
             pos_mask = einops.reduce(masks_label[i], 'c ... -> c', 'any')
             mask_loss_list.setdefault('dice-pos', []).append(mask_loss_list['dice'][-1][pos_mask])  # sorry, I want to save some variable names
 

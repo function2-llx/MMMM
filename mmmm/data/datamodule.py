@@ -30,6 +30,129 @@ __all__ = [
 
 CE_IGNORE_INDEX = -100
 
+def gen_conversation(
+    modality: str,
+    pos_classes: list[str],
+    neg_classes: list[str],
+    tokenizer: MMMMTokenizer,
+    R: np.random.RandomState | int,
+    p_use_neg_mask: float = 0.9,
+):
+    def _convert_list(names: Iterable[str], mask: bool):
+        # FIXME: do not use special tokens explicitly in text
+        if mask:
+            names = map(lambda name: f'{tokenizer.bop_token} {name} {tokenizer.eop_token} {tokenizer.seg_token}', names)
+        return ', '.join(names)
+
+    if isinstance(R, int):
+        R = np.random.RandomState(R)
+
+    # copy the input list because the shuffling is in-place
+    pos_classes = list(pos_classes)
+    R.shuffle(pos_classes)
+    neg_classes = list(neg_classes)
+    R.shuffle(neg_classes)
+
+    # merge positive and negative classes with random order without shuffling
+    pos_class_mask = torch.zeros(len(pos_classes) + len(neg_classes), dtype=torch.bool)
+    pos_class_mask[R.choice(pos_class_mask.shape[0], len(pos_classes), replace=False)] = True
+    pos_it, neg_it = map(iter, [pos_classes, neg_classes])
+    classes = [
+        next(pos_it) if m else next(neg_it)
+        for m in pos_class_mask
+    ]
+
+    assert len(classes) > 0
+    neg_mask = R.uniform() < p_use_neg_mask
+    if neg_mask:
+        prompt = f'For the given {modality} image, output the segmentation masks for the following objects: {_convert_list(classes, False)}.'
+    else:
+        prompt = f"For the given {modality} image, find the following objects, and output segmentation masks for the found objects: {_convert_list(classes, False)}. "
+    if len(pos_classes) > 0:
+        if len(neg_classes) > 0:
+            response = f'The following objects are found: {_convert_list(pos_classes, True)}. ' + \
+                       f'The following objects are not found: {_convert_list(neg_classes, neg_mask)}. '
+            mask_classes = pos_classes + (neg_classes if neg_mask else [])
+        else:
+            response = f'All of the requested objects are found: {_convert_list(classes, True)}. '
+            mask_classes = classes
+    else:
+        if neg_mask:
+            response = f'None of the requested objects are found: {_convert_list(classes, True)}. '
+            mask_classes = classes
+        else:
+            response = 'None of the requested objects are found. '
+            mask_classes = []
+    # mask_classes: the list of classes that with masks, following the order occurring in the conversation
+    return [(prompt, response)], mask_classes
+
+def prepare_vlm_inputs(
+    conversation: list[tuple[str, str]],
+    tokenizer: MMMMTokenizer,
+    patch_size: tuple3_t[int],
+    vit_patch_size: tuple3_t[int],
+):
+    # TODO: refactor this function to support various VLM formats
+    # template: CogVLM `chat_old_history_to_prompt`
+    # just for viewing, don't tokenize it directly
+    user_start = 'Question:'
+    sys_start = 'Answer:'
+    text = '\n'.join(
+        f'{user_start} {query} {sys_start} {answer}'
+        for query, answer in conversation
+    )
+    dtype = torch.long
+    text_ids = []
+    lm_targets = []
+    for query, answer in conversation:
+        prompt = f'{user_start} {query} {sys_start}'
+        prompt_ids = torch.tensor(tokenizer.encode(prompt, add_special_tokens=False))
+        answer_ids = torch.tensor(tokenizer.encode(answer, add_special_tokens=False))
+        text_ids.append(torch.cat([prompt_ids, answer_ids]))
+        lm_targets.append(
+            torch.cat([
+                torch.full((prompt_ids.shape[0] - 1, ), CE_IGNORE_INDEX),
+                answer_ids,
+                torch.tensor([tokenizer.eos_token_id]),
+            ]),
+        )
+    text_ids = torch.cat(text_ids)
+    lm_targets = torch.cat(lm_targets)
+
+    # text_ids = torch.tensor(tokenizer.encode(text, add_special_tokens=False))
+    # TODO: dynamically adjust patch size according to image spacing
+    num_vision_tokens = np.prod([s // ps for s, ps in zip(patch_size, vit_patch_size)]).item() + 2  # including boi and eoi
+    input_ids = torch.cat([
+        torch.tensor([tokenizer.bos_token_id]),
+        torch.full((num_vision_tokens, ), 0),
+        text_ids,
+    ])
+    image_features_mask = torch.zeros(input_ids.shape[0], dtype=torch.bool)
+    image_features_mask[1:1 + num_vision_tokens] = True
+    token_type_ids = torch.cat([
+        torch.tensor([LANGUAGE_TOKEN_TYPE]),
+        torch.full((num_vision_tokens, ), VISION_TOKEN_TYPE),
+        # all new tokens will be processed by VE
+        # torch.where(text_ids < tokenizer.base_vocab_size, LANGUAGE_TOKEN_TYPE, VISION_TOKEN_TYPE),
+        torch.full((text_ids.shape[0], ), LANGUAGE_TOKEN_TYPE),
+    ])
+    position_ids = torch.cat([
+        torch.tensor([0, 1]),  # bos and boi
+        torch.full((num_vision_tokens - 2, ), 2),
+        torch.tensor([3]),  # eoi
+        torch.arange(4, 4 + text_ids.shape[0]),
+    ])
+    attention_mask = torch.ones(input_ids.shape, dtype=dtype)
+    lm_targets = torch.cat([torch.full((1 + num_vision_tokens, ), CE_IGNORE_INDEX), lm_targets])
+    return {
+        'input_ids': input_ids,
+        'image_features_mask': image_features_mask,
+        'token_type_ids': token_type_ids,
+        'position_ids': position_ids,
+        'attention_mask': attention_mask,
+        'lm_targets': lm_targets,
+    }, text
+
 class SamplePatch(mt.RandomizableTransform):
     def __init__(
         self,
@@ -38,7 +161,7 @@ class SamplePatch(mt.RandomizableTransform):
         num_pos: int,
         num_neg: int,
         tokenizer: MMMMTokenizer,
-        force_fg_ratio: float = 2 / 3,
+        force_fg_ratio: float = 1 / 3,
         device: Device = 'cpu',
     ):
         super().__init__()
@@ -48,117 +171,7 @@ class SamplePatch(mt.RandomizableTransform):
         self.tokenizer = tokenizer
         self.force_fg_ratio = force_fg_ratio
         self.device = device
-        self.vit_patch_size = ensure_tuple_rep(vit_patch_size, 3)
-
-    def gen_conversation(self, modality: str, pos_classes: list[str], neg_classes: list[str]):
-        def _convert_list(names: Iterable[str], mask: bool):
-            # FIXME: do not use special tokens explicitly in text
-            if mask:
-                names = map(lambda name: f'{tokenizer.bop_token} {name} {tokenizer.eop_token} {tokenizer.seg_token}', names)
-            return ', '.join(names)
-        # copy the input list because the shuffling is in-place
-        pos_classes = list(pos_classes)
-        self.R.shuffle(pos_classes)
-        neg_classes = list(neg_classes)
-        self.R.shuffle(neg_classes)
-
-        # merge positive and negative classes with random order without shuffling
-        pos_class_mask = torch.zeros(len(pos_classes) + len(neg_classes), dtype=torch.bool)
-        pos_class_mask[self.R.choice(pos_class_mask.shape[0], len(pos_classes), replace=False)] = True
-        pos_it, neg_it = map(iter, [pos_classes, neg_classes])
-        classes = [
-            next(pos_it) if m else next(neg_it)
-            for m in pos_class_mask
-        ]
-
-        tokenizer = self.tokenizer
-        assert len(classes) > 0
-        p_use_neg_mask = 0.9
-        neg_mask = self.R.uniform() < p_use_neg_mask
-        if neg_mask:
-            prompt = f'For the given {modality} image, output the segmentation masks for the following objects: {_convert_list(classes, False)}.'
-        else:
-            prompt = f"For the given {modality} image, find the following objects, and output segmentation masks for the found objects: {_convert_list(classes, False)}. "
-        if len(pos_classes) > 0:
-            if len(neg_classes) > 0:
-                response = f'The following objects are found: {_convert_list(pos_classes, True)}. ' + \
-                           f'The following objects are not found: {_convert_list(neg_classes, neg_mask)}. '
-                mask_classes = pos_classes + (neg_classes if neg_mask else [])
-            else:
-                response = f'All of the requested objects are found: {_convert_list(classes, True)}. '
-                mask_classes = classes
-        else:
-            if neg_mask:
-                response = f'None of the requested objects are found: {_convert_list(classes, True)}. '
-                mask_classes = classes
-            else:
-                response = 'None of the requested objects are found. '
-                mask_classes = []
-        # mask_classes: the list of classes that with masks, following the order occurring in the conversation
-        return [(prompt, response)], mask_classes
-
-    def prepare_vlm_inputs(self, conversation: list[tuple[str, str]]):
-        # TODO: refactor this function to support various VLM formats
-        tokenizer = self.tokenizer
-        # template: CogVLM `chat_old_history_to_prompt`
-        # just for viewing, don't tokenize it directly
-        user_start = 'Question:'
-        sys_start = 'Answer:'
-        text = '\n'.join(
-            f'{user_start} {query} {sys_start} {answer}'
-            for query, answer in conversation
-        )
-        dtype = torch.long
-        text_ids = []
-        lm_targets = []
-        for query, answer in conversation:
-            prompt = f'{user_start} {query} {sys_start}'
-            prompt_ids = torch.tensor(tokenizer.encode(prompt, add_special_tokens=False))
-            answer_ids = torch.tensor(tokenizer.encode(answer, add_special_tokens=False))
-            text_ids.append(torch.cat([prompt_ids, answer_ids]))
-            lm_targets.append(
-                torch.cat([
-                    torch.full((prompt_ids.shape[0] - 1, ), CE_IGNORE_INDEX),
-                    answer_ids,
-                    torch.tensor([tokenizer.eos_token_id]),
-                ]),
-            )
-        text_ids = torch.cat(text_ids)
-        lm_targets = torch.cat(lm_targets)
-
-        # text_ids = torch.tensor(tokenizer.encode(text, add_special_tokens=False))
-        # TODO: dynamically adjust patch size according to image spacing
-        num_vision_tokens = np.prod([s // ps for s, ps in zip(self.patch_size, self.vit_patch_size)]).item() + 2  # including boi and eoi
-        input_ids = torch.cat([
-            torch.tensor([tokenizer.bos_token_id]),
-            torch.full((num_vision_tokens, ), 0),
-            text_ids,
-        ])
-        image_features_mask = torch.zeros(input_ids.shape[0], dtype=torch.bool)
-        image_features_mask[1:1 + num_vision_tokens] = True
-        token_type_ids = torch.cat([
-            torch.tensor([LANGUAGE_TOKEN_TYPE]),
-            torch.full((num_vision_tokens, ), VISION_TOKEN_TYPE),
-            # all new tokens will be processed by VE
-            # torch.where(text_ids < tokenizer.base_vocab_size, LANGUAGE_TOKEN_TYPE, VISION_TOKEN_TYPE),
-            torch.full((text_ids.shape[0], ), LANGUAGE_TOKEN_TYPE),
-        ])
-        position_ids = torch.cat([
-            torch.tensor([0, 1]),  # bos and boi
-            torch.full((num_vision_tokens - 2, ), 2),
-            torch.tensor([3]),  # eoi
-            torch.arange(4, 4 + text_ids.shape[0]),
-        ])
-        attention_mask = torch.ones(input_ids.shape, dtype=dtype)
-        lm_targets = torch.cat([torch.full((1 + num_vision_tokens, ), CE_IGNORE_INDEX), lm_targets])
-        return {
-            'input_ids': input_ids,
-            'image_features_mask': image_features_mask,
-            'token_type_ids': token_type_ids,
-            'position_ids': position_ids,
-            'attention_mask': attention_mask,
-            'lm_targets': lm_targets,
-        }, text
+        self.vit_patch_size: tuple3_t[int] = ensure_tuple_rep(vit_patch_size, 3)
 
     def __call__(self, data: dict):
         dataset_dir: Path = data['dataset_dir']
@@ -206,6 +219,7 @@ class SamplePatch(mt.RandomizableTransform):
         modalities = meta['modalities']
         modality_id = self.R.randint(len(modalities))
         patch_slice = [slice(p, p + s) for p, s in zip(position, self.patch_size)]
+        # TODO: support RGB
         image = np.load(data_dir / 'images.npy', 'r')[modality_id:modality_id + 1, *patch_slice]
         image = torch.as_tensor(np.array(image), device=self.device)
         pos_masks = np.load(data_dir / 'masks.npy', 'r')[:, *patch_slice]
@@ -214,14 +228,18 @@ class SamplePatch(mt.RandomizableTransform):
 
         # prepare sample output
         modality = modalities[modality_id]
-        conversation, mask_classes = self.gen_conversation(modality, pos_classes, neg_classes)
+        conversation, mask_classes = gen_conversation(
+            modality, pos_classes, neg_classes, self.tokenizer, self.R,
+        )
         masks = pos_masks.new_zeros((len(mask_classes), *pos_masks.shape[1:]))
         pos_class_to_idx = {name: i for i, name in enumerate(pos_classes)}
         for i, name in enumerate(mask_classes):
             if (pos_idx := pos_class_to_idx.get(name, -1)) != -1:
                 masks[i] = pos_masks[pos_idx]
 
-        vlm_inputs, conversation_text = self.prepare_vlm_inputs(conversation)
+        vlm_inputs, conversation_text = prepare_vlm_inputs(
+            conversation, self.tokenizer, self.patch_size, self.vit_patch_size,
+        )
         if np.less(image.shape[1:], self.patch_size).any():
             mean, std = meta['mean'], meta['std']
             padder = mt.SpatialPad(self.patch_size)
@@ -240,6 +258,70 @@ class SamplePatch(mt.RandomizableTransform):
         }
         return data
 
+class FullImageTransform(mt.Transform):
+    # TODO: merge these two transforms
+    # this class may include randomized procedure, but its output can be cached
+
+    def __init__(
+        self,
+        patch_size: tuple3_t[int],
+        vit_patch_size: param3_t[int],
+        tokenizer: MMMMTokenizer,
+        device: Device = 'cpu',
+    ):
+        super().__init__()
+        self.patch_size = patch_size
+        self.tokenizer = tokenizer
+        self.device = device
+        self.vit_patch_size: tuple3_t[int] = ensure_tuple_rep(vit_patch_size, 3)
+
+    def __call__(self, data: dict):
+        dataset_dir: Path = data['dataset_dir']
+        key: str = data['key']
+        meta: Meta = data['meta']
+        patch_dir = dataset_dir / 'patch' / encode_patch_size(self.patch_size) / key
+        # all positive classes on the whole image
+        assert len(meta['negative_classes']) == 0
+        pos_classes = meta['positive_classes']
+
+        # construct image & masks patch
+        data_dir = dataset_dir / 'data' / key
+        modalities = meta['modalities']
+        assert len(modalities) == 1
+        modality = modalities[0]
+        image = torch.as_tensor(np.load(data_dir / 'images.npy'), device=self.device)
+        masks = torch.as_tensor(np.load(data_dir / 'masks.npy'), device=self.device)
+        # prepare sample output
+        conversation, mask_classes = gen_conversation(
+            modality, pos_classes, [], self.tokenizer, 42, 1.,
+        )
+        pos_class_to_idx = {name: i for i, name in enumerate(pos_classes)}
+        mask_perm = [
+            pos_class_to_idx[name]
+            for i, name in enumerate(mask_classes)
+        ]
+        masks = masks[mask_perm]
+
+        vlm_inputs, conversation_text = prepare_vlm_inputs(
+            conversation, self.tokenizer, self.patch_size, self.vit_patch_size,
+        )
+        if np.less(image.shape[1:], self.patch_size).any():
+            mean, std = meta['mean'], meta['std']
+            padder = mt.SpatialPad(self.patch_size)
+            image = torch.cat([
+                padder(image[i:i + 1], value=-mean[i] / std[i])
+                for i in range(image.shape[0])
+            ])
+            masks = padder(masks)
+        data = {
+            'key': key,
+            'image': image,
+            'modality': modality,
+            'masks': masks,
+            'mask_classes': mask_classes,
+            'vlm_inputs': vlm_inputs,
+        }
+        return data
 class InputTransformD(mt.Transform):
     def __call__(self, data: dict):
         data = dict(data)
@@ -276,14 +358,15 @@ class MMMMDataModule(ExpDataModuleBase):
         self.trans_conf = trans
 
     @cache
-    def fit_data(self):
+    def fit_split(self):
         # FIXME: use a list as dataset with Python's multiprocessing can cause "memory leak": https://github.com/pytorch/pytorch/issues/13246
-        ret = []
+        all_data = []
         for dataset_dir in self.data_root.iterdir():
+            # NOTE: experiment on AMOS22 only now
             if dataset_dir.name != 'AMOS22':
                 continue
             dataset_meta: pd.DataFrame = pd.read_pickle(dataset_dir / 'meta.pkl')
-            ret.extend([
+            all_data.extend([
                 {
                     'dataset_dir': dataset_dir,
                     'key': key,
@@ -291,10 +374,25 @@ class MMMMDataModule(ExpDataModuleBase):
                 }
                 for key, meta in dataset_meta.iterrows()
             ])
-        return ret
+        np.random.RandomState(42).shuffle(all_data)
+        max_val_num: int = 0
+        train_data, val_data = [], []
+        for item in all_data:
+            # select fully labeled samples for validation
+            meta: Meta = item['meta']
+            if len(val_data) < max_val_num and len(meta['negative_classes']) == 0:
+                val_data.append(item)
+            else:
+                train_data.append(item)
+        return train_data, val_data
 
     def train_data(self) -> Sequence:
-        return self.fit_data()
+        train, _val = self.fit_split()
+        return train
+
+    def val_data(self) -> Sequence:
+        _train, val = self.fit_split()
+        return val
 
     def train_transform(self) -> Callable:
         conf = self.trans_conf
@@ -304,10 +402,19 @@ class MMMMDataModule(ExpDataModuleBase):
                 conf.vit_patch_size,
                 conf.num_pos,
                 conf.num_neg,
-                self.tokenizer
+                self.tokenizer,
             ),
             InputTransformD(),
         ])
+
+    def val_transform(self) -> Callable:
+        conf = self.trans_conf
+        return mt.Compose(
+            [
+                FullImageTransform(conf.patch_size, conf.vit_patch_size, self.tokenizer),
+                InputTransformD(),
+            ]
+        )
 
     def get_train_collate_fn(self):
         from luolib.data.utils import list_data_collate
