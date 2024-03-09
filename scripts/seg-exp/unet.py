@@ -4,7 +4,6 @@ from transformers import PreTrainedModel, PretrainedConfig
 
 from luolib.lightning.cli import LightningCLI
 from luolib.models import PlainConvUNetDecoder, UNetBackbone
-from mmmm.models.mmmm import DiceFocalLoss
 
 from base import DataModule, SemanticSegModel
 
@@ -23,7 +22,6 @@ class UNetForSemanticSeg(PreTrainedModel, SemanticSegModel):
         self.backbone = backbone
         self.decoder = decoder
         self.seg_head = nn.Conv3d(self.decoder.layer_channels[0], num_fg_classes, 1)
-        self.loss = DiceFocalLoss()
 
     def on_fit_start(self) -> None:
         super().on_fit_start()
