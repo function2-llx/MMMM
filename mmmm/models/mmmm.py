@@ -65,11 +65,14 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         torch_dtype: str | torch.dtype = 'auto',
         mask_loss: DiceFocalLoss | None = None,
         val_sw: SlidingWindow | None = None,
+        lora_lang: bool = True,
         **kwargs,
     ):
         """make jsonargparse happy
         This works thanks to that AST does not support this (according to the debug information)
         TODO: refactor the construction of PreTrainedModel
+        Args:
+            lora_lang: whether to fine-tune language weights
         """
         self: Self = super().from_pretrained(
             pretrained_model_name_or_path, *args,
@@ -81,6 +84,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             torch_dtype=torch_dtype,
             mask_loss=mask_loss,
             val_sw=val_sw,
+            lora_lang=lora_lang,
             **kwargs,
         )
         self.resize_token_embeddings(len(tokenizer))
@@ -99,11 +103,13 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         sam_args: SamArgs,
         mask_loss: DiceFocalLoss | None,
         val_sw: SlidingWindow | None,
+        lora_lang: bool,
         **kwargs,
     ):
         # adapt vision config
         vision_config: dict = vlm_config.vision_config
         vision_config.update(vars(vision_override))
+        vlm_config.lora_lang = lora_lang
         super().__init__(vlm_config, **kwargs)
         self.sam_model = build_sam_vit_3d(sam_args)
         self.seg_proj = nn.Sequential(

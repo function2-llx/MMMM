@@ -11,12 +11,12 @@ def _check_leaf_module(module: nn.Module):
     else:
         return False
 
-def get_lora_modules_default(module: nn.Module, prefix: str = ''):
+def get_lora_modules_default(module: nn.Module, prefix: str = '', recursive: bool = True):
     target_modules, modules_to_save = [], []
 
     # noinspection PyShadowingNames
     def dfs(m: nn.Module, prefix: str):
-        if hasattr(m, 'get_lora_modules'):
+        if recursive and hasattr(m, 'get_lora_modules'):
             # if the module has defined the `get_lora_modules` method, use it
             m_target_modules, m_modules_to_save = m.get_lora_modules(prefix=prefix)
             target_modules.extend(m_target_modules)

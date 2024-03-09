@@ -102,14 +102,17 @@ def get_expert_mask(token_type_ids: "torch.LongTensor(B, L)") -> "[torch.BoolTen
 class VisionExpertMLP(nn.Module):
     def __init__(self, config):
         super().__init__()
+        self.config = config
         self.language_mlp = MLP(config)
         self.vision_mlp = MLP(config)
 
-    # def get_lora_modules(self, prefix: str):
-    #     target_modules, modules_to_save = get_lora_modules_default(
-    #         self.vision_mlp, apply_prefix(prefix, 'vision_mlp'),
-    #     )
-    #     return target_modules, modules_to_save
+    def get_lora_modules(self, prefix: str):
+        if self.config.lora_lang:
+            return get_lora_modules_default(self, prefix, False)
+        else:
+            return get_lora_modules_default(
+                self.vision_mlp, apply_prefix(prefix, 'vision_mlp'),
+            )
 
     def forward(self, hidden_states: "torch.Tensor(B, L, D)", token_type_ids: "torch.LongTensor(B, L)"):
         output = torch.empty(hidden_states.shape, dtype=hidden_states.dtype, device=hidden_states.device)
@@ -219,13 +222,16 @@ class VisionExpertAttention(nn.Module):
         self.language_expert_query_key_value = nn.Linear(self.hidden_size, self.hidden_size * 3, bias=False)
         self.language_expert_dense = nn.Linear(self.hidden_size, self.hidden_size, bias=False)
 
-    # def get_lora_modules(self, prefix: str):
-    #     target_modules = [
-    #         apply_prefix(prefix, 'vision_expert_query_key_value'),
-    #         apply_prefix(prefix, 'vision_expert_dense'),
-    #     ]
-    #     modules_to_save = []
-    #     return target_modules, modules_to_save
+    def get_lora_modules(self, prefix: str):
+        if self.config.lora_lang:
+            return get_lora_modules_default(self, prefix, False)
+        else:
+            target_modules = [
+                apply_prefix(prefix, 'vision_expert_query_key_value'),
+                apply_prefix(prefix, 'vision_expert_dense'),
+            ]
+            modules_to_save = []
+            return target_modules, modules_to_save
 
     def _transpose_for_scores(self, tensor):
         """Transpose a 3D tensor [B, L, H*HD] into a 4D tensor with size [B H L HD]."""
