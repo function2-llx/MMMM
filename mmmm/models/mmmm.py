@@ -10,7 +10,6 @@ import torch.nn as nn
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
 from luolib.lightning import LightningModule
-from luolib.lightning.utils import OptimizationConf
 from luolib.types import param3_t, tuple2_t, tuple3_t
 
 from .cogvlm import CogVLMConfig, CogVLMForCausalLM
@@ -301,11 +300,12 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         assert (batch_size := len(masks_label)) == len(masks_logits)
         mask_loss_list: dict[str, list[torch.Tensor]] = {}
         for i in range(batch_size):
-            for k, v in self.mask_loss(masks_logits[i][None], masks_label[i][None]).items():
+            sample_mask_loss: dict = self.mask_loss(masks_logits[i][None], masks_label[i][None])
+            sample_mask_loss.pop('dice-pos-batch')
+            dice_pos_loss = sample_mask_loss.pop('dice-pos')
+            mask_loss_list.setdefault('dice-pos', []).append(dice_pos_loss[dice_pos_loss.isfinite()])
+            for k, v in sample_mask_loss.items():
                 mask_loss_list.setdefault(k, []).append(v)
-            # this won't take long, right?
-            pos_mask = einops.reduce(masks_label[i], 'c ... -> c', 'any')
-            mask_loss_list.setdefault('dice-pos', []).append(mask_loss_list['dice'][-1][pos_mask])  # sorry, I want to save some variable names
 
         mask_loss = {k: torch.cat(v).mean() for k, v in mask_loss_list.items()}
         return mask_loss
