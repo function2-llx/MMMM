@@ -65,7 +65,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         torch_dtype: str | torch.dtype = 'auto',
         mask_loss: DiceFocalLoss | None = None,
         val_sw: SlidingWindow | None = None,
-        lora_lang: bool = True,
+        lora_lang: bool = False,
         **kwargs,
     ):
         """make jsonargparse happy
