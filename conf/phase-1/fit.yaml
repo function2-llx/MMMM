@@ -55,4 +55,4 @@ optim:
       interval: step
       frequency: 200
 mask_loss:
-  lambda_focal: 3
+  lambda_focal: 1
