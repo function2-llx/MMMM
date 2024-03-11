@@ -1,9 +1,8 @@
 from dataclasses import dataclass
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional, Self
+from typing import Self
 
-import einops
 from jsonargparse import class_from_function
 import torch
 from torch.nn import functional as nnf
