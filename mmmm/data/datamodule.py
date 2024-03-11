@@ -38,10 +38,16 @@ def gen_conversation(
     R: np.random.RandomState | int,
     p_use_neg_mask: float = 0.9,
 ):
+    def _wrap_name(name: str):
+        ret = f'{tokenizer.bop_token} {name} {tokenizer.eop_token}'
+        if tokenizer.use_seg_token:
+            ret += f' {tokenizer.seg_token}'
+        return ret
+
     def _convert_list(names: Iterable[str], mask: bool):
         # FIXME: do not use special tokens explicitly in text
         if mask:
-            names = map(lambda name: f'{tokenizer.bop_token} {name} {tokenizer.eop_token} {tokenizer.seg_token}', names)
+            names = map(_wrap_name, names)
         return ', '.join(names)
 
     if isinstance(R, int):

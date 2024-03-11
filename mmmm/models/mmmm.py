@@ -119,7 +119,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         )
         self.lm_loss_weight = lm_loss_weight
         self.mask_loss_weight = mask_loss_weight
-        self.seg_token_id = tokenizer.seg_token_id
+        self.seg_token_id = tokenizer.seg_token_id if tokenizer.use_seg_token else tokenizer.eop_token_id
         self.mask_loss = mask_loss
         self.val_sw = val_sw
         self._setup_sam_requires_grad()
