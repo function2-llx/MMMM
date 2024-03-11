@@ -31,7 +31,6 @@ class InputTransformD(mt.Transform):
             'seg': seg,
         }
 
-
 class DataModule(ExpDataModuleBase):
     def __init__(
         self,

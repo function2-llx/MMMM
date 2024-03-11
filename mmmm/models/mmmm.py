@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 import os
-from typing import Self
+from pathlib import Path
+from typing import Any, Dict, Optional, Self
 
 import einops
 from jsonargparse import class_from_function
@@ -124,6 +125,9 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         self._setup_sam_requires_grad()
 
         self.post_init()
+
+    def load_default_adapter(self, ckpt_dir: Path):
+        self.peft_model.load_adapter(str(ckpt_dir / 'adapter'), 'default')
 
     def on_fit_start(self) -> None:
         super().on_fit_start()

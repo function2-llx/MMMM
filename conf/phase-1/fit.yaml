@@ -5,7 +5,7 @@ trainer:
   max_steps: 60000
   log_every_n_steps: 10
   precision: bf16-true
-  gradient_clip_val: 10
+  gradient_clip_val: 4
   gradient_clip_algorithm: norm
   save_embedding_layers: true
   callbacks:
