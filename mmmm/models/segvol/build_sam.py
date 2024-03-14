@@ -67,7 +67,7 @@ def _build_sam(
 
     if args.checkpoint is not None:
         # load from SegVol checkpoint
-        state_dict = torch.load(args.checkpoint)['model']
+        state_dict = torch.load(args.checkpoint, map_location='cpu')['model']
         prefix = 'module.'
         state_dict = {
             key[len(prefix):]: value

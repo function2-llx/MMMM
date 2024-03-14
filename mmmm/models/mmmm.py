@@ -12,6 +12,7 @@ from transformers.modeling_outputs import CausalLMOutputWithPast
 from luolib.lightning import LightningModule
 from luolib.types import param3_t, tuple2_t, tuple3_t
 
+from mmmm.utils import apply_prefix, get_lora_modules_default, get_lora_modules_finetune_all
 from .cogvlm import CogVLMConfig, CogVLMForCausalLM
 from .loss import DiceFocalLoss
 from .segvol import SamArgs, build_sam_vit_3d
@@ -21,8 +22,6 @@ __all__ = [
     'MMMMForCausalLM',
     'from_pretrained',
 ]
-
-from mmmm.utils import apply_prefix, get_lora_modules_default, get_lora_modules_finetune_all
 
 @dataclass
 class VisionConf:
@@ -118,7 +117,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         )
         self.lm_loss_weight = lm_loss_weight
         self.mask_loss_weight = mask_loss_weight
-        self.seg_token_id = tokenizer.seg_token_id if tokenizer.use_seg_token else tokenizer.eop_token_id
+        self.tokenizer = tokenizer
         self.mask_loss = mask_loss
         self.val_sw = val_sw
         self._setup_sam_requires_grad()
@@ -190,7 +189,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             grounding_enc_image,
             vlm_output.hidden_states[-1][:, :-1],
             # shift as suggested by GLaMM: https://github.com/mbzuai-oryx/groundingLMM/issues/16
-            input_ids[:, 1:] == self.seg_token_id,
+            self.tokenizer.create_seg_token_mask(input_ids[:, 1:]),
         )
         mask_loss = None if masks is None else self._compute_mask_loss(masks_logits, masks)
         return MMMMOutputWithPast(

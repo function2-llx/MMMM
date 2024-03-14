@@ -39,16 +39,10 @@ def gen_conversation(
     p_use_neg_mask: float = 0.9,
     inference: bool = False,
 ):
-    def _wrap_name(name: str):
-        ret = f'{tokenizer.bop_token} {name} {tokenizer.eop_token}'
-        if tokenizer.use_seg_token:
-            ret += f' {tokenizer.seg_token}'
-        return ret
-
     def _convert_list(names: Iterable[str], mask: bool):
         # FIXME: do not use special tokens explicitly in text
         if mask:
-            names = map(_wrap_name, names)
+            names = map(tokenizer.wrap_name, names)
         return ', '.join(names)
 
     if isinstance(R, int):
@@ -285,70 +279,71 @@ class SamplePatch(mt.RandomizableTransform):
         }
         return data
 
-class FullImageTransform(mt.Transform):
-    # TODO: merge these two transforms
-    # this class may include randomized procedure, but its output can be cached
+# class FullImageTransform(mt.Transform):
+#     # TODO: merge these two transforms
+#     # this class may include randomized procedure, but its output can be cached
+#
+#     def __init__(
+#         self,
+#         patch_size: tuple3_t[int],
+#         vit_patch_size: param3_t[int],
+#         tokenizer: MMMMTokenizer,
+#         device: Device = 'cpu',
+#     ):
+#         super().__init__()
+#         self.patch_size = patch_size
+#         self.tokenizer = tokenizer
+#         self.device = device
+#         self.vit_patch_size: tuple3_t[int] = ensure_tuple_rep(vit_patch_size, 3)
+#
+#     def __call__(self, data: dict):
+#         dataset_dir: Path = data['dataset_dir']
+#         key: str = data['key']
+#         meta: Meta = data['meta']
+#         patch_dir = dataset_dir / 'patch' / encode_patch_size(self.patch_size) / key
+#         # all positive classes on the whole image
+#         assert len(meta['negative_classes']) == 0
+#         pos_classes = meta['positive_classes']
+#
+#         # construct image & masks patch
+#         data_dir = dataset_dir / 'data' / key
+#         modalities = meta['modalities']
+#         assert len(modalities) == 1
+#         modality = modalities[0]
+#         image = torch.as_tensor(np.load(data_dir / 'images.npy'), device=self.device)
+#         masks = torch.as_tensor(np.load(data_dir / 'masks.npy'), device=self.device)
+#         # prepare sample output
+#         conversation, mask_classes = gen_conversation(
+#             modality, pos_classes, [], self.tokenizer, 42, 1.,
+#         )
+#         pos_class_to_idx = {name: i for i, name in enumerate(pos_classes)}
+#         mask_perm = [
+#             pos_class_to_idx[name]
+#             for i, name in enumerate(mask_classes)
+#         ]
+#         masks = masks[mask_perm]
+#
+#         vlm_inputs, conversation_text = prepare_vlm_inputs(
+#             conversation, self.tokenizer, self.patch_size, self.vit_patch_size,
+#         )
+#         if np.less(image.shape[1:], self.patch_size).any():
+#             mean, std = meta['mean'], meta['std']
+#             padder = mt.SpatialPad(self.patch_size)
+#             image = torch.cat([
+#                 padder(image[i:i + 1], value=-mean[i] / std[i])
+#                 for i in range(image.shape[0])
+#             ])
+#             masks = padder(masks)
+#         data = {
+#             'key': key,
+#             'image': image,
+#             'modality': modality,
+#             'masks': masks,
+#             'mask_classes': mask_classes,
+#             'vlm_inputs': vlm_inputs,
+#         }
+#         return data
 
-    def __init__(
-        self,
-        patch_size: tuple3_t[int],
-        vit_patch_size: param3_t[int],
-        tokenizer: MMMMTokenizer,
-        device: Device = 'cpu',
-    ):
-        super().__init__()
-        self.patch_size = patch_size
-        self.tokenizer = tokenizer
-        self.device = device
-        self.vit_patch_size: tuple3_t[int] = ensure_tuple_rep(vit_patch_size, 3)
-
-    def __call__(self, data: dict):
-        dataset_dir: Path = data['dataset_dir']
-        key: str = data['key']
-        meta: Meta = data['meta']
-        patch_dir = dataset_dir / 'patch' / encode_patch_size(self.patch_size) / key
-        # all positive classes on the whole image
-        assert len(meta['negative_classes']) == 0
-        pos_classes = meta['positive_classes']
-
-        # construct image & masks patch
-        data_dir = dataset_dir / 'data' / key
-        modalities = meta['modalities']
-        assert len(modalities) == 1
-        modality = modalities[0]
-        image = torch.as_tensor(np.load(data_dir / 'images.npy'), device=self.device)
-        masks = torch.as_tensor(np.load(data_dir / 'masks.npy'), device=self.device)
-        # prepare sample output
-        conversation, mask_classes = gen_conversation(
-            modality, pos_classes, [], self.tokenizer, 42, 1.,
-        )
-        pos_class_to_idx = {name: i for i, name in enumerate(pos_classes)}
-        mask_perm = [
-            pos_class_to_idx[name]
-            for i, name in enumerate(mask_classes)
-        ]
-        masks = masks[mask_perm]
-
-        vlm_inputs, conversation_text = prepare_vlm_inputs(
-            conversation, self.tokenizer, self.patch_size, self.vit_patch_size,
-        )
-        if np.less(image.shape[1:], self.patch_size).any():
-            mean, std = meta['mean'], meta['std']
-            padder = mt.SpatialPad(self.patch_size)
-            image = torch.cat([
-                padder(image[i:i + 1], value=-mean[i] / std[i])
-                for i in range(image.shape[0])
-            ])
-            masks = padder(masks)
-        data = {
-            'key': key,
-            'image': image,
-            'modality': modality,
-            'masks': masks,
-            'mask_classes': mask_classes,
-            'vlm_inputs': vlm_inputs,
-        }
-        return data
 class InputTransformD(mt.Transform):
     def __call__(self, data: dict):
         data = dict(data)
@@ -404,13 +399,17 @@ class MMMMDataModule(ExpDataModuleBase):
         np.random.RandomState(42).shuffle(all_data)
         max_val_num: int = 0
         train_data, val_data = [], []
+        all_classes = set()
         for item in all_data:
             # select fully labeled samples for validation
             meta: Meta = item['meta']
+            all_classes |= set(meta['positive_classes'])
+            all_classes |= set(meta['negative_classes'])
             if len(val_data) < max_val_num and len(meta['negative_classes']) == 0:
                 val_data.append(item)
             else:
                 train_data.append(item)
+        self.tokenizer.build_classes_index(all_classes)
         return train_data, val_data
 
     def train_data(self) -> Sequence:
@@ -434,14 +433,14 @@ class MMMMDataModule(ExpDataModuleBase):
             InputTransformD(),
         ])
 
-    def val_transform(self) -> Callable:
-        conf = self.trans_conf
-        return mt.Compose(
-            [
-                FullImageTransform(conf.patch_size, conf.vit_patch_size, self.tokenizer),
-                InputTransformD(),
-            ]
-        )
+    # def val_transform(self) -> Callable:
+    #     conf = self.trans_conf
+    #     return mt.Compose(
+    #         [
+    #             FullImageTransform(conf.patch_size, conf.vit_patch_size, self.tokenizer),
+    #             InputTransformD(),
+    #         ]
+    #     )
 
     def get_train_collate_fn(self):
         from luolib.data.utils import list_data_collate
