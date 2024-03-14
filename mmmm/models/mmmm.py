@@ -160,7 +160,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             modules_to_save.extend(c_modules_to_save)
         return target_modules, modules_to_save
 
-    def forward(
+    def forward_with_sam(
         self,
         *,
         global_enc_image: torch.FloatTensor,
@@ -203,9 +203,45 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             mask_loss=mask_loss,
         )
 
+    def prepare_inputs_for_generation(
+        self,
+        input_ids,
+        *,
+        token_type_ids,
+        position_ids,
+        image=None,
+        past_key_values=None,
+        attention_mask=None,
+        inputs_embeds=None,
+        image_features_mask: torch.BoolTensor,
+        **kwargs,
+    ):
+        if past_key_values:
+            input_ids = input_ids[:, -1:]
+            token_type_ids = token_type_ids[:, -1:]
+            position_ids = position_ids[:, -1:]
+
+        # if `inputs_embeds` are passed, we only want to use them in the 1st generation step
+        if inputs_embeds is not None and past_key_values is None:
+            model_inputs = {"inputs_embeds": inputs_embeds}
+        else:
+            model_inputs = {"input_ids": input_ids, 'image_features_mask': image_features_mask}
+
+        model_inputs.update(
+            {
+                "image": image,
+                "token_type_ids": token_type_ids,
+                "position_ids": position_ids,
+                "past_key_values": past_key_values,
+                "attention_mask": attention_mask,
+                "use_cache": kwargs.get("use_cache"),
+            }
+        )
+        return model_inputs
+
     def training_step(self, batch: dict, *args, **kwargs):
         image = batch['image']
-        output: MMMMOutputWithPast = self(
+        output: MMMMOutputWithPast = self.forward_with_sam(
             global_enc_image=image,
             grounding_enc_image=image,
             masks=batch['masks'],

@@ -22,6 +22,7 @@ class MMMMTokenizer(LlamaTokenizer):
         self.use_seg_token = use_seg_token
         if use_seg_token:
             self.seg_token = '<SEG>'
+            self.add_tokens(self.seg_token, special_tokens=True)
             self.seg_token_id: int = self.convert_tokens_to_ids(self.seg_token)
 
     @classmethod

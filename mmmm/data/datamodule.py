@@ -37,6 +37,7 @@ def gen_conversation(
     tokenizer: MMMMTokenizer,
     R: np.random.RandomState | int,
     p_use_neg_mask: float = 0.9,
+    inference: bool = False,
 ):
     def _wrap_name(name: str):
         ret = f'{tokenizer.bop_token} {name} {tokenizer.eop_token}'
@@ -90,6 +91,9 @@ def gen_conversation(
             response = 'None of the requested objects are found. '
             mask_classes = []
     # mask_classes: the list of classes that with masks, following the order occurring in the conversation
+    if inference:
+        # TODO: refactor this function
+        response = ''
     return [(prompt, response)], mask_classes
 
 def prepare_vlm_inputs(
@@ -97,6 +101,7 @@ def prepare_vlm_inputs(
     tokenizer: MMMMTokenizer,
     patch_size: tuple3_t[int],
     vit_patch_size: tuple3_t[int],
+    inference: bool = False,
 ):
     # TODO: refactor this function to support various VLM formats
     # template: CogVLM `chat_old_history_to_prompt`
@@ -109,21 +114,32 @@ def prepare_vlm_inputs(
     )
     dtype = torch.long
     text_ids = []
-    lm_targets = []
-    for query, answer in conversation:
+    if inference:
+        # the last response must be empty for inference
+        assert conversation[-1][1] == ''
+    else:
+        lm_targets = []
+    for i, (query, answer) in enumerate(conversation):
         prompt = f'{user_start} {query} {sys_start}'
         prompt_ids = torch.tensor(tokenizer.encode(prompt, add_special_tokens=False))
-        answer_ids = torch.tensor(tokenizer.encode(answer, add_special_tokens=False))
-        text_ids.append(torch.cat([prompt_ids, answer_ids]))
-        lm_targets.append(
-            torch.cat([
-                torch.full((prompt_ids.shape[0] - 1, ), CE_IGNORE_INDEX),
-                answer_ids,
-                torch.tensor([tokenizer.eos_token_id]),
-            ]),
-        )
+
+        if answer == '':
+            assert i == len(conversation) - 1 and inference
+            text_ids.append(prompt_ids)
+        else:
+            answer_ids = torch.tensor(tokenizer.encode(answer, add_special_tokens=False))
+            text_ids.append(torch.cat([prompt_ids, answer_ids]))
+            if not inference:
+                lm_targets.append(
+                    torch.cat([
+                        torch.full((prompt_ids.shape[0] - 1, ), CE_IGNORE_INDEX),
+                        answer_ids,
+                        torch.tensor([tokenizer.eos_token_id]),
+                    ]),
+                )
     text_ids = torch.cat(text_ids)
-    lm_targets = torch.cat(lm_targets)
+    if not inference:
+        lm_targets = torch.cat(lm_targets)
 
     # text_ids = torch.tensor(tokenizer.encode(text, add_special_tokens=False))
     # TODO: dynamically adjust patch size according to image spacing
@@ -149,15 +165,18 @@ def prepare_vlm_inputs(
         torch.arange(4, 4 + text_ids.shape[0]),
     ])
     attention_mask = torch.ones(input_ids.shape, dtype=dtype)
-    lm_targets = torch.cat([torch.full((1 + num_vision_tokens, ), CE_IGNORE_INDEX), lm_targets])
-    return {
+    if not inference:
+        lm_targets = torch.cat([torch.full((1 + num_vision_tokens, ), CE_IGNORE_INDEX), lm_targets])
+    inputs = {
         'input_ids': input_ids,
         'image_features_mask': image_features_mask,
         'token_type_ids': token_type_ids,
         'position_ids': position_ids,
         'attention_mask': attention_mask,
-        'lm_targets': lm_targets,
-    }, text
+    }
+    if not inference:
+        inputs['lm_targets'] = lm_targets
+    return inputs, text
 
 class SamplePatch(mt.RandomizableTransform):
     def __init__(
@@ -169,6 +188,7 @@ class SamplePatch(mt.RandomizableTransform):
         tokenizer: MMMMTokenizer,
         force_fg_ratio: float = 1 / 3,
         device: Device = 'cpu',
+        inference: bool = False,
     ):
         super().__init__()
         self.patch_size = patch_size
@@ -178,6 +198,7 @@ class SamplePatch(mt.RandomizableTransform):
         self.force_fg_ratio = force_fg_ratio
         self.device = device
         self.vit_patch_size: tuple3_t[int] = ensure_tuple_rep(vit_patch_size, 3)
+        self.inference = inference
 
     def __call__(self, data: dict):
         dataset_dir: Path = data['dataset_dir']
@@ -235,7 +256,7 @@ class SamplePatch(mt.RandomizableTransform):
         # prepare sample output
         modality = modalities[modality_id]
         conversation, mask_classes = gen_conversation(
-            modality, pos_classes, neg_classes, self.tokenizer, self.R,
+            modality, pos_classes, neg_classes, self.tokenizer, self.R, inference=self.inference,
         )
         masks = pos_masks.new_zeros((len(mask_classes), *pos_masks.shape[1:]))
         pos_class_to_idx = {name: i for i, name in enumerate(pos_classes)}
@@ -244,7 +265,7 @@ class SamplePatch(mt.RandomizableTransform):
                 masks[i] = pos_masks[pos_idx]
 
         vlm_inputs, conversation_text = prepare_vlm_inputs(
-            conversation, self.tokenizer, self.patch_size, self.vit_patch_size,
+            conversation, self.tokenizer, self.patch_size, self.vit_patch_size, self.inference,
         )
         if np.less(image.shape[1:], self.patch_size).any():
             mean, std = meta['mean'], meta['std']

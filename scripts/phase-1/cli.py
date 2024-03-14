@@ -11,6 +11,7 @@ from mmmm.utils import get_lora_modules_default
 
 class CLI(LightningCLI):
     model: MMMMForCausalLM
+    datamodule: MMMMDataModule
 
     def add_arguments_to_parser(self, parser: LightningArgumentParser):
         super().add_arguments_to_parser(parser)
