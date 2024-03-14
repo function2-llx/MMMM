@@ -240,16 +240,22 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
 
     def training_step(self, batch: dict, *args, **kwargs):
         image = batch['image']
+        vlm_inputs = batch['vlm_inputs']
         output: MMMMOutputWithPast = self.forward_with_sam(
             global_enc_image=image,
             grounding_enc_image=image,
             masks=batch['masks'],
-            **batch['vlm_inputs'],
+            **vlm_inputs,
             use_cache=False,
+        )
+        seg_token_mask = self.tokenizer.create_seg_token_mask(vlm_inputs['input_ids'][:, 1:])
+        seg_lm_loss = nnf.cross_entropy(
+            output.lm_logits[:, :-1][seg_token_mask], vlm_inputs['lm_targets'][:, :-1][seg_token_mask],
         )
         loss = output.lm_loss * self.lm_loss_weight + output.mask_loss['total'] * self.mask_loss_weight
         self.log_dict({
             'train/lm_loss': output.lm_loss,
+            'train/seg_lm_loss': seg_lm_loss,
             'train/mask_loss': output.mask_loss['total'],
             'train/loss': loss,
             **{f'train/{k}_loss': v for k, v in output.mask_loss.items() if k != 'total'},
