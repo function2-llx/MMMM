@@ -38,7 +38,7 @@ optim:
           warmup_prefix: true
       interval: step
       frequency: 200
-  else:
+  default:
     optimizer:
       class_path: torch.optim.AdamW
       init_args:

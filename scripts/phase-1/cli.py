@@ -1,13 +1,21 @@
+from dataclasses import dataclass
+
 from lightning.pytorch.cli import LightningArgumentParser
 from peft import LoraConfig, get_peft_model
 
-from luolib.lightning.cli import LightningCLI
+from luolib.lightning.cli import LightningCLI, OptimDict as OptimDictBase
 from luolib.lightning.trainer import PeftTrainer
+from luolib.lightning.utils import OptimConf
 
 from mmmm.data import MMMMDataModule
 from mmmm.models import MMMMForCausalLM, MMMMTokenizer
 from mmmm.models.loss import DiceFocalLoss
 from mmmm.utils import get_lora_modules_default
+
+@dataclass
+class OptimDict(OptimDictBase):
+    sam: OptimConf
+    default: OptimConf
 
 class CLI(LightningCLI):
     model: MMMMForCausalLM
@@ -36,6 +44,7 @@ def main():
         model_class=MMMMForCausalLM,
         datamodule_class=MMMMDataModule,
         trainer_class=PeftTrainer,
+        optim_dict_class=OptimDict,
     )
 
 if __name__ == '__main__':
