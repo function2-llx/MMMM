@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 import os
 from pathlib import Path
-from typing import Self
+from typing import Literal, Self
 
 from jsonargparse import class_from_function
 import torch
@@ -64,6 +64,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         mask_loss: DiceFocalLoss | None = None,
         val_sw: SlidingWindow | None = None,
         lora_lang: bool = False,
+        seg_hidden_layer: Literal[0, -1] = -1,
         **kwargs,
     ):
         """make jsonargparse happy
@@ -83,6 +84,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             mask_loss=mask_loss,
             val_sw=val_sw,
             lora_lang=lora_lang,
+            seg_hidden_layer=seg_hidden_layer,
             **kwargs,
         )
         self.resize_token_embeddings(len(tokenizer))
@@ -102,6 +104,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         mask_loss: DiceFocalLoss | None,
         val_sw: SlidingWindow | None,
         lora_lang: bool,
+        seg_hidden_layer: Literal[0, -1],
         **kwargs,
     ):
         # adapt vision config
@@ -121,6 +124,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         self.mask_loss = mask_loss
         self.val_sw = val_sw
         self._setup_sam_requires_grad()
+        self.seg_hidden_layer = seg_hidden_layer
 
         self.post_init()
 
@@ -185,11 +189,20 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             **kwargs,
         )
         # SAM part
+        match self.seg_hidden_layer:
+            case 0:
+                seg_hidden_states = vlm_output.hidden_states[0]
+                seg_token_mask = self.tokenizer.create_seg_token_mask(input_ids)
+            case -1:
+                seg_hidden_states = vlm_output.hidden_states[-1][:, :-1]
+                seg_token_mask = self.tokenizer.create_seg_token_mask(input_ids[:, 1:])
+            case _:
+                raise ValueError
         masks_logits = self._generate_and_postprocess_masks(
             grounding_enc_image,
-            vlm_output.hidden_states[-1][:, :-1],
+            seg_hidden_states,
             # shift as suggested by GLaMM: https://github.com/mbzuai-oryx/groundingLMM/issues/16
-            self.tokenizer.create_seg_token_mask(input_ids[:, 1:]),
+            seg_token_mask,
         )
         mask_loss = None if masks is None else self._compute_mask_loss(masks_logits, masks)
         return MMMMOutputWithPast(
