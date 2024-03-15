@@ -216,6 +216,19 @@ class Processor(ABC):
         images, masks = map(lambda x: trans(x).contiguous(), [images, masks])
         return images, masks
 
+    def compute_resize(self, images: MetaTensor) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.int32]]:
+        if self.max_smaller_edge < (smaller_edge := min(images.shape[2:])):
+            scale_xy = smaller_edge / self.max_smaller_edge
+        else:
+            scale_xy = 1.
+        new_spacing_xy = images.pixdim[1:].min().item() * scale_xy
+        new_spacing_z = max(images.pixdim[0].item(), new_spacing_xy * self.min_aniso_ratio)
+        new_spacing = np.array([new_spacing_z, new_spacing_xy, new_spacing_xy])
+        scale_z = new_spacing_z / images.pixdim[0].item()
+        scale = np.array([scale_z, scale_xy, scale_xy])
+        new_shape = (np.array(images.shape[1:]) / scale).round().astype(np.int32)
+        return new_spacing, new_shape
+
     def process_data_point(self, data_point: DataPoint) -> tuple[dict, dict] | None:
         """
         Returns:
@@ -243,17 +256,8 @@ class Processor(ABC):
             crop_mask = clip_intensity(images, is_natural)
             # 2. crop images and masks
             images, masks = crop(images, masks, crop_mask)
-            # 3. compute resize (adapt to self.max_smaller_edge and self.min_aniso_ratio)
-            if self.max_smaller_edge < (smaller_edge := min(images.shape[2:])):
-                scale_xy = smaller_edge / self.max_smaller_edge
-            else:
-                scale_xy = 1.
-            new_spacing_xy = images.pixdim[2:].min().item() * scale_xy
-            new_spacing_z = max(images.pixdim[0].item(), new_spacing_xy * self.min_aniso_ratio)
-            new_spacing = np.array([new_spacing_z, new_spacing_xy, new_spacing_xy])
-            scale_z = new_spacing_z / images.pixdim[0].item()
-            scale = np.array([scale_z, scale_xy, scale_xy])
-            new_shape = np.round(np.array(images.shape[1:]) / scale).astype(np.int32)
+            # 3. compute resize (default: adapt to self.max_smaller_edge and self.min_aniso_ratio)
+            new_spacing, new_shape = self.compute_resize(images)
             info.update({
                 **{f'shape-{i}': s.item() for i, s in enumerate(new_shape)},
                 **{f'space-{i}': s.item() for i, s in enumerate(new_spacing)},
