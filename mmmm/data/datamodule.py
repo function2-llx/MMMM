@@ -385,7 +385,7 @@ class MMMMDataModule(ExpDataModuleBase):
         all_data = []
         for dataset_dir in self.data_root.iterdir():
             # NOTE: experiment on AMOS22 only now
-            if dataset_dir.name != 'AMOS22':
+            if dataset_dir.name != 'AMOS22-debug':
                 continue
             dataset_meta: pd.DataFrame = pd.read_pickle(dataset_dir / 'meta.pkl')
             all_data.extend([
