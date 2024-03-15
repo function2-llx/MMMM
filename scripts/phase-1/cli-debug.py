@@ -6,11 +6,11 @@ from luolib.lightning.trainer import Trainer
 from mmmm.data import MMMMDataModule
 from mmmm.models import MMMMTokenizer
 from mmmm.models.loss import DiceFocalLoss
-from mmmm.models.mmmm import MMMMDebug, MMMMDebugSAM
 from mmmm_debug.data import DataModuleDebug
+from mmmm_debug.model import MMMMDebugSAM
 
 class CLI(LightningCLI):
-    model: MMMMDebug
+    model: MMMMDebugSAM
     datamodule: MMMMDataModule
 
     def add_arguments_to_parser(self, parser: LightningArgumentParser):
