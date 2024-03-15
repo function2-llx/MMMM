@@ -9,6 +9,7 @@ from torch.nn import functional as nnf
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
 from luolib.lightning import LightningModule
+from luolib.models.param import NoWeightDecayParameter
 from luolib.types import param3_t, tuple2_t, tuple3_t
 
 from mmmm.utils import apply_prefix, get_lora_modules_default, get_lora_modules_finetune_all
@@ -397,8 +398,8 @@ class MMMMDebug(MMMMForCausalLM):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.model.requires_grad_(False)
-        self.model.embed_tokens.requires_grad_(True)
         self.lm_head.requires_grad_(False)
+        self.cls_embed = NoWeightDecayParameter(torch.randn(15, self.sam_model.prompt_encoder.embed_dim))
 
     def training_step(self, batch: dict, *args, **kwargs):
         image = batch['image']
@@ -407,7 +408,7 @@ class MMMMDebug(MMMMForCausalLM):
         masks = batch['masks']
         seg_token_mask = self.tokenizer.create_seg_token_mask(input_ids)
         seg_hidden_states = [
-            self.model.embed_tokens(input_ids[i, seg_token_mask[i]])
+            self.cls_embed[input_ids[i, seg_token_mask[i]] - self.tokenizer.seg_token_id_start]
             for i in range(seg_token_mask.shape[0])
         ]
         masks_logits = self._generate_and_postprocess_masks(image, seg_hidden_states)
@@ -420,6 +421,7 @@ class MMMMDebug(MMMMForCausalLM):
                 **{f'train/{k}_loss': v for k, v in mask_loss.items() if k != 'total'},
             }
         )
+
         return loss
 
 from_debug = class_from_function(MMMMDebug.from_pretrained, MMMMDebug, name='mmmm_debug_t')
