@@ -1,4 +1,9 @@
-data: data.yaml
+data:
+  class_path: DataModuleDebugSAM
+  init_args:
+    patch_size: [48, 224, 224]
+    dataloader:
+      train_batch_size: 4
 tokenizer: ../tokenizer-debug.yaml
 logger: logger-debug.yaml
 trainer:

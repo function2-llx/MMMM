@@ -138,7 +138,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         # and from_pretrained call .eval() by default https://github.com/huggingface/transformers/blob/v4.38.2/src/transformers/modeling_utils.py#L3523-L3524
         # also see: https://huggingface.co/docs/transformers/v4.38.2/en/main_classes/model#transformers.PreTrainedModel (search "model.eval()")
         self.train()
-        # self.model will be adapted by LoRA
+        # self.model will be adapted by LoRA; FIXME: but what about LoRA?
         self.model.eval()
         self.gradient_checkpointing_enable({'use_reentrant': False})
 
@@ -421,7 +421,34 @@ class MMMMDebug(MMMMForCausalLM):
                 **{f'train/{k}_loss': v for k, v in mask_loss.items() if k != 'total'},
             }
         )
-
         return loss
 
 from_debug = class_from_function(MMMMDebug.from_pretrained, MMMMDebug, name='mmmm_debug_t')
+
+class MMMMDebugSAM(MMMMForCausalLM):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.model.requires_grad_(False)
+        self.lm_head.requires_grad_(False)
+        self.cls_embed = NoWeightDecayParameter(torch.randn(15, self.sam_model.prompt_encoder.embed_dim))
+
+    def _setup_sam_requires_grad(self):
+        pass
+
+    def training_step(self, batch: dict, *args, **kwargs):
+        image = batch['img']
+        masks = batch['seg']
+        seg_hidden_states = [self.cls_embed for _ in range(image.shape[0])]
+        masks_logits = self._generate_and_postprocess_masks(image, seg_hidden_states)
+        mask_loss = self._compute_mask_loss(masks_logits, masks)
+        loss = mask_loss['total']
+        self.log_dict(
+            {
+                'train/mask_loss': mask_loss['total'],
+                'train/loss': loss,
+                **{f'train/{k}_loss': v for k, v in mask_loss.items() if k != 'total'},
+            }
+        )
+        return loss
+
+from_debug_sam = class_from_function(MMMMDebugSAM.from_pretrained, MMMMDebugSAM, name='mmmm_debug_sam_t')
