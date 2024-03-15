@@ -10,9 +10,7 @@ from torch.nn import functional as nnf
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
 from luolib.lightning import LightningModule
-from luolib.models.param import NoWeightDecayParameter
 from luolib.types import param3_t, tuple2_t, tuple3_t
-
 from mmmm.utils import apply_prefix, get_lora_modules_default, get_lora_modules_finetune_all
 from .cogvlm import CogVLMConfig, CogVLMForCausalLM
 from .loss import DiceFocalLoss
@@ -29,7 +27,6 @@ class VisionArgs:
     pos_embed_shape: tuple3_t[int]
     pt_pos_embed_shape: tuple2_t[int] | None = None
     patch_size: param3_t[int] = 16
-    lora_lang: bool = False
 
 @dataclass(kw_only=True)
 class MMMMOutputWithPast:
@@ -59,13 +56,14 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         *args,
         lm_loss_weight: float = 1.,
         mask_loss_weight: float = 1.,
-        vlm_override: VisionArgs,
+        vision_override: VisionArgs,
         tokenizer: MMMMTokenizer,
         sam: SamArgs,
         torch_dtype: str | torch.dtype = 'auto',
         mask_loss: DiceFocalLoss | None = None,
         val_sw: SlidingWindow | None = None,
         seg_hidden_layer: Literal[0, -1] = -1,
+        lora_lang: bool = False,
         **kwargs,
     ):
         """make jsonargparse happy
@@ -76,7 +74,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         """
         self: Self = super().from_pretrained(
             pretrained_model_name_or_path, *args,
-            vlm_override=vlm_override,
+            vision_override=vision_override,
             torch_dtype=torch_dtype,
             **kwargs,
         )
@@ -94,6 +92,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         )
         self.val_sw = val_sw
         self.seg_hidden_layer = seg_hidden_layer
+        self.model.config.lora_lang = lora_lang
         # make the `from_pretrained` interface consistent, since `resize_token_embeddings` will create new modules without preserving original attributes
         self.eval()
         return self
@@ -109,12 +108,12 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         self,
         vlm_config: CogVLMConfig,
         *,
-        vlm_override: VisionArgs,
+        vision_override: VisionArgs,
         **kwargs,
     ):
         # adapt vision config
         vision_config: dict = vlm_config.vision_config
-        vision_config.update(vars(vlm_override))
+        vision_config.update(vars(vision_override))
         super().__init__(vlm_config, **kwargs)
 
     def load_default_adapter(self, ckpt_dir: Path):

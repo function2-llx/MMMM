@@ -73,7 +73,7 @@ class MMMMDebugSAM(MMMMForCausalLM):
         cls,
         pretrained_model_name_or_path: str | Path | None,
         *args,
-        vlm_override: VisionArgs,
+        vision_override: VisionArgs,
         tokenizer: MMMMTokenizer,
         sam: SamArgs,
         mask_loss: DiceFocalLoss | None = None,
@@ -81,7 +81,7 @@ class MMMMDebugSAM(MMMMForCausalLM):
     ):
         self: Self = super().from_pretrained(
             pretrained_model_name_or_path, *args,
-            vlm_override=vlm_override,
+            vision_override=vision_override,
             tokenizer=tokenizer,
             sam=sam,
             torch_dtype='auto',

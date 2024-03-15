@@ -40,7 +40,7 @@ model:
   class_path: mmmm_debug.model.from_debug_sam
   init_args:
     pretrained_model_name_or_path: THUDM/cogvlm-chat-hf
-    vlm_override:
+    vision_override:
       patch_size: [8, 16, 16]
       pos_embed_shape: [6, 14, 14]
       pt_pos_embed_shape: [35, 35]
