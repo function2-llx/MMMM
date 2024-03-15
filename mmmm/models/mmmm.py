@@ -397,14 +397,8 @@ class MMMMDebug(MMMMForCausalLM):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.model.requires_grad_(False)
+        self.model.embed_tokens.requires_grad_(True)
         self.lm_head.requires_grad_(False)
-
-    def get_lora_modules(self, prefix: str):
-        # only fine-tune SAM
-        target_modules, modules_to_save = get_lora_modules_finetune_all(
-            self.sam_model, apply_prefix(prefix, 'sam_model'),
-        )
-        return target_modules, modules_to_save
 
     def training_step(self, batch: dict, *args, **kwargs):
         image = batch['image']
