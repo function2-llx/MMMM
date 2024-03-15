@@ -6,7 +6,6 @@ from typing import Literal, Self
 from jsonargparse import class_from_function
 import torch
 from torch.nn import functional as nnf
-import torch.nn as nn
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
 from luolib.lightning import LightningModule
@@ -193,19 +192,19 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         match self.seg_hidden_layer:
             case 0:
                 # for debugging
-                seg_hidden_states = vlm_output.hidden_states[0]
+                seg_layer_hidden_states = vlm_output.hidden_states[0]
                 seg_token_mask = self.tokenizer.create_seg_token_mask(input_ids)
             case -1:
                 # shift as suggested by GLaMM: https://github.com/mbzuai-oryx/groundingLMM/issues/16
-                seg_hidden_states = vlm_output.hidden_states[-1][:, :-1]
+                seg_layer_hidden_states = vlm_output.hidden_states[-1][:, :-1]
                 seg_token_mask = self.tokenizer.create_seg_token_mask(input_ids[:, 1:])
             case _:
                 raise ValueError
-        masks_logits = self._generate_and_postprocess_masks(
-            grounding_enc_image,
-            seg_hidden_states,
-            seg_token_mask,
-        )
+        seg_hidden_states = [
+            seg_layer_hidden_states[i, seg_token_mask[i]]
+            for i in range(seg_layer_hidden_states.shape[0])
+        ]
+        masks_logits = self._generate_and_postprocess_masks(grounding_enc_image, seg_hidden_states)
         mask_loss = None if masks is None else self._compute_mask_loss(masks_logits, masks)
         return MMMMOutputWithPast(
             lm_loss=vlm_output.loss,
@@ -324,19 +323,14 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         output_hidden_states = [output_hidden_states]
         return output_hidden_states
 
-    def _generate_and_postprocess_masks(
-        self,
-        image: torch.Tensor,
-        hidden_states: torch.Tensor,
-        seg_token_mask: torch.BoolTensor,
-    ) -> list[torch.Tensor]:
+    def _generate_and_postprocess_masks(self, image: torch.Tensor, seg_hidden_states: list[torch.Tensor]) -> list[torch.Tensor]:
         sam = self.sam_model
         # TODO: check grad vs no_grad
         image_embeddings = sam.image_encoder(image)
         masks_logits_list = []
-        for i in range(hidden_states.shape[0]):
-            if seg_token_mask[i].any():
-                text_embedding = self.seg_proj(hidden_states[i, seg_token_mask[i]])
+        for i in range(image_embeddings.shape[0]):
+            if seg_hidden_states[i].shape[0] > 0:
+                text_embedding = self.seg_proj(seg_hidden_states[i])
                 sparse_embeddings, dense_embeddings = sam.prompt_encoder(
                     image_embeddings.shape[2:], text_embedding=text_embedding,
                 )
@@ -398,3 +392,40 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         return generated_output_ids, pred_masks
 
 from_pretrained = class_from_function(MMMMForCausalLM.from_pretrained, MMMMForCausalLM)
+
+class MMMMDebug(MMMMForCausalLM):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.model.requires_grad_(False)
+        self.lm_head.requires_grad_(False)
+
+    def get_lora_modules(self, prefix: str):
+        # only fine-tune SAM
+        target_modules, modules_to_save = get_lora_modules_finetune_all(
+            self.sam_model, apply_prefix(prefix, 'sam_model'),
+        )
+        return target_modules, modules_to_save
+
+    def training_step(self, batch: dict, *args, **kwargs):
+        image = batch['image']
+        vlm_inputs = batch['vlm_inputs']
+        input_ids = vlm_inputs['input_ids']
+        masks = batch['masks']
+        seg_token_mask = self.tokenizer.create_seg_token_mask(input_ids)
+        seg_hidden_states = [
+            self.model.embed_tokens(input_ids[i, seg_token_mask[i]])
+            for i in range(seg_token_mask.shape[0])
+        ]
+        masks_logits = self._generate_and_postprocess_masks(image, seg_hidden_states)
+        mask_loss = None if masks is None else self._compute_mask_loss(masks_logits, masks)
+        loss = mask_loss['total']
+        self.log_dict(
+            {
+                'train/mask_loss': mask_loss['total'],
+                'train/loss': loss,
+                **{f'train/{k}_loss': v for k, v in mask_loss.items() if k != 'total'},
+            }
+        )
+        return loss
+
+from_debug = class_from_function(MMMMDebug.from_pretrained, MMMMDebug, name='mmmm_debug_t')
