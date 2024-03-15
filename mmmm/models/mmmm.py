@@ -191,9 +191,11 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         # SAM part
         match self.seg_hidden_layer:
             case 0:
+                # for debugging
                 seg_hidden_states = vlm_output.hidden_states[0]
                 seg_token_mask = self.tokenizer.create_seg_token_mask(input_ids)
             case -1:
+                # shift as suggested by GLaMM: https://github.com/mbzuai-oryx/groundingLMM/issues/16
                 seg_hidden_states = vlm_output.hidden_states[-1][:, :-1]
                 seg_token_mask = self.tokenizer.create_seg_token_mask(input_ids[:, 1:])
             case _:
@@ -201,7 +203,6 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         masks_logits = self._generate_and_postprocess_masks(
             grounding_enc_image,
             seg_hidden_states,
-            # shift as suggested by GLaMM: https://github.com/mbzuai-oryx/groundingLMM/issues/16
             seg_token_mask,
         )
         mask_loss = None if masks is None else self._compute_mask_loss(masks_logits, masks)
