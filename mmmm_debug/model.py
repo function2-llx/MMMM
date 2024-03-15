@@ -9,7 +9,7 @@ from luolib.lightning import LightningModule
 from luolib.models.param import NoWeightDecayParameter
 from mmmm.models import MMMMForCausalLM, MMMMTokenizer
 from mmmm.models.loss import DiceFocalLoss
-from mmmm.models.mmmm import VisionConf
+from mmmm.models.mmmm import VisionArgs
 from mmmm.models.segvol import SamArgs
 
 class MMMMDebug(MMMMForCausalLM):
@@ -73,7 +73,7 @@ class MMMMDebugSAM(MMMMForCausalLM):
         cls,
         pretrained_model_name_or_path: str | Path | None,
         *args,
-        vision_override: VisionConf,
+        vlm_override: VisionArgs,
         tokenizer: MMMMTokenizer,
         sam: SamArgs,
         mask_loss: DiceFocalLoss | None = None,
@@ -81,7 +81,7 @@ class MMMMDebugSAM(MMMMForCausalLM):
     ):
         self: Self = super().from_pretrained(
             pretrained_model_name_or_path, *args,
-            vision_override=vision_override,
+            vlm_override=vlm_override,
             tokenizer=tokenizer,
             sam=sam,
             torch_dtype='auto',

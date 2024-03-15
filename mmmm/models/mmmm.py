@@ -25,7 +25,7 @@ __all__ = [
 ]
 
 @dataclass
-class VisionConf:
+class VisionArgs:
     pos_embed_shape: tuple3_t[int]
     pt_pos_embed_shape: tuple2_t[int] | None = None
     patch_size: param3_t[int] = 16
@@ -59,7 +59,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         *args,
         lm_loss_weight: float = 1.,
         mask_loss_weight: float = 1.,
-        vision_override: VisionConf,
+        vlm_override: VisionArgs,
         tokenizer: MMMMTokenizer,
         sam: SamArgs,
         torch_dtype: str | torch.dtype = 'auto',
@@ -76,7 +76,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         """
         self: Self = super().from_pretrained(
             pretrained_model_name_or_path, *args,
-            vision_override=vision_override,
+            vlm_override=vlm_override,
             torch_dtype=torch_dtype,
             **kwargs,
         )
@@ -109,12 +109,12 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         self,
         vlm_config: CogVLMConfig,
         *,
-        vision_override: VisionConf,
+        vlm_override: VisionArgs,
         **kwargs,
     ):
         # adapt vision config
         vision_config: dict = vlm_config.vision_config
-        vision_config.update(vars(vision_override))
+        vision_config.update(vars(vlm_override))
         super().__init__(vlm_config, **kwargs)
 
     def load_default_adapter(self, ckpt_dir: Path):
