@@ -113,11 +113,12 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         vlm_config.lora_lang = lora_lang
         super().__init__(vlm_config, **kwargs)
         self.sam_model = build_sam_vit_3d(sam_args)
-        self.seg_proj = nn.Sequential(
-            nn.Linear(vlm_config.hidden_size, vlm_config.hidden_size),
-            nn.ReLU(inplace=True),
-            nn.Linear(vlm_config.hidden_size, self.sam_model.prompt_encoder.embed_dim),
-        )
+        # self.seg_proj = nn.Sequential(
+        #     nn.Linear(vlm_config.hidden_size, vlm_config.hidden_size),
+        #     nn.ReLU(inplace=True),
+        #     nn.Linear(vlm_config.hidden_size, self.sam_model.prompt_encoder.embed_dim),
+        # )
+        self.seg_proj = lambda x: x[..., :self.sam_model.prompt_encoder.embed_dim]
         self.lm_loss_weight = lm_loss_weight
         self.mask_loss_weight = mask_loss_weight
         self.tokenizer = tokenizer
