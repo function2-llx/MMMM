@@ -1,8 +1,15 @@
+from pathlib import Path
+from typing import Self
+
 from jsonargparse import class_from_function
 import torch
 
+from luolib.lightning import LightningModule
 from luolib.models.param import NoWeightDecayParameter
-from mmmm.models import MMMMForCausalLM
+from mmmm.models import MMMMForCausalLM, MMMMTokenizer
+from mmmm.models.loss import DiceFocalLoss
+from mmmm.models.mmmm import VisionConf
+from mmmm.models.segvol import SamArgs
 
 class MMMMDebug(MMMMForCausalLM):
     def __init__(self, *args, **kwargs):
@@ -38,8 +45,8 @@ from_debug = class_from_function(MMMMDebug.from_pretrained, MMMMDebug, name='mmm
 class MMMMDebugSAM(MMMMForCausalLM):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.model.requires_grad_(False)
-        self.lm_head.requires_grad_(False)
+        # del self.model
+        # del self.lm_head
         self.cls_embed = NoWeightDecayParameter(torch.randn(15, self.sam_model.prompt_encoder.embed_dim))
 
     def _setup_sam_requires_grad(self):
@@ -60,5 +67,43 @@ class MMMMDebugSAM(MMMMForCausalLM):
             }
         )
         return loss
+
+    def on_fit_start(self) -> None:
+        LightningModule.on_fit_start(self)
+        self.train()
+        self.gradient_checkpointing_enable({'use_reentrant': False})
+
+    @classmethod
+    def from_pretrained(
+        cls,
+        pretrained_model_name_or_path: str | Path | None,
+        *args,
+        vision_override: VisionConf,
+        tokenizer: MMMMTokenizer,
+        sam: SamArgs,
+        mask_loss: DiceFocalLoss | None = None,
+        **kwargs,
+    ):
+        """make jsonargparse happy
+        This works thanks to that AST does not support this (according to the debug information)
+        TODO: refactor the construction of PreTrainedModel
+        Args:
+            lora_lang: whether to fine-tune language weights
+        """
+        self: Self = super().from_pretrained(
+            pretrained_model_name_or_path, *args,
+            vision_override=vision_override,
+            tokenizer=tokenizer,
+            sam=sam,
+            torch_dtype='auto',
+            mask_loss=mask_loss,
+            **kwargs,
+        )
+        self.resize_token_embeddings(len(tokenizer))
+        # make the `from_pretrained` interface consistent, since `resize_token_embeddings` will create new modules without preserving original attributes
+        self.eval()
+        del self.model
+        del self.lm_head
+        return self
 
 from_debug_sam = class_from_function(MMMMDebugSAM.from_pretrained, MMMMDebugSAM, name='mmmm_debug_sam_t')

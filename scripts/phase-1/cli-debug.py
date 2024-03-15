@@ -16,7 +16,7 @@ class CLI(LightningCLI):
     def add_arguments_to_parser(self, parser: LightningArgumentParser):
         super().add_arguments_to_parser(parser)
         parser.add_subclass_arguments(MMMMTokenizer, 'tokenizer')
-        parser.link_arguments('tokenizer', f'{self.data_prefix}.tokenizer', apply_on='instantiate')
+        # parser.link_arguments('tokenizer', f'{self.data_prefix}.tokenizer', apply_on='instantiate')
         parser.link_arguments('tokenizer', f'{self.model_prefix}.tokenizer', apply_on='instantiate')
         # dataclass as class: https://github.com/omni-us/jsonargparse/issues/287
         # parser.add_class_arguments(LoraConfig, 'lora')
@@ -27,6 +27,7 @@ def main():
     CLI(
         model_class=MMMMDebugSAM,
         datamodule_class=DataModuleDebug,
+        subclass_mode_data=False,
         trainer_class=Trainer,
     )
 
