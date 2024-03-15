@@ -399,7 +399,7 @@ class MMMMDebug(MMMMForCausalLM):
         super().__init__(*args, **kwargs)
         self.model.requires_grad_(False)
         self.lm_head.requires_grad_(False)
-        self.cls_embed = NoWeightDecayParameter(torch.randn(15, self.sam_model.prompt_encoder.embed_dim))
+        self.cls_embed = NoWeightDecayParameter(torch.randn(16, self.sam_model.prompt_encoder.embed_dim))
 
     def training_step(self, batch: dict, *args, **kwargs):
         image = batch['image']

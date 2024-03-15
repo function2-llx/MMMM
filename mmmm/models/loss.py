@@ -107,10 +107,10 @@ class DiceFocalLoss(_MONAIDiceFocalLoss):
 
     def __init__(self, **kwargs):
         super().__init__(reduction='none', smooth_nr=0, smooth_dr=0, sigmoid=True, **kwargs)
+        self.dice.forward = partial(patched_dice_forward, self.dice)
 
     def forward(self, input: torch.Tensor, target: torch.Tensor) -> dict[str, torch.Tensor]:
         input = input.float()
-        self.dice.forward = partial(patched_dice_forward, self.dice)
         dice_loss = self.dice(input, target)
         # this won't take long, right?
         pos_class_mask = einops.reduce(target, 'n c ... -> n c', 'any')

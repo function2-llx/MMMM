@@ -36,7 +36,7 @@ def gen_conversation(
     neg_classes: list[str],
     tokenizer: MMMMTokenizer,
     R: np.random.RandomState | int,
-    p_use_neg_mask: float = 0.9,
+    p_use_neg_mask: float = 1.,
     inference: bool = False,
 ):
     def _convert_list(names: Iterable[str], mask: bool):
