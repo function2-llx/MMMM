@@ -35,19 +35,18 @@ trainer:
       save_last: true
       verbose: true
 optim:
-  all:
-    optimizer:
-      class_path: torch.optim.AdamW
+  optimizer:
+    class_path: torch.optim.AdamW
+    init_args:
+      lr: 1e-4
+      weight_decay: 5e-2
+  lr_scheduler:
+    scheduler:
+      class_path: timm.scheduler.CosineLRScheduler
       init_args:
-        lr: 1e-4
-        weight_decay: 5e-2
-    lr_scheduler:
-      scheduler:
-        class_path: timm.scheduler.CosineLRScheduler
-        init_args:
-          t_initial: ${trainer.max_steps}
-          t_in_epochs: false
-          warmup_t: 0
-          warmup_prefix: true
-      interval: step
-      frequency: 200
+        t_initial: ${trainer.max_steps}
+        t_in_epochs: false
+        warmup_t: 0
+        warmup_prefix: true
+    interval: step
+    frequency: 200

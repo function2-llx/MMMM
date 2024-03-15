@@ -5,7 +5,7 @@ from transformers import PreTrainedModel, PretrainedConfig
 from luolib.lightning.cli import LightningCLI
 from luolib.models import PlainConvUNetDecoder, UNetBackbone
 
-from base import DataModule, SemanticSegModel
+from base import DataModuleDebug, SemanticSegModel
 
 class UNetForSemanticSeg(PreTrainedModel, SemanticSegModel):
     supports_gradient_checkpointing: bool = True
@@ -40,7 +40,7 @@ def main():
     CLI(
         model_class=UNetForSemanticSeg,
         subclass_mode_data=False,
-        datamodule_class=DataModule,
+        datamodule_class=DataModuleDebug,
         subclass_mode_model=False,
     )
 

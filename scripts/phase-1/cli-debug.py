@@ -1,17 +1,13 @@
-from dataclasses import dataclass
-
 from lightning.pytorch.cli import LightningArgumentParser
-from peft import LoraConfig, get_peft_model
 
-from luolib.lightning.cli import LightningCLI, OptimDict as OptimDictBase
-from luolib.lightning.trainer import PeftTrainer, Trainer
-from luolib.lightning.utils import OptimConf
+from luolib.lightning.cli import LightningCLI
+from luolib.lightning.trainer import Trainer
 
 from mmmm.data import MMMMDataModule
-from mmmm.models import MMMMForCausalLM, MMMMTokenizer
+from mmmm.models import MMMMTokenizer
 from mmmm.models.loss import DiceFocalLoss
-from mmmm.models.mmmm import MMMMDebug
-from mmmm.utils import get_lora_modules_default
+from mmmm.models.mmmm import MMMMDebug, MMMMDebugSAM
+from mmmm_debug.data import DataModuleDebug
 
 class CLI(LightningCLI):
     model: MMMMDebug
@@ -27,18 +23,10 @@ class CLI(LightningCLI):
         parser.add_class_arguments(DiceFocalLoss, 'mask_loss')
         parser.link_arguments('mask_loss', f'{self.model_prefix}.mask_loss', apply_on='instantiate')
 
-    # def instantiate_classes(self) -> None:
-    #     super().instantiate_classes()
-    #     model = self.model
-    #     config = self.active_config_init
-    #     lora_config: LoraConfig = config.lora
-    #     lora_config.target_modules, lora_config.modules_to_save = get_lora_modules_default(model)
-    #     model.set_peft_model(get_peft_model(model, lora_config))
-
 def main():
     CLI(
-        model_class=MMMMDebug,
-        datamodule_class=MMMMDataModule,
+        model_class=MMMMDebugSAM,
+        datamodule_class=DataModuleDebug,
         trainer_class=Trainer,
     )
 
