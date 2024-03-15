@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import Self
 
 from jsonargparse import class_from_function
+import numpy as np
 import torch
 
 from luolib.lightning import LightningModule
@@ -43,12 +44,6 @@ class MMMMDebug(MMMMForCausalLM):
 from_debug = class_from_function(MMMMDebug.from_pretrained, MMMMDebug, name='mmmm_debug_t')
 
 class MMMMDebugSAM(MMMMForCausalLM):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        # del self.model
-        # del self.lm_head
-        self.cls_embed = NoWeightDecayParameter(torch.randn(15, self.sam_model.prompt_encoder.embed_dim))
-
     def _setup_sam_requires_grad(self):
         pass
 
@@ -84,12 +79,6 @@ class MMMMDebugSAM(MMMMForCausalLM):
         mask_loss: DiceFocalLoss | None = None,
         **kwargs,
     ):
-        """make jsonargparse happy
-        This works thanks to that AST does not support this (according to the debug information)
-        TODO: refactor the construction of PreTrainedModel
-        Args:
-            lora_lang: whether to fine-tune language weights
-        """
         self: Self = super().from_pretrained(
             pretrained_model_name_or_path, *args,
             vision_override=vision_override,
@@ -99,9 +88,8 @@ class MMMMDebugSAM(MMMMForCausalLM):
             mask_loss=mask_loss,
             **kwargs,
         )
-        self.resize_token_embeddings(len(tokenizer))
+        self.cls_embed = NoWeightDecayParameter(torch.randn(15, self.sam_model.prompt_encoder.embed_dim))
         # make the `from_pretrained` interface consistent, since `resize_token_embeddings` will create new modules without preserving original attributes
-        self.eval()
         del self.model
         del self.lm_head
         return self

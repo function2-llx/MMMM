@@ -39,6 +39,10 @@ class Sam(nn.Module):
         self.prompt_encoder = prompt_encoder
         self.mask_decoder = mask_decoder
 
+    @property
+    def prompt_dim(self):
+        return self.prompt_encoder.embed_dim
+
     @torch.no_grad()
     def forward(
         self,

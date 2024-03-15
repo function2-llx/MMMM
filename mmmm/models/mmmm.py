@@ -5,6 +5,7 @@ from typing import Literal, Self
 
 from jsonargparse import class_from_function
 import torch
+from torch import nn
 from torch.nn import functional as nnf
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
@@ -28,6 +29,7 @@ class VisionConf:
     pos_embed_shape: tuple3_t[int]
     pt_pos_embed_shape: tuple2_t[int] | None = None
     patch_size: param3_t[int] = 16
+    lora_lang: bool = False
 
 @dataclass(kw_only=True)
 class MMMMOutputWithPast:
@@ -63,7 +65,6 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         torch_dtype: str | torch.dtype = 'auto',
         mask_loss: DiceFocalLoss | None = None,
         val_sw: SlidingWindow | None = None,
-        lora_lang: bool = False,
         seg_hidden_layer: Literal[0, -1] = -1,
         **kwargs,
     ):
@@ -75,59 +76,46 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         """
         self: Self = super().from_pretrained(
             pretrained_model_name_or_path, *args,
-            lm_loss_weight=lm_loss_weight,
-            mask_loss_weight=mask_loss_weight,
             vision_override=vision_override,
-            tokenizer=tokenizer,
-            sam_args=sam,
             torch_dtype=torch_dtype,
-            mask_loss=mask_loss,
-            val_sw=val_sw,
-            lora_lang=lora_lang,
-            seg_hidden_layer=seg_hidden_layer,
             **kwargs,
         )
         self.resize_token_embeddings(len(tokenizer))
+        self.sam_model = build_sam_vit_3d(sam)
+        self._setup_sam_requires_grad()
+        self.tokenizer = tokenizer
+        self.lm_loss_weight = lm_loss_weight
+        self.mask_loss_weight = mask_loss_weight
+        self.mask_loss = mask_loss
+        self.seg_proj = nn.Sequential(
+            nn.Linear(self.hidden_size, self.hidden_size),
+            nn.ReLU(inplace=True),
+            nn.Linear(self.hidden_size, self.sam_model.prompt_dim),
+        )
+        self.val_sw = val_sw
+        self.seg_hidden_layer = seg_hidden_layer
         # make the `from_pretrained` interface consistent, since `resize_token_embeddings` will create new modules without preserving original attributes
         self.eval()
         return self
+
+    def _init_weights(self, module):
+        """Let's happily do nothing"""
+
+    @property
+    def hidden_size(self):
+        return self.model.embed_tokens.embedding_dim
 
     def __init__(
         self,
         vlm_config: CogVLMConfig,
         *,
-        lm_loss_weight: float,
-        mask_loss_weight: float,
         vision_override: VisionConf,
-        tokenizer: MMMMTokenizer,
-        sam_args: SamArgs,
-        mask_loss: DiceFocalLoss | None,
-        val_sw: SlidingWindow | None,
-        lora_lang: bool,
-        seg_hidden_layer: Literal[0, -1],
         **kwargs,
     ):
         # adapt vision config
         vision_config: dict = vlm_config.vision_config
         vision_config.update(vars(vision_override))
-        vlm_config.lora_lang = lora_lang
         super().__init__(vlm_config, **kwargs)
-        self.sam_model = build_sam_vit_3d(sam_args)
-        # self.seg_proj = nn.Sequential(
-        #     nn.Linear(vlm_config.hidden_size, vlm_config.hidden_size),
-        #     nn.ReLU(inplace=True),
-        #     nn.Linear(vlm_config.hidden_size, self.sam_model.prompt_encoder.embed_dim),
-        # )
-        self.seg_proj = lambda x: x[..., :self.sam_model.prompt_encoder.embed_dim]
-        self.lm_loss_weight = lm_loss_weight
-        self.mask_loss_weight = mask_loss_weight
-        self.tokenizer = tokenizer
-        self.mask_loss = mask_loss
-        self.val_sw = val_sw
-        self._setup_sam_requires_grad()
-        self.seg_hidden_layer = seg_hidden_layer
-
-        self.post_init()
 
     def load_default_adapter(self, ckpt_dir: Path):
         self.peft_model.load_adapter(str(ckpt_dir / 'adapter'), 'default')

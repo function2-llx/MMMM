@@ -20,10 +20,10 @@ class InputTransformD(mt.Transform):
         seg = one_hot(data['seg'].as_tensor(), self.num_fg_classes + 1, dim=0, dtype=torch.bool)
         seg = seg[1:]  # remove bg
         return {
+            'case': data['case'],
             'img': img,
             'seg': seg,
         }
-
 
 class DataModuleDebug(ExpDataModuleBase):
     def __init__(
