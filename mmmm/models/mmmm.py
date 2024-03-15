@@ -85,11 +85,12 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         self.lm_loss_weight = lm_loss_weight
         self.mask_loss_weight = mask_loss_weight
         self.mask_loss = mask_loss
-        self.seg_proj = nn.Sequential(
-            nn.Linear(self.hidden_size, self.hidden_size),
-            nn.ReLU(inplace=True),
-            nn.Linear(self.hidden_size, self.sam_model.prompt_dim),
-        )
+        # self.seg_proj = nn.Sequential(
+        #     nn.Linear(self.hidden_size, self.hidden_size),
+        #     nn.ReLU(inplace=True),
+        #     nn.Linear(self.hidden_size, self.sam_model.prompt_dim),
+        # )
+        self.seg_proj = lambda x: x[..., :self.sam_model.prompt_dim]
         self.val_sw = val_sw
         self.seg_hidden_layer = seg_hidden_layer
         self.model.config.lora_lang = lora_lang
