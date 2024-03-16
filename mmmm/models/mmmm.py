@@ -266,7 +266,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         # make some custom log
         lm_targets = vlm_inputs['lm_targets']
         lm_loss_dict = {
-            f'train/{name}_lm_loss': nnf.cross_entropy(output.lm_logits[token_mask], lm_targets[token_mask])
+            f'train/token-lm/{name}_loss': nnf.cross_entropy(output.lm_logits[token_mask], lm_targets[token_mask])
             for name, token_mask in {
                 'seg': self.tokenizer.create_seg_token_mask(lm_targets),
                 'bop': lm_targets == self.tokenizer.bop_token_id,
