@@ -48,7 +48,19 @@ class SlidingWindow:
     batch_size: int
     overlap: float = 0.5
 
+# class EmbeddingWrapper(nn.Module):
+#     def __init__(self, base: nn.Embedding, new_size: int):
+#         self.base = base
+#         self.new = nn.Embedding(new_size)
+#
+#     def forward(self, input: torch.Tensor) -> torch.Tensor:
+#         return F.embedding(
+#             input, self.weight, self.padding_idx, self.max_norm,
+#             self.norm_type, self.scale_grad_by_freq, self.sparse)
+
 class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
+    tokenizer: MMMMTokenizer
+
     @classmethod
     def from_pretrained(
         cls,
@@ -250,18 +262,27 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             **vlm_inputs,
             use_cache=False,
         )
-        seg_token_mask = self.tokenizer.create_seg_token_mask(vlm_inputs['input_ids'][:, 1:])
-        seg_lm_loss = nnf.cross_entropy(
-            output.lm_logits[:, :-1][seg_token_mask], vlm_inputs['lm_targets'][:, :-1][seg_token_mask],
-        )
         loss = output.lm_loss * self.lm_loss_weight + output.mask_loss['total'] * self.mask_loss_weight
-        self.log_dict({
-            'train/lm_loss': output.lm_loss,
-            'train/seg_lm_loss': seg_lm_loss,
-            'train/mask_loss': output.mask_loss['total'],
-            'train/loss': loss,
-            **{f'train/{k}_loss': v for k, v in output.mask_loss.items() if k != 'total'},
-        })
+        # make some custom log
+        lm_targets = vlm_inputs['lm_targets']
+        lm_loss_dict = {
+            f'train/{name}_lm_loss': nnf.cross_entropy(output.lm_logits[token_mask], lm_targets[token_mask])
+            for name, token_mask in {
+                'seg': self.tokenizer.create_seg_token_mask(lm_targets),
+                'bop': lm_targets == self.tokenizer.bop_token_id,
+                'eop': lm_targets == self.tokenizer.eop_token_id,
+            }.items()
+        }
+        self.log_dict(
+            {
+                'train/lm_loss': output.lm_loss,
+                **lm_loss_dict,
+                'train/mask_loss': output.mask_loss['total'],
+                'train/loss': loss,
+                **{f'train/{k}_loss': v for k, v in output.mask_loss.items() if k != 'total'},
+            },
+            sync_dist=True,
+        )
         return loss
 
     # def sw_predictor(self, patch: torch.Tensor):
@@ -340,15 +361,24 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
     def _compute_mask_loss(self, masks_logits: list[torch.Tensor], masks_label: list[torch.BoolTensor]) -> dict[str, torch.Tensor]:
         assert (batch_size := len(masks_label)) == len(masks_logits)
         mask_loss_list: dict[str, list[torch.Tensor]] = {}
+        dice_pos_loss = []
         for i in range(batch_size):
             sample_mask_loss: dict = self.mask_loss(masks_logits[i][None], masks_label[i][None])
             sample_mask_loss.pop('dice-pos-batch')
-            dice_pos_loss = sample_mask_loss.pop('dice-pos')
-            mask_loss_list.setdefault('dice-pos', []).append(dice_pos_loss[dice_pos_loss.isfinite()])
+            sample_dice_pos_loss: torch.Tensor = sample_mask_loss.pop('dice-pos')
+            dice_pos_loss.append(sample_dice_pos_loss[sample_dice_pos_loss.isfinite()])
             for k, v in sample_mask_loss.items():
                 mask_loss_list.setdefault(k, []).append(v)
-
         mask_loss = {k: torch.cat(v).mean() for k, v in mask_loss_list.items()}
+        # gather dice pos loss across devices
+        dice_pos_loss = torch.cat(dice_pos_loss)
+        weight = dice_pos_loss.numel()
+        loss_weight = torch.tensor(
+            [0 if weight == 0 else dice_pos_loss.mean(), weight], dtype=dice_pos_loss.dtype,
+        )
+        loss_weight = self.all_gather(loss_weight)
+        dice_pos_loss, weight = loss_weight[:, 0], loss_weight[:, 1]
+        mask_loss['dice-pos'] = torch.dot(dice_pos_loss, weight) / weight.sum().clip(min=1e-8)
         return mask_loss
 
     def evaluate(self, input_ids, token_type_ids, global_enc_images, grounding_enc_images, resize_list, orig_sizes, max_tokens_new=32):
