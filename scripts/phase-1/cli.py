@@ -15,6 +15,7 @@ from mmmm.utils import get_lora_modules_default
 @dataclass
 class OptimDict(OptimDictBase):
     sam: OptimConf
+    seg_proj: OptimConf
     default: OptimConf
 
 class CLI(LightningCLI):

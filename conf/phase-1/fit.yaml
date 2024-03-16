@@ -22,7 +22,7 @@ trainer:
 #      timeout: 0:0:45
 optim:
   sam:
-    prefix: [sam_model, seg_proj]
+    prefix: sam_model
     optimizer:
       class_path: torch.optim.AdamW
       init_args:
@@ -35,6 +35,23 @@ optim:
           t_initial: ${trainer.max_steps}
           t_in_epochs: false
           warmup_t: 1000
+          warmup_prefix: true
+      interval: step
+      frequency: 200
+  seg_proj:
+    prefix: seg_proj
+    optimizer:
+      class_path: torch.optim.AdamW
+      init_args:
+        lr: 1e-4
+        weight_decay: 5e-2
+    lr_scheduler:
+      scheduler:
+        class_path: timm.scheduler.CosineLRScheduler
+        init_args:
+          t_initial: ${trainer.max_steps}
+          t_in_epochs: false
+          warmup_t: 0
           warmup_prefix: true
       interval: step
       frequency: 200
