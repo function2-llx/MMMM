@@ -33,25 +33,25 @@ class MMMMTokenizer(LlamaTokenizer):
                 self.add_tokens(self.seg_tokens, True)
 
     @classmethod
-    def build(cls, hf_model_path: Path, use_seg_token: bool = True, share_seg_token: bool = True):
+    def build(cls, hf_model_path: Path, use_seg_token: bool = False, share_seg_token: bool = True):
         # no type hint (https://github.com/huggingface/transformers/blob/v4.38.2/src/transformers/tokenization_utils_base.py#L1827)
         # will cause jsonargparse fail (https://github.com/omni-us/jsonargparse/issues/454).
         return cls.from_pretrained(
             hf_model_path, use_seg_token=use_seg_token, share_seg_token=share_seg_token,
         )
 
-    def create_seg_token_mask(self, input_ids: torch.LongTensor):
+    def create_seg_token_mask(self, token_ids: torch.LongTensor):
         """
         Args:
-            input_ids: the (possibly shifted) token ids to find seg tokens
+            token_ids: the (possibly shifted) token ids to find seg tokens
         """
         if self.use_seg_token:
             if self.share_seg_token:
-                return input_ids == self.seg_token_id
+                return token_ids == self.seg_token_id
             else:
-                return input_ids >= self.seg_token_id_start
+                return token_ids >= self.seg_token_id_start
         else:
-            return input_ids == self.eop_token_id
+            return token_ids == self.eop_token_id
 
     def build_classes_index(self, names: set[str]):
         """This method is useful only when not self.share_seg_token"""

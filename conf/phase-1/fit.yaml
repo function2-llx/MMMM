@@ -34,7 +34,7 @@ optim:
         init_args:
           t_initial: ${trainer.max_steps}
           t_in_epochs: false
-          warmup_t: 200
+          warmup_t: 1000
           warmup_prefix: true
       interval: step
       frequency: 200
