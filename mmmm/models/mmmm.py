@@ -226,7 +226,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         past_key_values=None,
         attention_mask=None,
         inputs_embeds=None,
-        image_features_mask: torch.BoolTensor,
+        image_features_mask: torch.BoolTensor | None = None,
         **kwargs,
     ):
         if past_key_values:

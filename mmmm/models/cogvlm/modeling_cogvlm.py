@@ -787,12 +787,17 @@ class CogVLMForCausalLM(CogVLMPreTrainedModel):
         if getattr(outputs, "state", None) is not None:
             model_kwargs["state"] = outputs.state
 
-        # update token_type_ids with last value
+        # update token_type_ids with LANGUAGE_TOKEN_TYPE
         if "token_type_ids" in model_kwargs:
             token_type_ids = model_kwargs["token_type_ids"]
             new_token_type_ids = torch.ones(size=(token_type_ids.shape[0], 1), dtype=token_type_ids.dtype,
                                             device=token_type_ids.device) * LANGUAGE_TOKEN_TYPE
             model_kwargs["token_type_ids"] = torch.cat([token_type_ids, new_token_type_ids], dim=-1)
+
+        # increase position_ids
+        if (position_ids := model_kwargs.get('position_ids')) is not None:
+            new_position_ids = position_ids[:, -1:] + 1
+            model_kwargs['position_ids'] = torch.cat([position_ids, new_position_ids], dim=-1)
 
         if not is_encoder_decoder:
             # update attention mask
