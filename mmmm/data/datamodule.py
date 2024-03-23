@@ -272,6 +272,7 @@ class SamplePatch(mt.RandomizableTransform):
         data = {
             'key': key,
             'image': image,
+            'spacing': meta['spacing'],
             'modality': modality,
             'masks': masks,
             'mask_classes': mask_classes,
