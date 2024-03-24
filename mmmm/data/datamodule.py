@@ -5,6 +5,7 @@ from functools import cache
 import json
 from pathlib import Path
 from typing import Callable, List, Sequence, Iterator, Optional
+import random
 
 from einops import repeat
 import h5py
@@ -534,7 +535,7 @@ class VQADataModule(ExpDataModuleBase):
         trans: TransConf,
         tokenizer: MMMMTokenizer,
         data_root: Path = PROCESSED_VL_DATA_ROOT,
-        datasets: List[str] = ['Slake'],
+        datasets: List[str] = ['Slake', 'VQA-Med'],
         *args, **kwargs,
     ):
         super().__init__(*args, **kwargs)
@@ -554,7 +555,6 @@ class VQADataModule(ExpDataModuleBase):
                     'image': item['image'],
                     'question': item['question'],
                     'answer': item['answer'],
-                    'type': item['type'],
                 }
                 for item in data
             ])
@@ -567,11 +567,71 @@ class VQADataModule(ExpDataModuleBase):
                 data = json.load(f)
             val_data.extend([
                 {
-                    'dataset_dir': dataset,
+                    'dataset_dir': self.data_root / dataset,
                     'image': item['image'],
                     'question': item['question'],
                     'answer': item['answer'],
-                    'type': item['type'],
+                }
+                for item in data
+            ])
+
+        return val_data
+    
+    def train_transform(self) -> Callable:
+        conf = self.trans_conf
+        return VLTransform(
+            conf.vit_patch_size,
+            self.tokenizer,
+        )
+
+    def get_train_collate_fn(self):
+        return mmmm_collate_fn
+    
+class CapDataModule(ExpDataModuleBase):
+    def __init__(
+        self,
+        trans: TransConf,
+        tokenizer: MMMMTokenizer,
+        data_root: Path = PROCESSED_VL_DATA_ROOT,
+        datasets: List[str] = ['Slake', 'VQA-Med'],
+        *args, **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        self.tokenizer = tokenizer
+        self.data_root = data_root
+        self.datasets = datasets
+        self.trans_conf = trans
+        self.prompts = [
+            '',
+        ]
+
+    def train_data(self) -> Sequence:
+        train_data = []
+        for dataset in self.datasets:
+            with open(self.data_root / dataset / 'train.json') as f:
+                data = json.load(f)
+            train_data.extend([
+                {
+                    'dataset_dir': self.data_root / dataset,
+                    'image': item['image'],
+                    'question': random.choice(self.prompts),
+                    'answer': item['caption'],
+                }
+                for item in data
+            ])
+        return train_data
+
+    def val_data(self) -> Sequence:
+        val_data = []
+        for dataset in self.datasets:
+            with open(self.data_root / dataset / 'validate.json') as f:
+                data = json.load(f)
+            val_data.extend([
+                {
+                    'dataset_dir': self.data_root / dataset,
+                    'image': item['image'],
+                    'question': random.choice(self.prompts),
+                    'answer': item['caption'],
                 }
                 for item in data
             ])
@@ -589,7 +649,7 @@ class VQADataModule(ExpDataModuleBase):
         return mmmm_collate_fn
 
 class MMMMRandomSampler(Sampler):
-    def __init__(self, data_source: ConcatDataset, num_samples: int, sample_rates: np.NDArray[np.float64]):
+    def __init__(self, data_source: ConcatDataset, num_samples: int, sample_rates: np.ndarray[np.float64]):
         self.num_samples = num_samples
         self.sample_rates = sample_rates
         self.len_cumsum = np.cumsum([len(d) for d in data_source.datasets])
@@ -614,7 +674,8 @@ class MMMMDataModule(ExpDataModuleBase):
         seg_data_root: str = PROCESSED_SEG_DATA_ROOT,
         vl_data_root: str = PROCESSED_VL_DATA_ROOT,
         seg_data: List[str] = ['AMOS22', 'AMOS22-debug'],
-        vqa_data: List[str] = ['Slake'],
+        vqa_data: List[str] = ['Slake', 'VQA-Med'],
+        cap_data: List[str] = ['PMC-OA'],
         datamodules: List[str] = ['seg', 'vqa'],
         sample_rates: List[int] = [1, 1],
         *args, **kwargs,
@@ -631,6 +692,10 @@ class MMMMDataModule(ExpDataModuleBase):
         if 'vqa' in datamodules:
             self.datamodules.append(
                 VQADataModule(trans, tokenizer, vl_data_root, vqa_data)
+            )
+        if 'cap' in datamodules:
+            self.datamodules.append(
+                CapDataModule(trans, tokenizer, vl_data_root, cap_data)
             )
 
     def train_dataset(self) -> Sequence:
