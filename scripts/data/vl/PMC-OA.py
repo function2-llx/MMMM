@@ -5,9 +5,10 @@ from tqdm import tqdm
 
 from mmmm.data.defs import ORIGIN_VL_DATA_ROOT, PROCESSED_VL_DATA_ROOT
 
-def process_text(json_file: str, out_file: str):
-    with open(ORIGIN_VL_DATA_ROOT / 'pmc_oa' / json_file, 'r') as f:
-        data = json.load(f)
+def process_text(jsonl_file: str, out_file: str):
+    with open(ORIGIN_VL_DATA_ROOT / 'pmc_oa' / jsonl_file, 'r') as f:
+        lines = f.readlines()
+        data = [json.loads(line) for line in lines]
     
     processed_data = [
         {
@@ -29,10 +30,10 @@ def process_images():
         )
 
 def process():
-    (PROCESSED_VL_DATA_ROOT / 'Slake').mkdir(parents=True, exist_ok=True)
-    process_text('train.json', 'train.json')
-    process_text('valid.json', 'validate.json')
-    process_text('test.json', 'test.json')
+    (PROCESSED_VL_DATA_ROOT / 'PMC-OA').mkdir(parents=True, exist_ok=True)
+    process_text('train.jsonl', 'train.json')
+    process_text('valid.jsonl', 'validate.json')
+    process_text('test.jsonl', 'test.json')
     process_images()
 
 if __name__ == '__main__':
