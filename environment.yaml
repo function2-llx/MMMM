@@ -29,7 +29,7 @@ dependencies:
 - nibabel
 - pydicom
 - cytoolz
-
+- zstandard
 - pip
 - pip:
   - jsonargparse[signatures, omegaconf]

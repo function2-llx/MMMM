@@ -13,7 +13,7 @@ ORIGIN_SEG_DATA_ROOT = ORIGIN_DATA_ROOT / 'image'
 PROCESSED_SEG_DATA_ROOT = PROCESSED_DATA_ROOT / 'image'
 
 @dataclass
-class Meta:
+class Sparse:
     spacing: npt.NDArray[np.float64]
     shape: npt.NDArray[np.int32]
     mean: npt.NDArray[np.floating]
@@ -25,15 +25,29 @@ class Meta:
     @dataclass
     class Anatomy:
         pos: list[str]
+        """anatomical structures that are assured to be observable in the image"""
         neg: list[str]
+        """anatomical structures that are assured to be unobservable in the image"""
     anatomy: Anatomy
 
     @dataclass
     class Anomaly:
         pos: list[tuple[str, int]]
+        """anomalies that are assured to be observable in the image, with number of instances"""
         neg: list[str]
-        nil: bool
+        """anomalies that are assured to be unobservable in the image"""
+        complete: bool
+        """indicating that `pos` covers all anomalies in the image"""
     anomaly: Anomaly
+
+@dataclass
+class Annotation:
+    mask: list[str]
+    """names of targets each of which have a segmentation mask available,
+    corresponding to the channel dimension of the mask file, and may repeat for multiple anomalies with the same name
+    """
+    bbox: list[tuple[str, npt.NDArray[np.float64]]]
+    """list of (target name, 3D bounding box coordinates)"""
 
 def encode_patch_size(patch_size: tuple3_t[int]):
     return ','.join(map(str, patch_size))
