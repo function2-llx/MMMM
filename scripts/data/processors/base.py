@@ -1,10 +1,10 @@
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
+from io import BytesIO
 from logging import Logger
 from pathlib import Path
 
-import cytoolz
 import einops
 import numpy as np
 from numpy import typing as npt
@@ -14,22 +14,23 @@ import torch
 from torch.nn import functional as nnf
 from torchvision.transforms import v2 as tvt
 from torchvision.transforms.v2 import functional as tvtf
+import zstandard as zstd
 
 from luolib import transforms as lt
 from luolib.utils import get_cuda_device, process_map
-from monai.data import MetaTensor
 from monai import transforms as mt
+from monai.data import MetaTensor
 from monai.utils import GridSampleMode
 
-from mmmm.data.defs import Meta, ORIGIN_SEG_DATA_ROOT, PROCESSED_SEG_DATA_ROOT
-from mmmm.data.seg_tax import SegClass
+from mmmm.data import load_target_tax
+from mmmm.data.defs import Annotation, ORIGIN_SEG_DATA_ROOT, PROCESSED_SEG_DATA_ROOT, Sparse
 
 ImageLoader: type = Callable[[Path], MetaTensor]
 
 @dataclass
 class DataPoint:
     key: str
-    """unique identifier in the dataset"""
+    """unique identifier within the dataset"""
     images: dict[str, Path]
     """co-registered images, map: modality ↦ file path"""
 
@@ -41,8 +42,8 @@ class DataPoint:
 
 @dataclass
 class MultiLabelMultiFileDataPoint(DataPoint):
-    masks: dict[str, Path]
-    """map: seg-tax name ↦ path to the segmentation mask in the image"""
+    masks: list[tuple[str, Path]]
+    """list of (target name, path to the segmentation mask)"""
 
 @dataclass
 class MultiClassDataPoint(DataPoint):
@@ -93,12 +94,13 @@ class Processor(ABC):
     orientation: str | None = None
     """if orientation is None, will determine it from the spacing"""
     max_smaller_edge: int = 512
-    min_aniso_ratio: float = 0.7
+    min_aniso_ratio: float = 0.5
     """minimum value for spacing_z / spacing_xy"""
     mask_batch_size: int = 32
+    complete_anomaly: bool = False
 
-    def __init__(self, seg_tax: dict[str, SegClass], logger: Logger, *, max_workers: int, chunksize: int, override: bool):
-        self.seg_tax = seg_tax
+    def __init__(self, logger: Logger, *, max_workers: int, chunksize: int, override: bool):
+        self.tax = load_target_tax()
         self.logger = logger
         if self.max_workers is None or override:
             self.max_workers = max_workers
@@ -116,6 +118,10 @@ class Processor(ABC):
     @property
     def output_root(self):
         return PROCESSED_SEG_DATA_ROOT / self.output_name
+
+    @property
+    def case_data_root(self):
+        return self.output_root / 'data'
 
     @abstractmethod
     def get_data_points(self) -> list[DataPoint]:
@@ -138,17 +144,17 @@ class Processor(ABC):
     def get_mask_loader(self) -> ImageLoader:
         pass
 
-    def load_masks(self, data_point: DataPoint) -> tuple[list[str], torch.BoolTensor]:
+    def load_masks(self, data_point: DataPoint) -> tuple[torch.BoolTensor, list[str]]:
         """
         Returns:
-            seg-tax name ↦ segmentation mask
+            - segmentation mask
+            - target names corresponding to the channel dimension
         """
         loader = self.get_mask_loader()
         device = get_cuda_device()
         if isinstance(data_point, MultiLabelMultiFileDataPoint):
-            masks = data_point.masks
-            classes, mask_paths = zip(*masks.items())
-            classes = list(classes)
+            targets, mask_paths = zip(*data_point.masks)
+            targets = list(targets)
             # NOTE: make sure that mask loader returns bool tensor
             masks = process_map(
                 loader, mask_paths,
@@ -162,40 +168,34 @@ class Processor(ABC):
             class_ids = torch.tensor([c for c in class_mapping], dtype=torch.int16, device=device)
             for _ in range(label.ndim - 1):
                 class_ids = class_ids[..., None]  # make broadcastable
-            classes = list(class_mapping.values())
+            targets = list(class_mapping.values())
             masks = label == class_ids
         else:
             raise NotImplementedError
-        return classes, masks
+        return masks, targets
 
     def process(self):
         data_points = self.get_data_points()
         assert len(data_points) > 0
-        assert len(data_points) == len(set(data_point.key for data_point in data_points))
-        if (meta_path := self.output_root / 'meta.pkl').exists():
-            processed_meta: pd.DataFrame = pd.read_pickle(meta_path)
-        else:
-            processed_meta = pd.DataFrame()
-        data_points = list(filter(lambda p: p.key not in processed_meta.index, data_points))
+        assert len(data_points) == len(set(data_point.key for data_point in data_points)), "key must be unique within the dataset"
+        data_points = [*filter(lambda p: not (self.case_data_root / p.name).exists(), data_points)]
         if len(data_points) == 0:
             return
         self.logger.info(f'{len(data_points)} data points to be processed')
-        (self.output_root / 'data').mkdir(parents=True, exist_ok=True)
-        meta, info = zip(
-            *process_map(
-                self.process_data_point,
-                data_points,
-                max_workers=self.max_workers, chunksize=self.chunksize, ncols=80,
-            )
+        self.case_data_root.mkdir(parents=True, exist_ok=True)
+        process_map(
+            self.process_data_point,
+            data_points,
+            max_workers=self.max_workers, chunksize=self.chunksize, ncols=80,
         )
-        meta = pd.concat([processed_meta, pd.DataFrame.from_records(meta, index='key')])
-        info = pd.DataFrame.from_records(info, index='key')
-        if (info_path := self.output_root / 'info.csv').exists():
-            processed_info = pd.read_csv(info_path, dtype={'key': 'string'}).set_index('key')
-            info = pd.concat([processed_info, info])
-        info.to_csv(info_path)
-        info.to_excel(info_path.with_suffix('.xlsx'), freeze_panes=(1, 1))
-        meta.to_pickle(meta_path)
+        # meta = pd.concat([processed_meta, pd.DataFrame.from_records(meta, index='key')])
+        # info = pd.DataFrame.from_records(info, index='key')
+        # if (info_path := self.output_root / 'info.csv').exists():
+        #     processed_info = pd.read_csv(info_path, dtype={'key': 'string'}).set_index('key')
+        #     info = pd.concat([processed_info, info])
+        # info.to_csv(info_path)
+        # info.to_excel(info_path.with_suffix('.xlsx'), freeze_panes=(1, 1))
+        # meta.to_pickle(meta_path)
 
     def get_orientation(self, images: MetaTensor):
         if self.orientation is not None:
@@ -229,7 +229,16 @@ class Processor(ABC):
         new_shape = (np.array(images.shape[1:]) / scale).round().astype(np.int32)
         return new_spacing, new_shape
 
-    def process_data_point(self, data_point: DataPoint) -> tuple[dict, dict] | None:
+    def _check_targets(self, targets: list[str]):
+        for name in targets:
+            assert name in self.tax
+
+    def _generate_bbox_from_mask(self, mask: torch.BoolTensor) -> npt.NDArray[np.float64]:
+        bbox_t = mt.BoundingRect()
+        bbox = bbox_t(mask[None])
+        return bbox[0].astype(np.float64)
+
+    def process_data_point(self, data_point: DataPoint):
         """
         Returns:
             (metadata, human-readable information saved in csv) if process success, else None
@@ -242,9 +251,8 @@ class Processor(ABC):
             assert all(is_natural == is_natural_modality(modality) for modality in modalities[1:])
             if any(is_rgb_modality(modality) for modality in modalities):
                 assert len(modalities) == 1, 'multiple RGB images is not supported'
-            classes, masks = self.load_masks(data_point)
-            for name in classes:
-                assert name in self.seg_tax
+            masks, targets = self.load_masks(data_point)
+            self._check_targets(targets)
             images, masks = self.orient(images, masks)
             assert images.shape[1:] == masks.shape[1:]
             info = {
@@ -263,35 +271,56 @@ class Processor(ABC):
                 **{f'space-{i}': s.item() for i, s in enumerate(new_spacing)},
             })
             # 4. apply resize & intensity normalization, save processed results
-            save_dir = self.output_root / 'data' / key
-            save_dir.mkdir(exist_ok=True, parents=True)
-            # for modality, image in images.items():
+            # 4.1. normalize and save images
             images, mean, std = self.normalize_image(images, is_natural, new_shape)
-            np.save(save_dir / f'images.npy', images.cpu().numpy().astype(np.float16))
+            save_dir = self.case_data_root / f'.{key}'
+            save_dir.mkdir(exist_ok=True, parents=True)
+            # 4.2. save image
+            torch.save(images.half().cpu(), save_dir / f'images.pt')
+            # 4.3. resize, filter, compress, and save masks
             masks = self.resize_masks(masks, new_shape)
-            positive_mask: torch.BoolTensor = einops.reduce(masks > 0, 'c ... -> c', 'any')
-            masks = masks[positive_mask]
-            np.save(save_dir / 'masks.npy', masks.cpu().numpy())
-            positive_classes = [name for i, name in enumerate(classes) if positive_mask[i]]
-            negative_classes = [name for i, name in enumerate(classes) if not positive_mask[i]]
-            # TODO: save mask sizes
-            meta: Meta = {
-                'key': data_point.key,
-                'spacing': new_spacing,
-                'shape': new_shape,
-                'mean': mean.cpu().numpy(),
-                'std': std.cpu().numpy(),
-                'modalities': modalities,
-                'positive_classes': positive_classes,
-                'negative_classes': negative_classes,
-            }
-            return meta, info
+            pos_target_mask: torch.BoolTensor = einops.reduce(masks > 0, 'c ... -> c', 'any')
+            # filter positive masks
+            masks = masks[pos_target_mask]
+            pos_targets = [name for i, name in enumerate(targets) if pos_target_mask[i]]
+            neg_targets = [name for i, name in enumerate(targets) if not pos_target_mask[i]]
+            with BytesIO() as buffer, open(save_dir / 'masks.pt.zst', 'wb') as f:
+                torch.save(masks.cpu(), buffer)
+                f.write(zstd.compress(buffer.getvalue()))
+            # 4.4 handle and save sparse information
+            sparse = Sparse(
+                new_spacing,
+                new_shape,
+                mean.cpu().numpy(),
+                std.cpu().numpy(),
+                modalities,
+                Sparse.Anatomy(
+                    [*filter(lambda name: self.tax[name].category == 'anatomy', pos_targets)],
+                    [*filter(lambda name: self.tax[name].category == 'anatomy', neg_targets)],
+                ),
+                Sparse.Anomaly(
+                    [*filter(lambda name: self.tax[name].category == 'anomaly', pos_targets)],
+                    [*filter(lambda name: self.tax[name].category == 'anomaly', neg_targets)],
+                    self.complete_anomaly,
+                ),
+            )
+            pd.to_pickle(sparse, 'sparse.pkl')
+            # 4.5. handle and save annotation information
+            annotation = Annotation(
+                [(name, masks[i].sum().item()) for i, name in enumerate(pos_targets)],
+                [
+                    (name, self._generate_bbox_from_mask(masks[i]))
+                    for i, name in enumerate(pos_targets)
+                ],
+            )
+            pd.to_pickle(annotation, 'annotation.pkl')
+            # 5. complete
+            save_dir.rename(save_dir.with_name(key))
         except Exception as e:
             self.logger.error(key)
             self.logger.error(e)
             import traceback
             self.logger.error(traceback.format_exc())
-            return None
 
     def normalize_image(self, images: torch.Tensor, is_natural: bool, new_shape: npt.NDArray[np.int32]):
         # 1. translate intensity to [0, ...] for padding during resizing

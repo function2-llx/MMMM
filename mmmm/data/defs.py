@@ -14,40 +14,51 @@ PROCESSED_SEG_DATA_ROOT = PROCESSED_DATA_ROOT / 'image'
 
 @dataclass
 class Sparse:
+    """
+    Attributes:
+        mean: mean intensity for each modality
+        modalities: all images of different modalities must be co-registered
+    """
     spacing: npt.NDArray[np.float64]
     shape: npt.NDArray[np.int32]
     mean: npt.NDArray[np.floating]
-    """mean intensity for each modality"""
     std: npt.NDArray[np.floating]
     modalities: list[str]
-    """all images of different modalities must be co-registered"""
 
     @dataclass
     class Anatomy:
+        """
+        Attributes:
+            pos: anatomical structures that are assured to be observable in the image
+            neg: anatomical structures that are assured to be unobservable in the image
+        """
         pos: list[str]
-        """anatomical structures that are assured to be observable in the image"""
         neg: list[str]
-        """anatomical structures that are assured to be unobservable in the image"""
     anatomy: Anatomy
 
     @dataclass
     class Anomaly:
+        """
+        Attributes:
+            pos: anomalies that are assured to be observable in the image, with number of instances
+            neg: anomalies that are assured to be unobservable in the image
+            complete: indicating that `pos` covers all anomalies in the image
+        """
         pos: list[tuple[str, int]]
-        """anomalies that are assured to be observable in the image, with number of instances"""
         neg: list[str]
-        """anomalies that are assured to be unobservable in the image"""
         complete: bool
-        """indicating that `pos` covers all anomalies in the image"""
     anomaly: Anomaly
 
 @dataclass
 class Annotation:
-    mask: list[str]
-    """names of targets each of which have a segmentation mask available,
-    corresponding to the channel dimension of the mask file, and may repeat for multiple anomalies with the same name
     """
+    Attributes:
+        mask: list of (name, mask size), where the order corresponds to the channel dimension of the mask
+            file, and names may repeat for multiple anomalies with the same name
+        bbox: list of (target name, 3D bounding box coordinates)
+    """
+    mask: list[tuple[str, int]]
     bbox: list[tuple[str, npt.NDArray[np.float64]]]
-    """list of (target name, 3D bounding box coordinates)"""
 
 def encode_patch_size(patch_size: tuple3_t[int]):
     return ','.join(map(str, patch_size))
