@@ -93,10 +93,18 @@ def gen_conversation(
 def prepare_vlm_inputs(
     conversation: list[tuple[str, str]],
     tokenizer: MMMMTokenizer,
-    patch_size: tuple3_t[int],
-    vit_patch_size: tuple3_t[int],
+    num_image_tokens: int,
     inference: bool = False,
 ):
+    """
+    Args:
+        conversation:
+        tokenizer:
+        num_image_tokens: the number of tokens corresponding to image patches (does not include special tokens)
+        inference:
+    Returns:
+
+    """
     # TODO: refactor this function to support various VLM formats
     # template: CogVLM `chat_old_history_to_prompt`
     # just for viewing, don't tokenize it directly
@@ -108,10 +116,9 @@ def prepare_vlm_inputs(
     )
     dtype = torch.long
     text_ids = []
-    if inference:
-        # the last response must be empty for inference
-        assert conversation[-1][1] == ''
-    else:
+    # the last response is empty iff inference
+    assert inference ^ (conversation[-1][1] == '')
+    if not inference:
         lm_targets = []
     for i, (query, answer) in enumerate(conversation):
         prompt = f'{user_start} {query} {sys_start}'
@@ -137,30 +144,31 @@ def prepare_vlm_inputs(
 
     # text_ids = torch.tensor(tokenizer.encode(text, add_special_tokens=False))
     # TODO: dynamically adjust patch size according to image spacing
-    num_vision_tokens = np.prod([s // ps for s, ps in zip(patch_size, vit_patch_size)]).item() + 2  # including boi and eoi
+    # num_vision_tokens = np.prod([s // ps for s, ps in zip(image_size, vit_patch_size)]).item() + 2  # including boi and eoi
+    num_image_tokens += 2  # including boi and eoi
     input_ids = torch.cat([
         torch.tensor([tokenizer.bos_token_id]),
-        torch.full((num_vision_tokens, ), 0),
+        torch.full((num_image_tokens,), 0),
         text_ids,
     ])
     image_features_mask = torch.zeros(input_ids.shape[0], dtype=torch.bool)
-    image_features_mask[1:1 + num_vision_tokens] = True
+    image_features_mask[1:1 + num_image_tokens] = True
     token_type_ids = torch.cat([
         torch.tensor([LANGUAGE_TOKEN_TYPE]),
-        torch.full((num_vision_tokens, ), VISION_TOKEN_TYPE),
+        torch.full((num_image_tokens,), VISION_TOKEN_TYPE),
         # all new tokens will be processed by VE
         # torch.where(text_ids < tokenizer.base_vocab_size, LANGUAGE_TOKEN_TYPE, VISION_TOKEN_TYPE),
         torch.full((text_ids.shape[0], ), LANGUAGE_TOKEN_TYPE),
     ])
     position_ids = torch.cat([
         torch.tensor([0, 1]),  # bos and boi
-        torch.full((num_vision_tokens - 2, ), 2),
+        torch.full((num_image_tokens - 2,), 2),
         torch.tensor([3]),  # eoi
         torch.arange(4, 4 + text_ids.shape[0]),
     ])
     attention_mask = torch.ones(input_ids.shape, dtype=dtype)
     if not inference:
-        lm_targets = torch.cat([torch.full((1 + num_vision_tokens, ), CE_IGNORE_INDEX), lm_targets])
+        lm_targets = torch.cat([torch.full((1 + num_image_tokens,), CE_IGNORE_INDEX), lm_targets])
     inputs = {
         'input_ids': input_ids,
         'image_features_mask': image_features_mask,
