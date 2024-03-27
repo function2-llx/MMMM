@@ -14,16 +14,16 @@ import torch
 from torch.nn import functional as nnf
 from torchvision.transforms import v2 as tvt
 from torchvision.transforms.v2 import functional as tvtf
-import zstandard as zstd
 
 from luolib import transforms as lt
-from luolib.utils import get_cuda_device, process_map
+from luolib.types import tuple3_t
+from luolib.utils import as_tensor, get_cuda_device, process_map, save_pt_zst
 from monai import transforms as mt
 from monai.data import MetaTensor
 from monai.utils import GridSampleMode
 
 from mmmm.data import load_target_tax
-from mmmm.data.defs import Annotation, ORIGIN_SEG_DATA_ROOT, PROCESSED_SEG_DATA_ROOT, Sparse
+from mmmm.data.defs import ORIGIN_SEG_DATA_ROOT, PROCESSED_SEG_DATA_ROOT, Sparse
 
 ImageLoader: type = Callable[[Path], MetaTensor]
 
@@ -71,7 +71,7 @@ def clip_intensity(img: torch.Tensor, is_natural: bool) -> torch.BoolTensor:
     torch.any(x > minv, dim=0, keepdim=True, out=crop_mask.view(1, -1))
     return crop_mask
 
-def crop(images: MetaTensor, masks: torch.BoolTensor, crop_mask: torch.BoolTensor) -> tuple[MetaTensor, torch.BoolTensor]:
+def crop(images: torch.Tensor, masks: torch.BoolTensor, crop_mask: torch.BoolTensor) -> tuple[MetaTensor, torch.BoolTensor]:
     data = {
         'images': images,
         'masks': masks,
@@ -87,17 +87,22 @@ def is_rgb_modality(modality: str):
     return modality.startswith('RGB')
 
 class Processor(ABC):
+    """
+    Attributes:
+        name: name of the dataset to be processed by the processor
+        orientation: if orientation is None, will determine it from the spacing
+        min_aniso_ratio: minimum value for spacing_z / spacing_xy
+        do_normalize: whether to normalize the image during pre-processing; otherwise, during training
+    """
     name: str
-    """name of the dataset to be processed by the processor"""
     max_workers: int | None = None
     chunksize: int | None = None
     orientation: str | None = None
-    """if orientation is None, will determine it from the spacing"""
     max_smaller_edge: int = 512
     min_aniso_ratio: float = 0.5
-    """minimum value for spacing_z / spacing_xy"""
     mask_batch_size: int = 32
     complete_anomaly: bool = False
+    do_normalize: bool = False
 
     def __init__(self, logger: Logger, *, max_workers: int, chunksize: int, override: bool):
         self.tax = load_target_tax()
@@ -138,7 +143,7 @@ class Processor(ABC):
         for modality, path in data_point.images.items():
             modalities.append(modality)
             images.append(loader(path))
-        return modalities, torch.cat(images).to(get_cuda_device())
+        return modalities, torch.cat(images).to(device=get_cuda_device())
 
     @abstractmethod
     def get_mask_loader(self) -> ImageLoader:
@@ -178,24 +183,24 @@ class Processor(ABC):
         data_points = self.get_data_points()
         assert len(data_points) > 0
         assert len(data_points) == len(set(data_point.key for data_point in data_points)), "key must be unique within the dataset"
-        data_points = [*filter(lambda p: not (self.case_data_root / p.name).exists(), data_points)]
-        if len(data_points) == 0:
-            return
-        self.logger.info(f'{len(data_points)} data points to be processed')
-        self.case_data_root.mkdir(parents=True, exist_ok=True)
-        process_map(
-            self.process_data_point,
-            data_points,
-            max_workers=self.max_workers, chunksize=self.chunksize, ncols=80,
+        pending_data_points = [*filter(lambda p: not (self.case_data_root / p.key).exists(), data_points)]
+        if len(pending_data_points) > 0:
+            self.logger.info(f'{len(pending_data_points)} data points to be processed')
+            self.case_data_root.mkdir(parents=True, exist_ok=True)
+            process_map(
+                self.process_data_point,
+                pending_data_points,
+                max_workers=self.max_workers, chunksize=self.chunksize, ncols=80,
+            )
+        info_list = process_map(
+            pd.read_pickle,
+            [self.case_data_root / p.key / 'info.pkl' for p in data_points],
+            max_workers=self.max_workers,
+            disable=True,
         )
-        # meta = pd.concat([processed_meta, pd.DataFrame.from_records(meta, index='key')])
-        # info = pd.DataFrame.from_records(info, index='key')
-        # if (info_path := self.output_root / 'info.csv').exists():
-        #     processed_info = pd.read_csv(info_path, dtype={'key': 'string'}).set_index('key')
-        #     info = pd.concat([processed_info, info])
-        # info.to_csv(info_path)
-        # info.to_excel(info_path.with_suffix('.xlsx'), freeze_panes=(1, 1))
-        # meta.to_pickle(meta_path)
+        info = pd.DataFrame.from_records(info_list, index='key')
+        info.to_csv(self.output_root / 'info.csv')
+        info.to_excel(self.output_root / 'info.xlsx', freeze_panes=(1, 1))
 
     def get_orientation(self, images: MetaTensor):
         if self.orientation is not None:
@@ -216,27 +221,27 @@ class Processor(ABC):
         images, masks = map(lambda x: trans(x).contiguous(), [images, masks])
         return images, masks
 
-    def compute_resize(self, images: MetaTensor) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.int32]]:
-        if self.max_smaller_edge < (smaller_edge := min(images.shape[2:])):
+    def compute_resize(self, spacing: torch.DoubleTensor, shape: tuple3_t[int]) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.int32]]:
+        if self.max_smaller_edge < (smaller_edge := min(shape[1:])):
             scale_xy = smaller_edge / self.max_smaller_edge
         else:
             scale_xy = 1.
-        new_spacing_xy = images.pixdim[1:].min().item() * scale_xy
-        new_spacing_z = max(images.pixdim[0].item(), new_spacing_xy * self.min_aniso_ratio)
+        new_spacing_xy = spacing[1:].min().item() * scale_xy
+        new_spacing_z = max(spacing[0].item(), new_spacing_xy * self.min_aniso_ratio)
         new_spacing = np.array([new_spacing_z, new_spacing_xy, new_spacing_xy])
-        scale_z = new_spacing_z / images.pixdim[0].item()
+        scale_z = new_spacing_z / spacing[0].item()
         scale = np.array([scale_z, scale_xy, scale_xy])
-        new_shape = (np.array(images.shape[1:]) / scale).round().astype(np.int32)
+        new_shape = (np.array(shape) / scale).round().astype(np.int32)
         return new_spacing, new_shape
 
     def _check_targets(self, targets: list[str]):
         for name in targets:
             assert name in self.tax
 
-    def _generate_bbox_from_mask(self, mask: torch.BoolTensor) -> npt.NDArray[np.float64]:
+    def _generate_bbox_from_mask(self, masks: torch.BoolTensor) -> npt.NDArray[np.float64]:
         bbox_t = mt.BoundingRect()
-        bbox = bbox_t(mask[None])
-        return bbox[0].astype(np.float64)
+        bbox = bbox_t(masks)
+        return bbox.astype(np.float64)
 
     def process_data_point(self, data_point: DataPoint):
         """
@@ -245,7 +250,6 @@ class Processor(ABC):
         """
         self.key = key = data_point.key
         try:
-            # TODO: control images.dtype
             modalities, images = self.load_images(data_point)
             is_natural = is_natural_modality(modalities[0])
             assert all(is_natural == is_natural_modality(modality) for modality in modalities[1:])
@@ -255,17 +259,18 @@ class Processor(ABC):
             self._check_targets(targets)
             images, masks = self.orient(images, masks)
             assert images.shape[1:] == masks.shape[1:]
+            spacing: torch.DoubleTensor = images.pixdim
             info = {
                 'key': key,
                 **{f'shape-o-{i}': s for i, s in enumerate(images.shape[1:])},
-                **{f'space-o-{i}': s.item() for i, s in enumerate(images.pixdim)}
+                **{f'space-o-{i}': s.item() for i, s in enumerate(spacing)}
             }
             # 1. clip intensity, compute crop mask
             crop_mask = clip_intensity(images, is_natural)
             # 2. crop images and masks
             images, masks = crop(images, masks, crop_mask)
             # 3. compute resize (default: adapt to self.max_smaller_edge and self.min_aniso_ratio)
-            new_spacing, new_shape = self.compute_resize(images)
+            new_spacing, new_shape = self.compute_resize(spacing, images.shape[1:])
             info.update({
                 **{f'shape-{i}': s.item() for i, s in enumerate(new_shape)},
                 **{f'space-{i}': s.item() for i, s in enumerate(new_spacing)},
@@ -276,7 +281,7 @@ class Processor(ABC):
             save_dir = self.case_data_root / f'.{key}'
             save_dir.mkdir(exist_ok=True, parents=True)
             # 4.2. save image
-            torch.save(images.half().cpu(), save_dir / f'images.pt')
+            torch.save(as_tensor(images).half().cpu(), save_dir / f'images.pt')
             # 4.3. resize, filter, compress, and save masks
             masks = self.resize_masks(masks, new_shape)
             pos_target_mask: torch.BoolTensor = einops.reduce(masks > 0, 'c ... -> c', 'any')
@@ -284,15 +289,14 @@ class Processor(ABC):
             masks = masks[pos_target_mask]
             pos_targets = [name for i, name in enumerate(targets) if pos_target_mask[i]]
             neg_targets = [name for i, name in enumerate(targets) if not pos_target_mask[i]]
-            with BytesIO() as buffer, open(save_dir / 'masks.pt.zst', 'wb') as f:
-                torch.save(masks.cpu(), buffer)
-                f.write(zstd.compress(buffer.getvalue()))
+            save_pt_zst(as_tensor(masks).cpu(), save_dir / 'masks.pt.zst')
             # 4.4 handle and save sparse information
             sparse = Sparse(
                 new_spacing,
                 new_shape,
                 mean.cpu().numpy(),
                 std.cpu().numpy(),
+                self.do_normalize,
                 modalities,
                 Sparse.Anatomy(
                     [*filter(lambda name: self.tax[name].category == 'anatomy', pos_targets)],
@@ -303,17 +307,17 @@ class Processor(ABC):
                     [*filter(lambda name: self.tax[name].category == 'anomaly', neg_targets)],
                     self.complete_anomaly,
                 ),
+                Sparse.Annotation(
+                    [(name, masks[i].sum().item()) for i, name in enumerate(pos_targets)],
+                    [
+                        (pos_targets[i], bbox)
+                        for i, bbox in enumerate(self._generate_bbox_from_mask(masks))
+                    ],
+                ),
             )
-            pd.to_pickle(sparse, 'sparse.pkl')
-            # 4.5. handle and save annotation information
-            annotation = Annotation(
-                [(name, masks[i].sum().item()) for i, name in enumerate(pos_targets)],
-                [
-                    (name, self._generate_bbox_from_mask(masks[i]))
-                    for i, name in enumerate(pos_targets)
-                ],
-            )
-            pd.to_pickle(annotation, 'annotation.pkl')
+            pd.to_pickle(sparse, save_dir / 'sparse.pkl')
+            # 4.5. save info, wait for collection
+            pd.to_pickle(info, save_dir / 'info.pkl')
             # 5. complete
             save_dir.rename(save_dir.with_name(key))
         except Exception as e:
@@ -322,12 +326,13 @@ class Processor(ABC):
             import traceback
             self.logger.error(traceback.format_exc())
 
-    def normalize_image(self, images: torch.Tensor, is_natural: bool, new_shape: npt.NDArray[np.int32]):
+    def normalize_image(self, images: torch.Tensor, is_natural: bool, new_shape: npt.NDArray[np.int32]) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         # 1. translate intensity to [0, ...] for padding during resizing
         if not is_natural:
             images = images - einops.reduce(images, 'c ... -> c', 'min')
         # 2. resize
-        if new_shape[0] == images.shape[1]:
+        if new_shape[0] == images.shape[1] == 1:
+            # use torchvision for 2D images
             if not np.array_equal(new_shape[1:], images.shape[2:]):
                 images = tvtf.resize(
                     images, new_shape[1:].tolist(), tvt.InterpolationMode.BICUBIC, antialias=True,
@@ -349,17 +354,19 @@ class Processor(ABC):
         images = images / maxv
         # 4. Z-score normalization or by pre-defined statistics
         if is_natural:
-            mean = images.new_tensor([[[[0.48145466, 0.4578275, 0.40821073]]]])
-            std = images.new_tensor([[[[0.26862954, 0.26130258, 0.27577711]]]])
+            # copied from CogVLM, used by CLIP
+            mean = images.new_tensor([0.48145466, 0.4578275, 0.40821073])
+            std = images.new_tensor([0.26862954, 0.26130258, 0.27577711])
         else:
-            mean = images.as_tensor().new_empty(images.shape[0], 1, 1, 1)
-            std = images.as_tensor().new_empty(images.shape[0], 1, 1, 1)
+            mean = images.new_empty((images.shape[0], ))
+            std = images.new_empty((images.shape[0], ))
             for i in range(images.shape[0]):
                 fg = images[i][images[i] > 0]
                 mean[i] = fg.mean()
                 std[i] = fg.std()
-        images = (images - mean) / std
-        return images, mean[:, 0, 0, 0], std[:, 0, 0, 0]
+        if self.do_normalize:
+            images = (images - mean[:, None, None, None]) / std[:, None, None, None]
+        return images, mean, std
 
     def resize_masks(self, masks: torch.BoolTensor, new_shape: npt.NDArray[np.int32]) -> torch.BoolTensor:
         new_shape = tuple(new_shape.tolist())

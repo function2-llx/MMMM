@@ -18,11 +18,13 @@ class Sparse:
     Attributes:
         mean: mean intensity for each modality
         modalities: all images of different modalities must be co-registered
+        normalized: whether the images are normalized during pre-processing
     """
     spacing: npt.NDArray[np.float64]
     shape: npt.NDArray[np.int32]
-    mean: npt.NDArray[np.floating]
-    std: npt.NDArray[np.floating]
+    mean: npt.NDArray[np.float32]
+    std: npt.NDArray[np.float32]
+    normalized: bool
     modalities: list[str]
 
     @dataclass
@@ -49,16 +51,17 @@ class Sparse:
         complete: bool
     anomaly: Anomaly
 
-@dataclass
-class Annotation:
-    """
-    Attributes:
-        mask: list of (name, mask size), where the order corresponds to the channel dimension of the mask
-            file, and names may repeat for multiple anomalies with the same name
-        bbox: list of (target name, 3D bounding box coordinates)
-    """
-    mask: list[tuple[str, int]]
-    bbox: list[tuple[str, npt.NDArray[np.float64]]]
+    @dataclass
+    class Annotation:
+        """
+        Attributes:
+            mask: list of (name, mask size), where the order corresponds to the channel dimension of the mask
+                file, and names may repeat for multiple anomalies with the same name
+            bbox: list of (target name, 3D bounding box coordinates)
+        """
+        mask: list[tuple[str, int]]
+        bbox: list[tuple[str, npt.NDArray[np.float64]]]
+    annotation: Annotation
 
 def encode_patch_size(patch_size: tuple3_t[int]):
     return ','.join(map(str, patch_size))

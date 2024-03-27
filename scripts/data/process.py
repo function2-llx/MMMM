@@ -4,8 +4,7 @@ import importlib
 import inspect
 import logging
 
-from mmmm.data.defs import PROCESSED_DATA_ROOT, PROCESSED_SEG_DATA_ROOT
-from mmmm.data.target_tax import load_target_tax
+from mmmm.data.defs import PROCESSED_DATA_ROOT
 from processors.base import Processor
 
 logger: logging.Logger
@@ -64,10 +63,9 @@ def main():
         datasets = args.datasets
     setup_logging()
     logger.info(datasets)
-    seg_tax = load_target_tax()
     for dataset in datasets:
         processor_cls = processors[dataset]
-        processor = processor_cls(seg_tax, logger, max_workers=args.max_workers, chunksize=args.chunksize, override=args.override)
+        processor = processor_cls(logger, max_workers=args.max_workers, chunksize=args.chunksize, override=args.override)
         logger.info(f'start processing {dataset}, max_workers={processor.max_workers}, chunksize={processor.chunksize}')
         processor.process()
 

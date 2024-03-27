@@ -38,7 +38,7 @@ def load_target_tax() -> dict[str, TargetClass]:
     ret = {}
     for category, tax in tax_dict.items():
         tax.set_index('name', inplace=True)
-        assert isinstance(category, TargetCategory)
+        category = TargetCategory(category)
         ret.update({
             name: TargetClass(name, category, [], [], [])
             for name in tax.index
