@@ -549,15 +549,26 @@ class VQADataModule(ExpDataModuleBase):
         for dataset in self.datasets:
             with open(self.data_root / dataset / 'train.json') as f:
                 data = json.load(f)
-            train_data.extend([
-                {
-                    'dataset_dir': self.data_root / dataset,
-                    'image': item['image'],
-                    'question': item['question'],
-                    'answer': item['answer'],
-                }
-                for item in data
-            ])
+            if dataset == 'Radiopaedia':
+                train_data.extend([
+                    {
+                        'dataset_dir': self.data_root / dataset,
+                        'image': random.choice(item['image']),
+                        **random.choice(item['qa_list']),
+                    }
+                    for item in data
+                
+                ])
+            else:
+                train_data.extend([
+                    {
+                        'dataset_dir': self.data_root / dataset,
+                        'image': item['image'],
+                        'question': item['question'],
+                        'answer': item['answer'],
+                    }
+                    for item in data
+                ])
         return train_data
 
     def val_data(self) -> Sequence:
@@ -610,15 +621,27 @@ class CapDataModule(ExpDataModuleBase):
         for dataset in self.datasets:
             with open(self.data_root / dataset / 'train.json') as f:
                 data = json.load(f)
-            train_data.extend([
-                {
-                    'dataset_dir': self.data_root / dataset,
-                    'image': item['image'],
-                    'question': random.choice(self.prompts),
-                    'answer': item['caption'],
-                }
-                for item in data
-            ])
+            if dataset == 'Radiopaedia':
+                train_data.extend([
+                    {
+                        'dataset_dir': self.data_root / dataset,
+                        'image': random.choice(item['image']),
+                        'question': random.choice(self.prompts),
+                        'answer': item['caption'],
+                    }
+                    for item in data
+                
+                ])
+            else:
+                train_data.extend([
+                    {
+                        'dataset_dir': self.data_root / dataset,
+                        'image': item['image'],
+                        'question': random.choice(self.prompts),
+                        'answer': item['caption'],
+                    }
+                    for item in data
+                ])
         return train_data
 
     def val_data(self) -> Sequence:
@@ -674,9 +697,9 @@ class MMMMDataModule(ExpDataModuleBase):
         seg_data_root: str = PROCESSED_SEG_DATA_ROOT,
         vl_data_root: str = PROCESSED_VL_DATA_ROOT,
         seg_data: List[str] = ['AMOS22', 'AMOS22-debug'],
-        vqa_data: List[str] = ['Slake', 'VQA-Med'],
-        cap_data: List[str] = ['PMC-OA'],
-        datamodules: List[str] = ['seg', 'vqa'],
+        vqa_data: List[str] = ['Slake', 'VQA-Med', 'Radiopaedia'],
+        cap_data: List[str] = ['PMC-OA', 'Radiopaedia'],
+        datamodules: List[str] = ['seg', 'vqa', 'cap'],
         sample_rates: List[int] = [1, 1],
         *args, **kwargs,
     ):
