@@ -56,6 +56,8 @@ def main():
     parser.add_argument('--max_workers', type=int, default=24)
     parser.add_argument('--chunksize', type=int, default=1)
     parser.add_argument('--override', action='store_true')
+    parser.add_argument('--limit', type=int | None, default=None)
+    parser.add_argument('--empty_cache', action='store_true')
     args = parser.parse_args()
     if args.all:
         datasets = list(set(all_datasets) - set(args.exclude))
@@ -67,7 +69,7 @@ def main():
         processor_cls = processors[dataset]
         processor = processor_cls(logger, max_workers=args.max_workers, chunksize=args.chunksize, override=args.override)
         logger.info(f'start processing {dataset}, max_workers={processor.max_workers}, chunksize={processor.chunksize}')
-        processor.process()
+        processor.process(args.limit, args.empty_cache)
 
 if __name__ == '__main__':
     main()

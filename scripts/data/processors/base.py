@@ -1,7 +1,8 @@
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
-from io import BytesIO
+import gc
+import itertools as it
 from logging import Logger
 from pathlib import Path
 
@@ -27,12 +28,17 @@ from mmmm.data.defs import ORIGIN_SEG_DATA_ROOT, PROCESSED_SEG_DATA_ROOT, Sparse
 
 ImageLoader: type = Callable[[Path], MetaTensor]
 
-@dataclass
+@dataclass(kw_only=True)
 class DataPoint:
+    """
+    Attributes:
+        key: unique identifier within the dataset
+        images: co-registered images, map: modality ↦ file path
+        complete_anomaly: all anomalies observable in the images are included in the label
+    """
     key: str
-    """unique identifier within the dataset"""
     images: dict[str, Path]
-    """co-registered images, map: modality ↦ file path"""
+    complete_anomaly: bool = False
 
 """
 1. multi-label, multi-file (single-channel, binary values)
@@ -40,12 +46,15 @@ class DataPoint:
 3. multi-label, single-file (multi-channel, binary values)
 """
 
-@dataclass
+@dataclass(kw_only=True)
 class MultiLabelMultiFileDataPoint(DataPoint):
+    """
+    Attributes:
+        masks: list of (target name, path to the segmentation mask)
+    """
     masks: list[tuple[str, Path]]
-    """list of (target name, path to the segmentation mask)"""
 
-@dataclass
+@dataclass(kw_only=True)
 class MultiClassDataPoint(DataPoint):
     label: Path
     class_mapping: dict[int, str]
@@ -101,7 +110,6 @@ class Processor(ABC):
     max_smaller_edge: int = 512
     min_aniso_ratio: float = 0.5
     mask_batch_size: int = 32
-    complete_anomaly: bool = False
     do_normalize: bool = False
 
     def __init__(self, logger: Logger, *, max_workers: int, chunksize: int, override: bool):
@@ -179,25 +187,28 @@ class Processor(ABC):
             raise NotImplementedError
         return masks, targets
 
-    def process(self):
+    def _collect_info(self, data_point: DataPoint):
+        if (path := self.case_data_root / data_point.key / 'info.pkl').exists():
+            return pd.read_pickle(path)
+        return None
+
+    def process(self, limit: int | None = None, empty_cache: bool = False):
         data_points = self.get_data_points()
         assert len(data_points) > 0
         assert len(data_points) == len(set(data_point.key for data_point in data_points)), "key must be unique within the dataset"
         pending_data_points = [*filter(lambda p: not (self.case_data_root / p.key).exists(), data_points)]
+        if limit is not None:
+            pending_data_points = pending_data_points[:limit]
         if len(pending_data_points) > 0:
             self.logger.info(f'{len(pending_data_points)} data points to be processed')
             self.case_data_root.mkdir(parents=True, exist_ok=True)
             process_map(
                 self.process_data_point,
-                pending_data_points,
-                max_workers=self.max_workers, chunksize=self.chunksize, ncols=80,
+                pending_data_points, it.repeat(empty_cache),
+                max_workers=self.max_workers, chunksize=10, ncols=80,
             )
-        info_list = process_map(
-            pd.read_pickle,
-            [self.case_data_root / p.key / 'info.pkl' for p in data_points],
-            max_workers=self.max_workers,
-            disable=True,
-        )
+        info_list: list[dict | None] = process_map(self._collect_info, data_points, max_workers=self.max_workers, disable=True)
+        info_list = [*filter(lambda x: x is not None, info_list)]
         info = pd.DataFrame.from_records(info_list, index='key')
         info.to_csv(self.output_root / 'info.csv')
         info.to_excel(self.output_root / 'info.xlsx', freeze_panes=(1, 1))
@@ -243,13 +254,16 @@ class Processor(ABC):
         bbox = bbox_t(masks)
         return bbox.astype(np.float64)
 
-    def process_data_point(self, data_point: DataPoint):
+    def process_data_point(self, data_point: DataPoint, empty_cache: bool):
         """
         Returns:
             (metadata, human-readable information saved in csv) if process success, else None
         """
         self.key = key = data_point.key
         try:
+            if empty_cache:
+                gc.collect()
+                torch.cuda.empty_cache()
             modalities, images = self.load_images(data_point)
             is_natural = is_natural_modality(modalities[0])
             assert all(is_natural == is_natural_modality(modality) for modality in modalities[1:])
@@ -305,7 +319,7 @@ class Processor(ABC):
                 Sparse.Anomaly(
                     [*filter(lambda name: self.tax[name].category == 'anomaly', pos_targets)],
                     [*filter(lambda name: self.tax[name].category == 'anomaly', neg_targets)],
-                    self.complete_anomaly,
+                    data_point.complete_anomaly,
                 ),
                 Sparse.Annotation(
                     [(name, masks[i].sum().item()) for i, name in enumerate(pos_targets)],
