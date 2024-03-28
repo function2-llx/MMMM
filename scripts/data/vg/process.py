@@ -6,17 +6,17 @@ from typing import List, Tuple
 from mmmm.data.defs import PROCESSED_VL_DATA_ROOT, PROCESSED_VG_DATA_ROOT
 
 prompt_highlight = """
-You are an AI assistant specialized in biomedical topics. You will be provided with a biomedical text, while the corresponding medical images are unavailable to you. 
-Your task is to highlight key anatomical structures and anomalies mentioned in the text strictly following the provided list of entities and highlight them in the report by enclosing them with "<p>" and "</p>" tags.
+You are an AI assistant specialized in biomedical topics. Your task is to carefully analyze the provided biomedical text and highlight key anatomical structures and anomalies mentioned in the text and highlight them in the report by enclosing them with "<p>" and "</p>" tags.
 Below are requirments:
-1. Include anatomic modifiers essential for precise localization, such as "right", "left", "upper", "lower", "anterior", "posterior", etc., when highlighting anatomical structures.
-2. Avoid highlighting any targets explicitly stated as absent, negated, or otherwise indicated as not present in the findings. E.g., in the context of "no tumor is visible", "lesion is not observed", "No left pleural effusion", the "tumor", "lesion" and "left pleural effusion" should not be highlighted.
-3. Do not highlight targets serving as global descriptions and are unable to be spatially localized. E.g., atelectasis.
-4. If the very same target occurs multiple times, highlight the first occurance. E.g., in the context of "The <p>abdominal aorta</p> is observed. An <p>accessory hepatic artery</p> arises from the abdominal aorta.", the second "abdominal aorta" should not be highlighted as it is the same target as the first one. 
-5. Different targets, even with the same name, should be hightlighted respectively. E.g., "A <p>lesion</p> is observed upperside, another <p>lesion</p> is observed on the right".
-6. Do not highlight targets that do not represent anatomical structures or anomalies at all. E.g., in the context of "Nonobstructed <p>small bowel</p> right of midline." and "hypointense on T2, FLAIR, and GE centrally and hyperintense peripherally", dangling modifiers like "right", "centrally" and "peripherally" should not be highlighted. In the context of "<p>Retroperitoneal lymphadenopathies</p> are observed in the image.", the verb phrase "observed" should not be highlighted.
-7. Do not highlight targets that are too coarse, ambiguous or amorphous to be localized. E.g., upper abdomen, chest, blood products.
+1. Include anatomic modifiers essential for precise localization, such as "right", "left", "upper", "lower", "anterior", "posterior", etc., when highlighting anatomical structures. But do not highlight them when they are not modifying any anatomical structures.
+2. Avoid highlighting any targets explicitly stated as absent, negated, or otherwise indicated as not present in the findings. E.g., in the context of "no tumor is visible" and "lesion is not observed", the "tumor" and "lesion" should not be highlighted.
+3. Do not highlight targets served as global descriptions and are unable to be spatially localized. E.g., you should not highlight "atelectasis".
+4. Do not highlight extra targets that are not included in the list of entities unless you are extremely confident.
+5. If the very same target occurs multiple times, highlight the first occurance. E.g., in the context of "The <p>abdominal aorta</p> is observed. An <p>accessory hepatic artery</p> arises from the abdominal aorta.", the second "abdominal aorta" should not be highlighted as it is the same target as the first one. 
+6. Different targets, even with the same name, should be hightlighted respectively. E.g., "A <p>lesion</p> is observed upperside, another <p>lesion</p> is observed on the right".
+7. Do not highlight targets that are too coarse, ambiguous, or amorphous to be localized. E.g. you should not highlight "upper abdomen", "chest", "blood products", "bones".
 8. The output should be exactly the original text with additional tags, do not output any additional information. Even if no target is present in the text, the output should be the same as the input.
+You must strictly follow the requirements above.
 
 Here are some examples:
 
@@ -72,7 +72,8 @@ def main():
     with open("../google_api_key.txt", "r") as f:
         genai.configure(api_key=f.readline().strip(), transport="rest")
 
-    llm = genai.GenerativeModel("gemini-pro")
+    config = genai.GenerationConfig(temperature=0.2)
+    llm = genai.GenerativeModel("gemini-pro", generation_config=config)
 
     datasets = [
         ('Radiopaedia', (1200, 400, 400)),

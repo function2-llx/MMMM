@@ -71,8 +71,9 @@ def check_image(image_path: str):
     except:
         return False
 
-def process_cases(cases: List[str]):
-    for case in tqdm(cases):
+def process_cases(cases: List[str], i):
+    print(f"Processing {i} - {i + 1000}")
+    for case in tqdm(cases[i: i + 1000]):
         for subset in os.listdir(ORIGIN_RP_DATA_ROOT / case):
             for image in os.listdir(ORIGIN_RP_DATA_ROOT / case /subset):
                 slices = os.listdir(ORIGIN_RP_DATA_ROOT / case / subset / image)
@@ -100,7 +101,7 @@ def process_images():
     (PROCESSED_VL_DATA_ROOT / 'Radiopaedia' / 'images').mkdir(parents=True, exist_ok=True)
     cases = os.listdir(ORIGIN_RP_DATA_ROOT)
     with Pool() as p:
-        p.map(process_cases, [cases[i: i + 2000] for i in range(0, len(cases), 2000)])
+        p.starmap(process_cases, [(cases, i) for i in range(0, len(cases), 2000)])
 
 def process():
     (PROCESSED_VL_DATA_ROOT / 'Radiopaedia').mkdir(parents=True, exist_ok=True)
