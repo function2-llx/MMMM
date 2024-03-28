@@ -9,7 +9,7 @@ def process_text(json_file: str):
     with open(ORIGIN_VL_DATA_ROOT / 'Slake1.0' / json_file) as f:
         data = json.load(f)
     
-    processed_data = [
+    data = [
         {
             'image': item['img_name'],
             'question': item['question'],
@@ -19,7 +19,7 @@ def process_text(json_file: str):
     ]
 
     with open(PROCESSED_VL_DATA_ROOT / 'Slake' / json_file, 'w') as f:
-        json.dump(processed_data, f, indent=4)
+        json.dump(data, f, indent=4)
 
 def process_images():
     (PROCESSED_VL_DATA_ROOT / 'Slake' / 'images').mkdir(parents=True, exist_ok=True)

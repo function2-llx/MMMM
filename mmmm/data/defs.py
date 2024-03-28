@@ -13,6 +13,7 @@ ORIGIN_SEG_DATA_ROOT = ORIGIN_DATA_ROOT / 'image'
 ORIGIN_VL_DATA_ROOT = ORIGIN_DATA_ROOT / 'vision-language'
 PROCESSED_SEG_DATA_ROOT = PROCESSED_DATA_ROOT / 'image'
 PROCESSED_VL_DATA_ROOT = PROCESSED_DATA_ROOT / 'vision-language'
+PROCESSED_VG_DATA_ROOT = PROCESSED_DATA_ROOT / 'visual-grounding'
 
 class Meta(TypedDict):
     spacing: npt.NDArray[np.float64]

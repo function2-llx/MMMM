@@ -10,7 +10,7 @@ def process_text(jsonl_file: str, out_file: str):
         lines = f.readlines()
         data = [json.loads(line) for line in lines]
     
-    processed_data = [
+    data = [
         {
             'image': item['image'],
             'caption': item['caption'],
@@ -19,7 +19,7 @@ def process_text(jsonl_file: str, out_file: str):
     ]
 
     with open(PROCESSED_VL_DATA_ROOT / 'PMC-OA' / out_file, 'w') as f:
-        json.dump(processed_data, f, indent=4)
+        json.dump(data, f, indent=4)
 
 def process_images():
     (PROCESSED_VL_DATA_ROOT / 'PMC-OA' / 'images').mkdir(parents=True, exist_ok=True)

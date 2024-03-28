@@ -425,12 +425,21 @@ class VLTransform(mt.Transform):
 
     def __call__(self, data: dict):
         image_dir: Path = data['dataset_dir'] / 'images' / data['image']
-        image = Image.open(image_dir)
-        image = tvt.functional.to_tensor(image)
-        if min(image.shape[1:]) > 512:
-            image = tvt.functional.resize(image, 512)
-        image = tvt.pad(image, (0, 0, torch.ceil(image.shape[2] / 16) * 16, torch.ceil(image.shape[1] / 16) * 16))
-        image = repeat(image, 'c h w -> c 1 h w')
+        if 'pt' in image_dir:
+            image = torch.load(image_dir)
+        else:
+            image = Image.open(image_dir)
+            image = tvt.functional.to_tensor(image)   
+        if len(image.shape) == 3:
+            if min(image.shape[1:]) > 512:
+                image = tvt.functional.resize(image, 512)
+            image = repeat(image, 'c h w -> c 1 h w')
+        elif len(image.shape) == 4:
+            if min(image.shape[1:]) > 512:
+                slices = []
+                for i in range(image.shape[3]):
+                    slices.append(tvt.functional.resize(image[:, :, :, i], 512))
+                image = torch.stack(slices, dim=3)
         conversation = [(data['question'], data['answer'])]
         vlm_inputs, conversation_text = prepare_vlm_inputs(
             conversation, self.tokenizer, self.patch_size, self.vit_patch_size, self.inference,
