@@ -53,6 +53,28 @@ class MMMMTokenizer(LlamaTokenizer):
         else:
             return token_ids == self.eop_token_id
 
+    def _parse_targets(self, token_ids: list[int]) -> list[str] | None:
+        ret = []
+        last_bop: int | None = None
+        for i, token_id in enumerate(token_ids):
+            match token_id:
+                case self.bop_token_id:
+                    if last_bop is not None:
+                        return None
+                    last_bop = i
+                case self.eop_token_id:
+                    if last_bop is None:
+                        return None
+                    ret.append(self.decode(token_ids[last_bop + 1:i - 1]))
+                    last_bop = None
+        return ret
+
+    def parse_targets(self, token_ids: torch.LongTensor) -> list[list[str] | None]:
+        return [
+            self._parse_targets(token_ids[i].tolist())
+            for i in range(token_ids.shape[0])
+        ]
+
     def build_classes_index(self, names: set[str]):
         """This method is useful only when not self.share_seg_token"""
         self.class_to_idx = {name: i for i, name in enumerate(sorted(names))}

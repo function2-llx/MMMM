@@ -45,10 +45,10 @@ class AMOS22Processor(Default3DImageLoaderMixin, MultiClass3DMaskLoaderMixin, Pr
                 class_mapping[15] = class15_mapping[meta.loc[case_id, "Patient's Sex"]]
                 # uterus / prostate may also be a negative class for male / female
                 data_point = MultiClassDataPoint(
-                    case,
-                    {modality: self.dataset_root / 'amos22' / f'images{split}' / f'{case}{suffix}'},
-                    label_path,
-                    class_mapping,
+                    key=case,
+                    images={modality: self.dataset_root / 'amos22' / f'images{split}' / f'{case}{suffix}'},
+                    label=label_path,
+                    class_mapping=class_mapping,
                 )
                 ret.append(data_point)
         return ret
