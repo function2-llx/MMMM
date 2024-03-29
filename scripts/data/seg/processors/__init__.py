@@ -1,4 +1,4 @@
-# FIXME: these boilerplate import codes are stupid, and static :(
+# FIXME: these boilerplate import codes are stupid, and inefficient for importing too much :(
 
 from .ACDC import ACDCProcessor
 from .AMOS22 import AMOS22DebugProcessor, AMOS22Processor
@@ -8,4 +8,5 @@ from .BraTS2023 import (
 )
 from .BTCV import BTCVAbdomenProcessor, BTCVCervixProcessor
 from .BUSI import BUSIProcessor
+from .CHAOS import CHAOSProcessor
 from .TotalSegmentator import TotalSegmentatorProcessor

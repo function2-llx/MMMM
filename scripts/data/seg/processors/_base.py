@@ -157,7 +157,7 @@ class Processor(ABC):
         return modalities, torch.cat(images).to(device=get_cuda_device()), is_natural_list[0]
 
     @abstractmethod
-    def mask_loader(self, path: Path):
+    def mask_loader(self, path: Path) -> torch.Tensor:
         pass
 
     def load_masks(self, data_point: DataPoint) -> tuple[torch.BoolTensor, list[str]]:
