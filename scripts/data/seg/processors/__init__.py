@@ -1,4 +1,4 @@
-# TODO: dynamical import?
+# FIXME: these boilerplate import codes are stupid, and static :(
 
 from .ACDC import ACDCProcessor
 from .AMOS22 import AMOS22DebugProcessor, AMOS22Processor
@@ -7,4 +7,5 @@ from .BraTS2023 import (
     BraTS2023GLIProcessor, BraTS2023MENProcessor, BraTS2023METProcessor, BraTS2023PEDProcessor, BraTS2023SSAProcessor,
 )
 from .BTCV import BTCVAbdomenProcessor, BTCVCervixProcessor
+from .BUSI import BUSIProcessor
 from .TotalSegmentator import TotalSegmentatorProcessor

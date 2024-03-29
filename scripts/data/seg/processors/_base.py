@@ -39,6 +39,7 @@ class DataPoint:
     key: str
     images: dict[str, Path]
     complete_anomaly: bool = False
+    extra: ... = None
 
 """
 1. multi-label, multi-file (single-channel, binary values)
@@ -89,12 +90,6 @@ def crop(images: torch.Tensor, masks: torch.BoolTensor, crop_mask: torch.BoolTen
     data = mt.CropForegroundD(['images', 'masks'], 'crop_mask', start_coord_key=None, end_coord_key=None)(data)
     return data['images'], data['masks']
 
-def is_natural_modality(modality: str):
-    return modality.startswith('RGB') or modality.startswith('gray')
-
-def is_rgb_modality(modality: str):
-    return modality.startswith('RGB')
-
 class Processor(ABC):
     """
     Attributes:
@@ -141,20 +136,28 @@ class Processor(ABC):
         pass
 
     @abstractmethod
-    def get_image_loader(self) -> ImageLoader:
-        pass
+    def image_loader(self, path: Path) -> tuple[MetaTensor, bool]:
+        """
+        Returns:
+            (image data, is natural)
+        """
 
-    def load_images(self, data_point: DataPoint) -> tuple[list[str], MetaTensor]:
-        loader = self.get_image_loader()
+    def load_images(self, data_point: DataPoint) -> tuple[list[str], MetaTensor, bool]:
+        # loader = self.get_image_loader()
         modalities = []
         images = []
+        is_natural_list = []
         for modality, path in data_point.images.items():
             modalities.append(modality)
-            images.append(loader(path))
-        return modalities, torch.cat(images).to(device=get_cuda_device())
+            image, is_natural = self.image_loader(path)
+            is_natural_list.append(is_natural)
+            images.append(image)
+        if any(is_natural_list):
+            assert len(images) == 1, 'multiple natural images are not supported'
+        return modalities, torch.cat(images).to(device=get_cuda_device()), is_natural_list[0]
 
     @abstractmethod
-    def get_mask_loader(self) -> ImageLoader:
+    def mask_loader(self, path: Path):
         pass
 
     def load_masks(self, data_point: DataPoint) -> tuple[torch.BoolTensor, list[str]]:
@@ -163,20 +166,20 @@ class Processor(ABC):
             - segmentation mask
             - target names corresponding to the channel dimension
         """
-        loader = self.get_mask_loader()
+        # loader = self.get_mask_loader()
         device = get_cuda_device()
         if isinstance(data_point, MultiLabelMultiFileDataPoint):
             targets, mask_paths = zip(*data_point.masks)
             targets = list(targets)
             # NOTE: make sure that mask loader returns bool tensor
             masks = process_map(
-                loader, mask_paths,
+                self.mask_loader, mask_paths,
                 new_mapper=False, disable=True, max_workers=min(4, len(mask_paths)),
             )
             masks = torch.cat(masks).to(dtype=torch.bool, device=device)
         elif isinstance(data_point, MultiClassDataPoint):
             class_mapping = data_point.class_mapping
-            label = loader(data_point.label).to(dtype=torch.int16, device=device)
+            label = self.mask_loader(data_point.label).to(dtype=torch.int16, device=device)
             assert label.shape[0] == 1
             class_ids = torch.tensor([c for c in class_mapping], dtype=torch.int16, device=device)
             for _ in range(label.ndim - 1):
@@ -255,6 +258,8 @@ class Processor(ABC):
             raise ValueError
 
     def _generate_bbox_from_mask(self, masks: torch.BoolTensor) -> npt.NDArray[np.float64]:
+        if masks.shape[0] == 0:
+            return np.empty(0, dtype=np.float64)
         bbox_t = mt.BoundingRect()
         bbox = bbox_t(masks)
         return bbox.astype(np.float64)
@@ -269,11 +274,7 @@ class Processor(ABC):
             if empty_cache:
                 gc.collect()
                 torch.cuda.empty_cache()
-            modalities, images = self.load_images(data_point)
-            is_natural = is_natural_modality(modalities[0])
-            assert all(is_natural == is_natural_modality(modality) for modality in modalities[1:])
-            if any(is_rgb_modality(modality) for modality in modalities):
-                assert len(modalities) == 1, 'multiple RGB images is not supported'
+            modalities, images, is_natural = self.load_images(data_point)
             masks, targets = self.load_masks(data_point)
             self._check_targets(targets)
             images, masks = self.orient(images, masks)
@@ -333,6 +334,7 @@ class Processor(ABC):
                         for i, bbox in enumerate(self._generate_bbox_from_mask(masks))
                     ],
                 ),
+                data_point.extra,
             )
             pd.to_pickle(sparse, save_dir / 'sparse.pkl')
             # 4.5. save info, wait for collection
@@ -402,8 +404,33 @@ class Processor(ABC):
 class Default3DImageLoaderMixin:
     image_reader = None
 
-    def get_image_loader(self) -> ImageLoader:
-        return mt.LoadImage(self.image_reader, image_only=True, dtype=None, ensure_channel_first=True)
+    def image_loader(self, path: Path) -> tuple[MetaTensor, bool]:
+        loader = mt.LoadImage(self.image_reader, image_only=True, dtype=None, ensure_channel_first=True)
+        return loader(path), False
+
+INF_SPACING = 1e8
+
+class NaturalImageLoaderMixin:
+    assert_gray_scale: bool = False
+
+    def check_and_adapt_to_3d(self, img):
+        img = MetaTensor(img.byte())
+        if img.shape[0] == 4:
+            assert (img[3] == 255).all()
+            img = img[:3]
+        if self.assert_gray_scale and img.shape[0] != 1:
+            assert (img[0] == img[1]).all() and (img[0] == img[2]).all()
+            img = img[0:1]
+        img = img.unsqueeze(1)
+        img.affine[0, 0] = INF_SPACING
+        return img
+
+    def image_loader(self, path) -> tuple[MetaTensor, bool]:
+        loader = mt.Compose([
+            mt.LoadImage(dtype=torch.uint8, ensure_channel_first=True),
+            self.check_and_adapt_to_3d,
+        ])
+        return loader(path), True
 
 class Binary3DMaskLoaderMixin:
     mask_reader = None
@@ -415,4 +442,5 @@ class MultiClass3DMaskLoaderMixin:
     mask_reader = None
 
     def get_mask_loader(self) -> ImageLoader:
+        # int16 should be enough, right?
         return mt.LoadImage(self.mask_reader, image_only=True, dtype=torch.int16, ensure_channel_first=True)

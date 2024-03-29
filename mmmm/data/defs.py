@@ -62,11 +62,13 @@ class Sparse:
         Attributes:
             mask: list of (name, mask size), where the order corresponds to the channel dimension of the mask
                 file, and names may repeat for multiple anomalies with the same name
-            bbox: list of (target name, 3D bounding box coordinates)
+            bbox: list of (target name, 3D bounding box coordinates), coordinates range: [0, shape - 1]
         """
         mask: list[tuple[str, int]]
         bbox: list[tuple[str, npt.NDArray[np.float64]]]
     annotation: Annotation
+
+    extra: ... = None
 
 def encode_patch_size(patch_size: tuple3_t[int]):
     return ','.join(map(str, patch_size))
