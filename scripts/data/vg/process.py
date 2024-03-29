@@ -8,14 +8,15 @@ from mmmm.data.defs import PROCESSED_VL_DATA_ROOT, PROCESSED_VG_DATA_ROOT
 prompt_highlight = """
 You are an AI assistant specialized in biomedical topics. Your task is to carefully analyze the provided biomedical text and highlight key anatomical structures and anomalies mentioned in the text and highlight them in the report by enclosing them with "<p>" and "</p>" tags.
 Below are requirments:
-1. Include anatomic modifiers essential for precise localization, such as "right", "left", "upper", "lower", "anterior", "posterior", etc., when highlighting anatomical structures. But do not highlight them when they are not modifying any anatomical structures.
-2. Avoid highlighting any targets explicitly stated as absent, negated, or otherwise indicated as not present in the findings. E.g., in the context of "no tumor is visible" and "lesion is not observed", the "tumor" and "lesion" should not be highlighted.
-3. Do not highlight targets served as global descriptions and are unable to be spatially localized. E.g., you should not highlight "atelectasis".
-4. Do not highlight extra targets that are not included in the list of entities unless you are extremely confident.
+1. The targets to be highlighted are limited to anatomical structures and anomalies. Anatomical structures and anomalies include organs, tissues, vessels, bones, etc. Anomalies include tumors, fractures, hemorrhages, etc. You should not highlight any other entities, such as symptoms, diseases, body systems or treatments.
+2. Include anatomic modifiers essential for precise localization, such as "right", "left", "upper", "lower", "anterior", "posterior", etc., when highlighting anatomical structures. But you must not highlight them when they are not modifying any anatomical structures.
+3. Avoid highlighting any targets explicitly stated as absent, negated, or otherwise indicated as not present in the findings. E.g., in the context of "no tumor is visible" and "lesion is not observed", the "tumor" and "lesion" should not be highlighted.
+4. Do not highlight targets served as global descriptions and are unable to be spatially localized. E.g., you should not highlight "atelectasis".
 5. If the very same target occurs multiple times, highlight the first occurance. E.g., in the context of "The <p>abdominal aorta</p> is observed. An <p>accessory hepatic artery</p> arises from the abdominal aorta.", the second "abdominal aorta" should not be highlighted as it is the same target as the first one. 
 6. Different targets, even with the same name, should be hightlighted respectively. E.g., "A <p>lesion</p> is observed upperside, another <p>lesion</p> is observed on the right".
-7. Do not highlight targets that are too coarse, ambiguous, or amorphous to be localized. E.g. you should not highlight "upper abdomen", "chest", "blood products", "bones".
-8. The output should be exactly the original text with additional tags, do not output any additional information. Even if no target is present in the text, the output should be the same as the input.
+7. Do not highlight targets that are too coarse, ambiguous, or amorphous to be localized. E.g. you should not highlight "abdomen", "chest".
+8. It is totally fine to miss a few targets but it is unacceptable to highlight any targets that do not meet the requirements. So please be cautious and conservative when highlighting the targets.
+9. The output should be exactly the original text with additional tags, do not output any additional information. Even if no target is present in the text, the output should be the same as the input.
 You must strictly follow the requirements above.
 
 Here are some examples:
@@ -25,19 +26,27 @@ The <p>appendix</p> is markedly distended by fluid-attenuation material and cont
 
 Input: A hyper-dense well-defined solid mass is seen in the supra-sellar regions. Another hyper-dense mass with large calcification is seen in the pineal region. There is compression of the pineal mass over the posterior aspect of the third ventricle with proximal marked hydrocephalus showing trans-ependymal CSF leakage. No dilatation of the fourth ventricle.
 A hyper-dense well-defined solid <p>mass</p> is seen in the supra-sellar regions. Another hyper-dense <p>mass</p> with large <p>calcification</p> is seen in the <p>pineal region</p>. There is compression of the pineal mass over the posterior aspect of the <p>third ventricle</p> with proximal marked hydrocephalus showing trans-ependymal CSF leakage. No dilatation of the fourth ventricle.
+"""
 
-Input: Left rectus sheath hematoma extending into the prevesical space. Pseudoaneurysm within left rectus sheath (with inferior component filling at venous phase). Ascites, irregular liver surface, extensive fatty change, and enlarged paraumbilical vein in keeping with cirrhosis.
-Left <p>rectus sheath hematoma</p> extending into the <p>prevesical space</p>. <p>Pseudoaneurysm</p> within left rectus sheath (with <p>inferior component</p> filling at venous phase). <p>Ascites</p>, <p>irregular liver surface</p>, extensive <p>fatty change</p>, and <p>enlarged paraumbilical vein</p> in keeping with cirrhosis.
-
+instruction = """
 Here is the input text:
 Input:
+"""
+
+second_turn = """
+Your output is not completely compliant with the requirements. You should not highlight any targets that do not meet the requirements. Please try again and note that your output still need to be exactly the original text with additional tags. Do not output any additional information.
 """
 
 def process_text(llm: genai.GenerativeModel, text: str):
     while True:
         try:
-            response = llm.generate_content(prompt_highlight + text)
+            messages = [{'role': 'user', 'parts': [prompt_highlight + instruction + text]}]
+            response = llm.generate_content(messages)
             print(response.text)
+            # messages.append(response.candidates[0].content)
+            # messages.append({'role': 'user', 'parts': [second_turn]})
+            # response = llm.generate_content(messages)
+            # print(response.text)
             return response.text
         except Exception as e:
             print(e)
@@ -72,8 +81,7 @@ def main():
     with open("../google_api_key.txt", "r") as f:
         genai.configure(api_key=f.readline().strip(), transport="rest")
 
-    config = genai.GenerationConfig(temperature=0.2)
-    llm = genai.GenerativeModel("gemini-pro", generation_config=config)
+    llm = genai.GenerativeModel("gemini-pro")
 
     datasets = [
         ('Radiopaedia', (1200, 400, 400)),
