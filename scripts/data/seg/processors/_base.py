@@ -249,8 +249,10 @@ class Processor(ABC):
         return new_spacing, new_shape
 
     def _check_targets(self, targets: list[str]):
-        for name in targets:
-            assert name in self.tax
+        unknown_targets = [name for name in targets if name not in self.tax]
+        if len(unknown_targets) > 0:
+            print('unknown targets:', unknown_targets)
+            raise ValueError
 
     def _generate_bbox_from_mask(self, masks: torch.BoolTensor) -> npt.NDArray[np.float64]:
         bbox_t = mt.BoundingRect()
