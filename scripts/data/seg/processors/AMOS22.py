@@ -7,7 +7,7 @@ from monai.data import MetaTensor
 
 from mmmm.data.defs import ORIGIN_SEG_DATA_ROOT
 
-from .base import Default3DImageLoaderMixin, MultiClass3DMaskLoaderMixin, Processor, MultiClassDataPoint
+from ._base import Default3DImageLoaderMixin, MultiClass3DMaskLoaderMixin, Processor, MultiClassDataPoint
 
 class AMOS22Processor(Default3DImageLoaderMixin, MultiClass3DMaskLoaderMixin, Processor):
     name = 'AMOS22'

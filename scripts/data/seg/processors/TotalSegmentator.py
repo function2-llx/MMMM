@@ -7,7 +7,7 @@ from monai import transforms as mt
 
 from mmmm.data.defs import ORIGIN_DATA_ROOT
 
-from .base import Default3DImageLoaderMixin, Binary3DMaskLoaderMixin, Processor, MultiLabelMultiFileDataPoint
+from ._base import Default3DImageLoaderMixin, Binary3DMaskLoaderMixin, Processor, MultiLabelMultiFileDataPoint
 
 class TotalSegmentatorProcessor(Default3DImageLoaderMixin, Binary3DMaskLoaderMixin, Processor):
     name = 'TotalSegmentator'

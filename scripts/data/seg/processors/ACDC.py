@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from .base import Default3DImageLoaderMixin, MultiClass3DMaskLoaderMixin, Processor, MultiClassDataPoint
+from ._base import Default3DImageLoaderMixin, MultiClass3DMaskLoaderMixin, Processor, MultiClassDataPoint
 
 def parse_info(case_dir: Path):
     info = (case_dir / 'Info.cfg').read_text().strip()

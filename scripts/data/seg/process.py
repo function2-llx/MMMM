@@ -5,7 +5,8 @@ import inspect
 import logging
 
 from mmmm.data.defs import PROCESSED_DATA_ROOT
-from processors.base import Processor
+
+from processors._base import Processor
 
 logger: logging.Logger
 

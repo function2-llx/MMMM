@@ -205,9 +205,12 @@ class Processor(ABC):
             process_map(
                 self.process_data_point,
                 pending_data_points, it.repeat(empty_cache),
-                max_workers=self.max_workers, chunksize=10, ncols=80,
+                max_workers=self.max_workers, chunksize=self.chunksize, ncols=80,
             )
-        info_list: list[dict | None] = process_map(self._collect_info, data_points, max_workers=self.max_workers, disable=True)
+        info_list: list[dict | None] = process_map(
+            self._collect_info, data_points,
+            max_workers=self.max_workers, chunksize=10, disable=True,
+        )
         info_list = [*filter(lambda x: x is not None, info_list)]
         info = pd.DataFrame.from_records(info_list, index='key')
         info.to_csv(self.output_root / 'info.csv')

@@ -29,7 +29,7 @@ from monai.utils import ensure_tuple_rep
 
 from mmmm.models import MMMMTokenizer
 from mmmm.models.cogvlm import LANGUAGE_TOKEN_TYPE, VISION_TOKEN_TYPE
-from .defs import Sparse, PROCESSED_SEG_DATA_ROOT, PROCESSED_VL_DATA_ROOT, encode_patch_size
+from .defs import Sparse, PROCESSED_SEG_DATA_ROOT, PROCESSED_VL_DATA_ROOT
 
 __all__ = [
     'MMMMDataModule',

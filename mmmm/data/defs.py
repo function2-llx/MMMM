@@ -22,6 +22,8 @@ class Sparse:
         mean: mean intensity for each modality
         modalities: all images of different modalities must be co-registered
         normalized: whether the images are normalized during pre-processing
+        anatomy: information for generating general conversation related to anatomy targets
+        anomaly: information for generating general conversation related to anomaly targets
     """
     spacing: npt.NDArray[np.float64]
     shape: npt.NDArray[np.int32]
