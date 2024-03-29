@@ -47,11 +47,11 @@ class Sparse:
     class Anomaly:
         """
         Attributes:
-            pos: anomalies that are assured to be observable in the image, with number of instances
+            pos: anomalies that are assured to be observable in the image
             neg: anomalies that are assured to be unobservable in the image
             complete: indicating that `pos` covers all anomalies in the image
         """
-        pos: list[tuple[str, int]]
+        pos: list[str]
         neg: list[str]
         complete: bool
     anomaly: Anomaly

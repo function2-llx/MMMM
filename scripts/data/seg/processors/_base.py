@@ -346,7 +346,7 @@ class Processor(ABC):
     def normalize_image(self, images: torch.Tensor, is_natural: bool, new_shape: npt.NDArray[np.int32]) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         # 1. translate intensity to [0, ...] for padding during resizing
         if not is_natural:
-            images = images - einops.reduce(images, 'c ... -> c', 'min')
+            images = images - einops.reduce(images, 'c ... -> c 1 1 1', 'min')
         # 2. resize
         if new_shape[0] == images.shape[1] == 1:
             # use torchvision for 2D images
@@ -356,7 +356,7 @@ class Processor(ABC):
                 )
         else:
             scale = images.shape[1:] / new_shape
-            anti_aliasing_filter = mt.GaussianSmooth((scale - 1) / 2)
+            anti_aliasing_filter = mt.GaussianSmooth(np.maximum((scale - 1) / 2, 0))
             filtered = anti_aliasing_filter(images)
             resizer = mt.Affine(
                 scale_params=scale.tolist(),
@@ -367,7 +367,7 @@ class Processor(ABC):
             images = resizer(filtered)
         # 3. rescale intensity fo [0, 1]
         images.clamp_(0)
-        maxv = 255 if is_natural else einops.reduce(images, 'c ... -> c', 'max')
+        maxv = 255 if is_natural else einops.reduce(images, 'c ... -> c 1 1 1', 'max')
         images = images / maxv
         # 4. Z-score normalization or by pre-defined statistics
         if is_natural:

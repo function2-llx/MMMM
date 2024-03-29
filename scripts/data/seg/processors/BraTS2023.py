@@ -37,13 +37,16 @@ class BraTS2023SegmentationProcessor(Default3DImageLoaderMixin, MultiClass3DMask
             if not (subject_dir.is_dir() and subject_dir.name.startswith(self.dataset_root.name)):
                 continue
             key = subject_dir.name
+            label_path = subject_dir / f'{key}-seg.nii.gz'
+            if not label_path.exists():
+                continue
             ret.append(MultiClassDataPoint(
                 key=key,
                 images={
                     modality: subject_dir / f'{key}-{modality_suffix}.nii.gz'
                     for modality_suffix, modality in modality_map.items()
                 },
-                label=subject_dir / f'{key}-seg.nii.gz',
+                label=label_path,
                 class_mapping=class_mapping,
             ))
         return ret
