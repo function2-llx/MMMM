@@ -1,11 +1,4 @@
-from pathlib import Path
-
-import einops
-import numpy as np
-
-from monai import transforms as mt
-
-from ._base import Default3DImageLoaderMixin, MultiClassDataPoint, Processor, MultiClass3DMaskLoaderMixin
+from ._base import Default3DImageLoaderMixin, MultiClass3DMaskLoaderMixin, MultiClassDataPoint, Processor
 
 class CT_ORGProcessor(Default3DImageLoaderMixin, MultiClass3DMaskLoaderMixin, Processor):
     name = 'CT-ORG'

@@ -10,4 +10,5 @@ from .BTCV import BTCVAbdomenProcessor, BTCVCervixProcessor
 from .BUSI import BUSIProcessor
 from .CHAOS import CHAOSProcessor
 from .CT_ORG import CT_ORGProcessor
+from .CTPelvic1K import CTPelvic1KProcessor
 from .TotalSegmentator import TotalSegmentatorProcessor
