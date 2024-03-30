@@ -1,10 +1,14 @@
 from dataclasses import dataclass
 from pathlib import Path
 
+import nibabel as nib
 import numpy as np
 from numpy import typing as npt
+import pandas as pd
+import torch
 
-from luolib.types import tuple3_t
+from luolib.types import PathLike, tuple3_t
+from luolib.utils import load_pt_zst
 
 DATA_ROOT = Path('data')
 ORIGIN_DATA_ROOT = DATA_ROOT / 'origin'
@@ -72,3 +76,26 @@ class Sparse:
 
 def encode_patch_size(patch_size: tuple3_t[int]):
     return ','.join(map(str, patch_size))
+
+def convert_to_slicer(data_dir: PathLike, output_dir: PathLike | None = None, multiclass: bool = True):
+    """convert the processed data by MMMM to the format readable by Slicer"""
+    data_dir = Path(data_dir)
+    output_dir = data_dir / 'slicer' if output_dir is None else Path(output_dir)
+    img = torch.load(data_dir / 'images.pt')
+    sparse: Sparse = pd.read_pickle(data_dir / 'sparse.pkl')
+    for i, modality in enumerate(sparse.modalities):
+        nib.save(
+            nib.Nifti1Image(img[i].float().numpy(), np.diag([*sparse.spacing, 1])),
+            output_dir / f'{modality}.nii.gz',
+        )
+    masks: torch.BoolTensor = load_pt_zst(data_dir / 'masks.pt.zst')
+    if multiclass:
+        seg = torch.zeros(masks.shape[1:], dtype=torch.int16)
+        for c in range(masks.shape[0]):
+            seg[masks[c]] = c + 1
+    else:
+        seg = masks
+    nib.save(
+        nib.Nifti1Image(seg.numpy(), np.diag([*sparse.spacing, 1])),
+        output_dir / 'seg.nii.gz',
+    )
