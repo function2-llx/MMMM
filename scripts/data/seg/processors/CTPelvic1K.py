@@ -2,27 +2,52 @@ from pathlib import Path
 import re
 
 from mmmm.data.defs import ORIGIN_SEG_DATA_ROOT
+
 from ._base import Default3DImageLoaderMixin, MultiClass3DMaskLoaderMixin, MultiClassDataPoint, Processor
 
 class CTPelvic1KProcessor(Default3DImageLoaderMixin, MultiClass3DMaskLoaderMixin, Processor):
     name = 'CTPelvic1K'
+    # https://nipy.org/nibabel/nifti_images.html#the-fall-back-header-affine
+    image_reader = 'itkreader'
+    mask_reader = 'itkreader'
 
-    def get_image_info(self, origin_key: str, dataset_idx: int) -> tuple[dict[str, Path], str | None]:
+    def get_image_info(self, origin_key: str, dataset_idx: int) -> tuple[Path | None, str]:
         match dataset_idx:
-            case 1:
-                # BTCV-Abdomen
-                data_dir = ORIGIN_SEG_DATA_ROOT / 'BTCV/Abdomen/RawData'
-                if not (img_path := data_dir / 'Training' / 'img' / f'{origin_key}.nii.gz').exists():
-                    img_path = data_dir / 'Testing' / 'img' / f'{origin_key}.nii.gz'
-                return {'CT': img_path}, f'BTCV-Abdomen-{origin_key}'
+            case 1 | 5:
+                # BTCV
+                btcv_task = 'Abdomen' if dataset_idx == 1 else 'Cervix'
+                data_dir = ORIGIN_SEG_DATA_ROOT / 'BTCV' / btcv_task / 'RawData'
+                if btcv_task == 'Cervix':
+                    origin_key = origin_key.replace('_', '-')
+                sub_path = f'img/{origin_key}.nii.gz'
+                if not (img_path := data_dir / 'Training' / sub_path).exists():
+                    img_path = data_dir / 'Testing' / sub_path
+                return img_path, f'BTCV-{btcv_task}-{origin_key}'
+            case 2:
+                # CT COLONOGRAPHY
+                subject_id, series_idx, *_ = origin_key.split('_')
+                data_dir = ORIGIN_SEG_DATA_ROOT / 'NCTCT/download/CT COLONOGRAPHY' / subject_id
+                series_dirs = [*data_dir.glob(f'*/{series_idx}.*')]
+                if len(series_dirs) != 1:
+                    return None, ''
+                return series_dirs[0], f'COLONOG-{origin_key}'
             case 3:
                 # MSD Task10_Colon
                 data_dir = ORIGIN_SEG_DATA_ROOT / 'MSD/Task10_Colon'
                 if not (img_path := data_dir / 'imagesTr' / f'{origin_key}.nii.gz').exists():
                     img_path = data_dir / 'imagesTs' / f'{origin_key}.nii.gz'
-                return {'CT': img_path}, f'MSD-T10-{origin_key}'
+                return img_path, f'MSD-T10-{origin_key}'
+            case 4:
+                # KiTS19
+                data_dir = ORIGIN_SEG_DATA_ROOT / 'KiTS19/data'
+                img_path = data_dir / f'{origin_key}/imaging.nii.gz'
+                return img_path, f'KiTS19-{origin_key}'
+            case 6 | 7:
+                # CLINIC & CLINIC-metal
+                img_path = self.dataset_root / f'CTPelvic1K_dataset{dataset_idx}_data/dataset{dataset_idx}_{origin_key}_data.nii.gz'
+                return img_path, origin_key
             case _:
-                return {}, None
+                return None, ''
 
     def get_data_points(self):
         # https://github.com/MIRACLE-Center/CTPelvic1K/blob/ebd422e00d4ca64c6a7e1d3e92a50b75d5e87af7/nnunet/dataset_conversion/JstPelvisSegmentation_5label.py#L108-L114
@@ -34,7 +59,11 @@ class CTPelvic1KProcessor(Default3DImageLoaderMixin, MultiClass3DMaskLoaderMixin
         }
         ret = []
         for dataset_idx in range(1, 8):
-            mask_filename_pattern = re.compile(fr'dataset{dataset_idx}_(.+)_mask_4label.nii.gz')
+            if dataset_idx <= 6:
+                mask_filename_pattern = re.compile(fr'dataset{dataset_idx}_(.+)_mask_4label.nii.gz')
+            else:
+                # NT
+                mask_filename_pattern = re.compile(fr'(.+)_mask_4label.nii.gz')
             if dataset_idx <= 5:
                 mask_dir = self.dataset_root / f'CTPelvic1K_dataset{dataset_idx}_mask_mappingback'
             else:
@@ -44,13 +73,13 @@ class CTPelvic1KProcessor(Default3DImageLoaderMixin, MultiClass3DMaskLoaderMixin
                 if match is None:
                     continue
                 origin_key = match.group(1)
-                images, key = self.get_image_info(origin_key, dataset_idx)
-                if key is None:
+                img_path, key = self.get_image_info(origin_key, dataset_idx)
+                if img_path is None:
                     continue
                 ret.append(
                     MultiClassDataPoint(
                         key=key,
-                        images=images,
+                        images={'CT': img_path},
                         label=mask_path,
                         class_mapping=class_mapping,
                     ),

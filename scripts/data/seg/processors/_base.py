@@ -102,7 +102,7 @@ class Processor(ABC):
     max_workers: int | None = None
     chunksize: int | None = None
     orientation: str | None = None
-    max_smaller_edge: int = 512
+    max_smaller_edge: int = 768
     min_aniso_ratio: float = 0.5
     mask_batch_size: int = 32
     do_normalize: bool = False
@@ -143,13 +143,17 @@ class Processor(ABC):
         """
 
     def load_images(self, data_point: DataPoint) -> tuple[list[str], MetaTensor, bool]:
-        # loader = self.get_image_loader()
         modalities = []
         images = []
         is_natural_list = []
+        affine = None
         for modality, path in data_point.images.items():
             modalities.append(modality)
             image, is_natural = self.image_loader(path)
+            if affine is None:
+                affine = image.affine
+            else:
+                assert torch.allclose(affine, image.affine)
             is_natural_list.append(is_natural)
             images.append(image)
         if any(is_natural_list):
@@ -157,13 +161,14 @@ class Processor(ABC):
         return modalities, torch.cat(images).to(device=get_cuda_device()), is_natural_list[0]
 
     @abstractmethod
-    def mask_loader(self, path: Path) -> torch.Tensor:
+    def mask_loader(self, path: Path) -> MetaTensor:
         pass
 
-    def load_masks(self, data_point: DataPoint) -> tuple[torch.BoolTensor, list[str]]:
+    def load_masks(self, data_point: DataPoint) -> tuple[MetaTensor, list[str]]:
         """
+        NOTE: metadata for mask should be preserved to match with the image
         Returns:
-            - segmentation mask
+            - a tensor of segmentation masks (dtype = torch.bool)
             - target names corresponding to the channel dimension
         """
         # loader = self.get_mask_loader()
@@ -172,14 +177,18 @@ class Processor(ABC):
             targets, mask_paths = zip(*data_point.masks)
             targets = list(targets)
             # NOTE: make sure that mask loader returns bool tensor
-            masks = process_map(
+            mask_list: list[MetaTensor] = process_map(
                 self.mask_loader, mask_paths,
                 new_mapper=False, disable=True, max_workers=min(4, len(mask_paths)),
             )
-            masks = torch.cat(masks).to(dtype=torch.bool, device=device)
+            affine = mask_list[0].affine
+            for mask in mask_list[1:]:
+                assert torch.allclose(affine, mask.affine)
+            masks: MetaTensor = torch.cat(mask_list).to(dtype=torch.bool, device=device)
+            masks.affine = affine
         elif isinstance(data_point, MultiClassDataPoint):
             class_mapping = data_point.class_mapping
-            label = self.mask_loader(data_point.label).to(dtype=torch.int16, device=device)
+            label: MetaTensor = self.mask_loader(data_point.label).to(dtype=torch.int16, device=device)
             assert label.shape[0] == 1
             class_ids = torch.tensor([c for c in class_mapping], dtype=torch.int16, device=device)
             for _ in range(label.ndim - 1):
@@ -195,7 +204,7 @@ class Processor(ABC):
             return pd.read_pickle(path)
         return None
 
-    def process(self, limit: int | None = None, empty_cache: bool = False):
+    def process(self, limit: int | None = None, empty_cache: bool = False, raise_error: bool = False):
         data_points = self.get_data_points()
         assert len(data_points) > 0
         assert len(data_points) == len(set(data_point.key for data_point in data_points)), "key must be unique within the dataset"
@@ -207,7 +216,7 @@ class Processor(ABC):
             self.case_data_root.mkdir(parents=True, exist_ok=True)
             process_map(
                 self.process_data_point,
-                pending_data_points, it.repeat(empty_cache),
+                pending_data_points, it.repeat(empty_cache), it.repeat(raise_error),
                 max_workers=self.max_workers, chunksize=self.chunksize, ncols=80,
             )
         info_list: list[dict | None] = process_map(
@@ -232,7 +241,7 @@ class Processor(ABC):
         orientation = codes[diff.argmin()]
         return orientation
 
-    def orient(self, images: MetaTensor, masks: torch.BoolTensor) -> tuple[MetaTensor, torch.BoolTensor]:
+    def orient(self, images: MetaTensor, masks: torch.BoolTensor) -> tuple[MetaTensor, MetaTensor]:
         orientation = self.get_orientation(images)
         trans = mt.Orientation(orientation)
         images, masks = map(lambda x: trans(x).contiguous(), [images, masks])
@@ -264,7 +273,7 @@ class Processor(ABC):
         bbox = bbox_t(masks)
         return bbox.astype(np.float64)
 
-    def process_data_point(self, data_point: DataPoint, empty_cache: bool):
+    def process_data_point(self, data_point: DataPoint, empty_cache: bool, raise_error: bool):
         """
         Returns:
             (metadata, human-readable information saved in csv) if process success, else None
@@ -279,6 +288,7 @@ class Processor(ABC):
             self._check_targets(targets)
             images, masks = self.orient(images, masks)
             assert images.shape[1:] == masks.shape[1:]
+            assert torch.allclose(images.affine, masks.affine, atol=1e-4)
             spacing: torch.DoubleTensor = images.pixdim
             info = {
                 'key': key,
@@ -344,31 +354,35 @@ class Processor(ABC):
         except Exception as e:
             self.logger.error(key)
             self.logger.error(e)
-            import traceback
-            self.logger.error(traceback.format_exc())
+            if raise_error:
+                raise e
+            else:
+                import traceback
+                self.logger.error(traceback.format_exc())
 
     def normalize_image(self, images: torch.Tensor, is_natural: bool, new_shape: npt.NDArray[np.int32]) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         # 1. translate intensity to [0, ...] for padding during resizing
         if not is_natural:
             images = images - einops.reduce(images, 'c ... -> c 1 1 1', 'min')
         # 2. resize
-        if new_shape[0] == images.shape[1] == 1:
-            # use torchvision for 2D images
-            if not np.array_equal(new_shape[1:], images.shape[2:]):
-                images = tvtf.resize(
-                    images, new_shape[1:].tolist(), tvt.InterpolationMode.BICUBIC, antialias=True,
+        if not np.array_equiv(new_shape, images.shape[1:]):
+            if new_shape[0] == images.shape[1] == 1:
+                # use torchvision for 2D images
+                if not np.array_equal(new_shape[1:], images.shape[2:]):
+                    images = tvtf.resize(
+                        images, new_shape[1:].tolist(), tvt.InterpolationMode.BICUBIC, antialias=True,
+                    )
+            else:
+                scale = images.shape[1:] / new_shape
+                anti_aliasing_filter = mt.GaussianSmooth(np.maximum((scale - 1) / 2, 0))
+                filtered = anti_aliasing_filter(images)
+                resizer = mt.Affine(
+                    scale_params=scale.tolist(),
+                    spatial_size=new_shape.tolist(),
+                    mode=GridSampleMode.BICUBIC,
+                    image_only=True,
                 )
-        else:
-            scale = images.shape[1:] / new_shape
-            anti_aliasing_filter = mt.GaussianSmooth(np.maximum((scale - 1) / 2, 0))
-            filtered = anti_aliasing_filter(images)
-            resizer = mt.Affine(
-                scale_params=scale.tolist(),
-                spatial_size=new_shape.tolist(),
-                mode=GridSampleMode.BICUBIC,
-                image_only=True,
-            )
-            images = resizer(filtered)
+                images = resizer(filtered)
         # 3. rescale intensity fo [0, 1]
         images.clamp_(0)
         maxv = 255 if is_natural else einops.reduce(images, 'c ... -> c 1 1 1', 'max')
@@ -435,14 +449,14 @@ class NaturalImageLoaderMixin:
 class Binary3DMaskLoaderMixin:
     mask_reader = None
 
-    def mask_loader(self, path: Path) -> torch.BoolTensor:
+    def mask_loader(self, path: Path):
         loader = mt.LoadImage(self.mask_reader, image_only=True, dtype=torch.bool, ensure_channel_first=True)
         return loader(path)
 
 class MultiClass3DMaskLoaderMixin:
     mask_reader = None
 
-    def mask_loader(self, path: Path) -> torch.ShortTensor:
+    def mask_loader(self, path: Path):
         # int16 should be enough, right?
         loader = mt.LoadImage(self.mask_reader, image_only=True, dtype=torch.int16, ensure_channel_first=True)
         return loader(path)
