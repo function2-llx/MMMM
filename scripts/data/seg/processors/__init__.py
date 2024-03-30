@@ -9,4 +9,5 @@ from .BraTS2023 import (
 from .BTCV import BTCVAbdomenProcessor, BTCVCervixProcessor
 from .BUSI import BUSIProcessor
 from .CHAOS import CHAOSProcessor
+from .CT_ORG import CT_ORGProcessor
 from .TotalSegmentator import TotalSegmentatorProcessor

@@ -435,12 +435,14 @@ class NaturalImageLoaderMixin:
 class Binary3DMaskLoaderMixin:
     mask_reader = None
 
-    def get_mask_loader(self) -> ImageLoader:
-        return mt.LoadImage(self.mask_reader, image_only=True, dtype=torch.bool, ensure_channel_first=True)
+    def mask_loader(self, path: Path) -> torch.BoolTensor:
+        loader = mt.LoadImage(self.mask_reader, image_only=True, dtype=torch.bool, ensure_channel_first=True)
+        return loader(path)
 
 class MultiClass3DMaskLoaderMixin:
     mask_reader = None
 
-    def get_mask_loader(self) -> ImageLoader:
+    def mask_loader(self, path: Path) -> torch.ShortTensor:
         # int16 should be enough, right?
-        return mt.LoadImage(self.mask_reader, image_only=True, dtype=torch.int16, ensure_channel_first=True)
+        loader = mt.LoadImage(self.mask_reader, image_only=True, dtype=torch.int16, ensure_channel_first=True)
+        return loader(path)
