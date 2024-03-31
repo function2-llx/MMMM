@@ -102,10 +102,11 @@ class Processor(ABC):
     max_workers: int | None = None
     chunksize: int | None = None
     orientation: str | None = None
-    max_smaller_edge: int = 768
+    max_smaller_edge: int = 1024
     min_aniso_ratio: float = 0.5
     mask_batch_size: int = 32
     do_normalize: bool = False
+    max_class_positions: int = 5000
 
     def __init__(self, logger: Logger, *, max_workers: int, chunksize: int, override: bool):
         self.tax = load_target_tax()
@@ -274,6 +275,19 @@ class Processor(ABC):
         bbox = bbox_t(masks)
         return bbox.astype(np.float64)
 
+    def _compute_class_positions(self, masks: torch.BoolTensor) -> tuple[torch.ShortTensor, torch.LongTensor]:
+        ret = []
+        offsets = torch.empty(masks.shape[0] + 1, dtype=torch.long, device=masks.device)
+        offsets[0] = 0
+        for i, mask in enumerate(masks):
+            positions = mask.nonzero().short()
+            if positions.shape[0] > self.max_class_positions:
+                # deterministic? random!
+                positions = positions[torch.randint(positions.shape[0], (self.max_class_positions,), device=mask.device)]
+            offsets[i + 1] = offsets[i] + positions.shape[0]
+            ret.append(positions)
+        return torch.cat(ret), offsets
+
     def process_data_point(self, data_point: DataPoint, empty_cache: bool, raise_error: bool):
         """
         Returns:
@@ -313,7 +327,7 @@ class Processor(ABC):
             save_dir.mkdir(exist_ok=True, parents=True)
             # 4.2. save image
             torch.save(as_tensor(images).half().cpu(), save_dir / f'images.pt')
-            # 4.3. resize, filter, compress, and save masks
+            # 4.3. resize, filter, compress, and save masks & class positions
             masks = self.resize_masks(masks, new_shape)
             pos_target_mask: torch.BoolTensor = einops.reduce(masks > 0, 'c ... -> c', 'any')
             # filter positive masks
@@ -321,6 +335,9 @@ class Processor(ABC):
             pos_targets = [name for i, name in enumerate(targets) if pos_target_mask[i]]
             neg_targets = [name for i, name in enumerate(targets) if not pos_target_mask[i]]
             save_pt_zst(as_tensor(masks).cpu(), save_dir / 'masks.pt.zst')
+            class_positions, class_offsets = self._compute_class_positions(masks)
+            torch.save(class_positions.cpu(), save_dir / 'class_positions.pt')
+            torch.save(class_offsets.cpu(), save_dir / 'class_offsets.pt')
             # 4.4 handle and save sparse information
             sparse = Sparse(
                 new_spacing,
