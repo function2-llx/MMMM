@@ -1,17 +1,28 @@
+from pathlib import Path
+import tempfile
+
 import numpy as np
 import pandas as pd
 import torch
+import zstandard as zstd
 
 from monai.data import MetaTensor
 from monai import transforms as mt
 
 from mmmm.data.defs import ORIGIN_DATA_ROOT
-
-from ._base import Default3DImageLoaderMixin, Binary3DMaskLoaderMixin, Processor, MultiLabelMultiFileDataPoint
+from ._base import Binary3DMaskLoaderMixin, Default3DImageLoaderMixin, MultiLabelMultiFileDataPoint, Processor
 
 class TotalSegmentatorProcessor(Default3DImageLoaderMixin, Binary3DMaskLoaderMixin, Processor):
     name = 'TotalSegmentator'
     max_workers = 8
+
+    def mask_loader(self, path: Path) -> MetaTensor:
+        with open(path, 'rb') as f:
+            data_zst = f.read()
+        data = zstd.decompress(data_zst)
+        with tempfile.NamedTemporaryFile(suffix='.nii', dir='/dev/shm') as f:
+            f.write(data)
+            return super().mask_loader(Path(f.name))
 
     def get_orientation(self, images: MetaTensor):
         codes = ['RAS', 'ASR', 'SRA']
@@ -43,7 +54,6 @@ class TotalSegmentatorProcessor(Default3DImageLoaderMixin, Binary3DMaskLoaderMix
 
     def get_data_points(self):
         ret = []
-        suffix = '.nii.gz'
         tax = pd.read_excel(ORIGIN_DATA_ROOT / 'target-tax.xlsx', sheet_name='anatomy')
         tax = tax[~tax['TS-v2 key'].isna()]
         tax.set_index('TS-v2 key', inplace=True)
@@ -54,8 +64,8 @@ class TotalSegmentatorProcessor(Default3DImageLoaderMixin, Binary3DMaskLoaderMix
                 key=case_dir.name,
                 images={'CT': case_dir / 'ct.nii.gz'},
                 masks=[
-                    (tax.loc[path.name[:-len(suffix)], 'name'], path)
-                    for path in (case_dir / 'segmentations').iterdir()
+                    (tax.loc[path.name[:-len('.nii.zst')], 'name'], path)
+                    for path in (case_dir / 'segmentations-zstd').glob('*.nii.zst')
                 ],
             )
             ret.append(data_point)
