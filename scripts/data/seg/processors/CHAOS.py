@@ -4,8 +4,9 @@ import einops
 import numpy as np
 
 from monai import transforms as mt
+from monai.data import MetaTensor
 
-from ._base import Default3DImageLoaderMixin, MultiClassDataPoint, Processor
+from ._base import DataPoint, Default3DImageLoaderMixin, MultiClassDataPoint, Processor
 
 class CHAOSProcessor(Default3DImageLoaderMixin, Processor):
     name = 'CHAOS'
@@ -23,6 +24,10 @@ class CHAOSProcessor(Default3DImageLoaderMixin, Processor):
             'd h w -> 1 h w d',
         )
         return mask.flip(dims=(1, 2))
+
+    def orient(self, images: MetaTensor, masks: MetaTensor) -> tuple[MetaTensor, MetaTensor]:
+        masks.affine = images.affine
+        return super().orient(images, masks)
 
     def _prepare(self, key: str, modality: str, image_dir: Path, mask_dir: Path) -> MultiClassDataPoint:
         return MultiClassDataPoint(

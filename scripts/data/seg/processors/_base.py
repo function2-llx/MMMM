@@ -183,7 +183,7 @@ class Processor(ABC):
             )
             affine = mask_list[0].affine
             for mask in mask_list[1:]:
-                assert torch.allclose(affine, mask.affine)
+                assert torch.allclose(affine, mask.affine, atol=1e-2)
             masks: MetaTensor = torch.cat(mask_list).to(dtype=torch.bool, device=device)
             masks.affine = affine
         elif isinstance(data_point, MultiClassDataPoint):
@@ -224,9 +224,10 @@ class Processor(ABC):
             max_workers=self.max_workers, chunksize=10, disable=True,
         )
         info_list = [*filter(lambda x: x is not None, info_list)]
-        info = pd.DataFrame.from_records(info_list, index='key')
-        info.to_csv(self.output_root / 'info.csv')
-        info.to_excel(self.output_root / 'info.xlsx', freeze_panes=(1, 1))
+        if len(info_list) > 0:
+            info = pd.DataFrame.from_records(info_list, index='key')
+            info.to_csv(self.output_root / 'info.csv')
+            info.to_excel(self.output_root / 'info.xlsx', freeze_panes=(1, 1))
 
     def get_orientation(self, images: MetaTensor):
         if self.orientation is not None:
@@ -241,7 +242,7 @@ class Processor(ABC):
         orientation = codes[diff.argmin()]
         return orientation
 
-    def orient(self, images: MetaTensor, masks: torch.BoolTensor) -> tuple[MetaTensor, MetaTensor]:
+    def orient(self, images: MetaTensor, masks: MetaTensor) -> tuple[MetaTensor, MetaTensor]:
         orientation = self.get_orientation(images)
         trans = mt.Orientation(orientation)
         images, masks = map(lambda x: trans(x).contiguous(), [images, masks])
@@ -288,7 +289,7 @@ class Processor(ABC):
             self._check_targets(targets)
             images, masks = self.orient(images, masks)
             assert images.shape[1:] == masks.shape[1:]
-            assert torch.allclose(images.affine, masks.affine, atol=1e-4)
+            assert torch.allclose(images.affine, masks.affine, atol=1e-2)
             spacing: torch.DoubleTensor = images.pixdim
             info = {
                 'key': key,

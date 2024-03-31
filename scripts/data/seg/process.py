@@ -51,9 +51,9 @@ def main():
     all_datasets = list(processors.keys())
     from jsonargparse import ArgumentParser
     parser = ArgumentParser()
-    parser.add_argument('datasets', nargs='*', type=str, choices=all_datasets)
+    parser.add_argument('datasets', nargs='*', type=str)
     parser.add_argument('--all', action='store_true')
-    parser.add_argument('--exclude', nargs='*', type=str, default=[], choices=all_datasets)
+    parser.add_argument('--exclude', nargs='*', type=str, default=[])
     parser.add_argument('--max_workers', type=int, default=24)
     parser.add_argument('--chunksize', type=int, default=1)
     parser.add_argument('--override', action='store_true')
