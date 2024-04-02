@@ -1,5 +1,4 @@
 from abc import ABC, abstractmethod
-from collections.abc import Callable
 from dataclasses import dataclass
 import gc
 import itertools as it
@@ -25,8 +24,6 @@ from monai.utils import GridSampleMode
 
 from mmmm.data import load_target_tax
 from mmmm.data.defs import ORIGIN_SEG_DATA_ROOT, PROCESSED_SEG_DATA_ROOT, Sparse
-
-ImageLoader: type = Callable[[Path], MetaTensor]
 
 @dataclass(kw_only=True)
 class DataPoint:
