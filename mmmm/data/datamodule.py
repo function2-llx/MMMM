@@ -97,7 +97,7 @@ def gen_seg_conversation(
     if neg_mask:
         prompt = f'For the given {modality} image, output the segmentation masks for the following objects: {_convert_list(classes, False)}.'
     else:
-        prompt = f"For the given {modality} image, find the following objects, and output segmentation masks for the found objects: {_convert_list(classes, False)}. "
+        prompt = f'For the given {modality} image, find the following objects, and output segmentation masks for the found objects: {_convert_list(classes, False)}. '
     if len(pos_classes) > 0:
         if len(neg_classes) > 0:
             response = f'The following objects are found: {_convert_list(pos_classes, True)}. ' + \
@@ -125,7 +125,7 @@ def prepare_vlm_inputs(
     num_image_tokens: int,
     inference: bool = False,
 ):
-    """
+    '''
     Args:
         conversation:
         tokenizer:
@@ -133,7 +133,7 @@ def prepare_vlm_inputs(
         inference:
     Returns:
 
-    """
+    '''
     # TODO: refactor this function to support various VLM formats
     # template: CogVLM `chat_old_history_to_prompt`
     # just for viewing, don't tokenize it directly
@@ -622,7 +622,7 @@ class CapDataModule(ExpDataModuleBase):
         trans: TransConf,
         tokenizer: MMMMTokenizer,
         data_root: Path = PROCESSED_VL_DATA_ROOT,
-        datasets: List[str] = ['Slake', 'VQA-Med'],
+        datasets: List[str] = ['PMC-OA', 'Radiopaedia', 'OpenI'],
         *args, **kwargs,
     ):
         super().__init__(*args, **kwargs)
@@ -631,7 +631,20 @@ class CapDataModule(ExpDataModuleBase):
         self.datasets = datasets
         self.trans_conf = trans
         self.prompts = [
-            '',
+            'Can you provide a caption consists of finding and impression for this medical image?',
+            'Please caption this medical scan with finding and impression.',
+            'Describe this medical scan with finding and impression.',
+            'Please write a caption consists of finding and impression for this image.',
+            'Please provide a caption consists of finding and impression for this medical image.',
+            'Can you provide a summary consists of finding and impression of this radiograph?',
+            'What are the findings and impression presented in this medical scan?',
+            'Please write a caption consists of finding and impression for this scan.',
+            'Can you provide a description consists of finding and impression of this medical scan?',
+            'Please caption this medical scan with finding and impression.',
+            'Analyze this medical image and provide a detailed caption with both finding and impression.',
+            'Examine the medical image and construct a caption that includes finding and impression.',
+            'Based on your analysis, what would be an accurate caption for this medical image, including both finding and impression?',
+            'What is the most appropriate caption for this medical scan, detailing both the finding and impression?',
         ]
 
     def train_data(self) -> Sequence:
@@ -639,7 +652,7 @@ class CapDataModule(ExpDataModuleBase):
         for dataset in self.datasets:
             with open(self.data_root / dataset / 'train.json') as f:
                 data = json.load(f)
-            if dataset == 'Radiopaedia':
+            if dataset == 'Radiopaedia' or dataset == 'OpenI':
                 train_data.extend([
                     {
                         'dataset_dir': self.data_root / dataset,
@@ -715,8 +728,8 @@ class MMMMDataModule(ExpDataModuleBase):
         seg_data_root: str = PROCESSED_SEG_DATA_ROOT,
         vl_data_root: str = PROCESSED_VL_DATA_ROOT,
         seg_data: List[str] = ['AMOS22', 'AMOS22-debug'],
-        vqa_data: List[str] = ['Slake', 'VQA-Med', 'Radiopaedia'],
-        cap_data: List[str] = ['PMC-OA', 'Radiopaedia'],
+        vqa_data: List[str] = ['Slake', 'VQA-Med', 'Radiopaedia', 'VQA-RAD'],
+        cap_data: List[str] = ['PMC-OA', 'Radiopaedia', 'OpenI'],
         datamodules: List[str] = ['seg', 'vqa', 'cap'],
         sample_rates: List[int] = [1, 1],
         *args, **kwargs,

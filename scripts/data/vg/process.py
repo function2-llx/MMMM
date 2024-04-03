@@ -33,20 +33,12 @@ Here is the input text:
 Input:
 """
 
-second_turn = """
-Your output is not completely compliant with the requirements. You should not highlight any targets that do not meet the requirements. Please try again and note that your output still need to be exactly the original text with additional tags. Do not output any additional information.
-"""
-
 def process_text(llm: genai.GenerativeModel, text: str):
     while True:
         try:
             messages = [{'role': 'user', 'parts': [prompt_highlight + instruction + text]}]
             response = llm.generate_content(messages)
             print(response.text)
-            # messages.append(response.candidates[0].content)
-            # messages.append({'role': 'user', 'parts': [second_turn]})
-            # response = llm.generate_content(messages)
-            # print(response.text)
             return response.text
         except Exception as e:
             print(e)
