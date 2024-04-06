@@ -26,7 +26,7 @@ class ISLES22Processor(Default3DImageLoaderMixin, Default3DMaskLoaderMixin, Proc
                             # ('T2-FLAIR MRI', 'anat', 'FLAIR'),
                         ]
                     },
-                    masks=[('lesion of ischemic stroke', mask_path)]
+                    masks=[('stroke lesion', mask_path)]
                 ),
             )
         return ret

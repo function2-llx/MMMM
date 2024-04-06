@@ -1,6 +1,7 @@
 # FIXME: these boilerplate import codes are stupid, and inefficient for importing too much :(
 
 from .ACDC import ACDCProcessor
+from .ATLAS import ATLASProcessor
 from .AMOS22 import AMOS22Processor
 from .ATM22 import ATM22Processor
 from .BTCV import BTCVAbdomenProcessor, BTCVCervixProcessor

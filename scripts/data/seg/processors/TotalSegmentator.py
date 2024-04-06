@@ -10,9 +10,9 @@ from monai.data import MetaTensor
 from monai import transforms as mt
 
 from mmmm.data.defs import ORIGIN_DATA_ROOT
-from ._base import Default3DImageLoaderMixin, MultiLabelMultiFileDataPoint, Processor
+from ._base import Default3DImageLoaderMixin, Default3DMaskLoaderMixin, MultiLabelMultiFileDataPoint, Processor
 
-class TotalSegmentatorProcessor(Default3DImageLoaderMixin, Binary3DMaskLoaderMixin, Processor):
+class TotalSegmentatorProcessor(Default3DImageLoaderMixin, Default3DMaskLoaderMixin, Processor):
     name = 'TotalSegmentator'
     max_workers = 8
 

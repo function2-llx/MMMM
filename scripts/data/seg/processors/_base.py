@@ -105,7 +105,7 @@ class Processor(ABC):
     mask_batch_size: int = 32
     do_normalize: bool = False
     max_class_positions: int = 5000
-    cuda_cache_th: int = 30
+    cuda_cache_th: int = 15
 
     def __init__(self, logger: Logger, *, max_workers: int, chunksize: int, override: bool):
         self.tax = load_target_tax()
@@ -184,7 +184,7 @@ class Processor(ABC):
             for mask in mask_list[1:]:
                 assert torch.allclose(affine, mask.affine, atol=1e-2)
             masks: MetaTensor = torch.cat(mask_list).to(device=device)
-            assert (0 <= masks <= 1).all()
+            assert ((0 <= masks) & (masks <= 1)).all()
             masks.affine = affine
             masks = masks.bool()
         elif isinstance(data_point, MultiClassDataPoint):
