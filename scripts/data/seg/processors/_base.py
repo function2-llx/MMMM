@@ -94,6 +94,7 @@ class Processor(ABC):
         orientation: if orientation is None, will determine it from the spacing
         min_aniso_ratio: minimum value for spacing_z / spacing_xy
         do_normalize: whether to normalize the image during pre-processing; otherwise, during training
+        cuda_cache_th: cuda cache usage threshold to empty cache (in GiB)
     """
     name: str
     max_workers: int | None = None
@@ -104,6 +105,7 @@ class Processor(ABC):
     mask_batch_size: int = 32
     do_normalize: bool = False
     max_class_positions: int = 5000
+    cuda_cache_th: int = 30
 
     def __init__(self, logger: Logger, *, max_workers: int, chunksize: int, override: bool):
         self.tax = load_target_tax()
@@ -293,8 +295,11 @@ class Processor(ABC):
         self.key = key = data_point.key
         try:
             if empty_cache:
-                gc.collect()
-                torch.cuda.empty_cache()
+                device = get_cuda_device()
+                cuda_cache = torch.cuda.memory_reserved(device) - torch.cuda.memory_allocated(device)
+                if cuda_cache > self.cuda_cache_th * 1024 ** 3:
+                    gc.collect()
+                    torch.cuda.empty_cache()
             modalities, images, is_natural = self.load_images(data_point)
             masks, targets = self.load_masks(data_point)
             self._check_targets(targets)
@@ -332,9 +337,10 @@ class Processor(ABC):
             pos_targets = [name for i, name in enumerate(targets) if pos_target_mask[i]]
             neg_targets = [name for i, name in enumerate(targets) if not pos_target_mask[i]]
             save_pt_zst(as_tensor(masks).cpu(), save_dir / 'masks.pt.zst')
-            class_positions, class_offsets = self._compute_class_positions(masks)
-            torch.save(class_positions.cpu(), save_dir / 'class_positions.pt')
-            torch.save(class_offsets.cpu(), save_dir / 'class_offsets.pt')
+            if masks.shape[0] > 0:
+                class_positions, class_offsets = self._compute_class_positions(masks)
+                torch.save(class_positions.cpu(), save_dir / 'class_positions.pt')
+                torch.save(class_offsets.cpu(), save_dir / 'class_offsets.pt')
             # 4.4 handle and save sparse information
             sparse = Sparse(
                 new_spacing,
