@@ -1,8 +1,8 @@
 # FIXME: these boilerplate import codes are stupid, and inefficient for importing too much :(
 
 from .ACDC import ACDCProcessor
-from .ATLAS import ATLASProcessor
 from .AMOS22 import AMOS22Processor
+from .ATLAS import ATLASProcessor
 from .ATM22 import ATM22Processor
 from .BTCV import BTCVAbdomenProcessor, BTCVCervixProcessor
 from .BUSI import BUSIProcessor
@@ -15,7 +15,12 @@ from .CTSpine1K import CTSpine1KProcessor
 from .CT_ORG import CT_ORGProcessor
 from .HaNSeg import HaNSegProcessor
 from .ISLES22 import ISLES22Processor
+from .LNQ2023 import LNQ2023Processor
 from .LiTS import LiTSProcessor
+from .MRSpineSeg import MRSpineSegProcessor
+from .MSD import (
+    MSDHeartProcessor, MSDHippocampusProcessor, MSDLiverProcessor, MSDLungProcessor, MSDPancreasProcessor,
+    MSDProstateProcessor, MSDHepaticVesselProcessor, MSDSpleenProcessor, MSDColonProcessor,
+)
 from .TotalSegmentator import TotalSegmentatorProcessor
 from .VerSe import VerSeProcessor
-from .LNQ2023 import LNQ2023Processor

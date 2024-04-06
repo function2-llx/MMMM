@@ -2,6 +2,7 @@ from ._base import Default3DImageLoaderMixin, Default3DMaskLoaderMixin, MultiCla
 
 class CT_ORGProcessor(Default3DImageLoaderMixin, Default3DMaskLoaderMixin, Processor):
     name = 'CT-ORG'
+    orientation = 'SRA'
 
     def get_data_points(self):
         ret = []

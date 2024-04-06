@@ -212,6 +212,8 @@ class Processor(ABC):
         pending_data_points = [*filter(lambda p: not (self.case_data_root / p.key).exists(), data_points)]
         if limit is not None:
             pending_data_points = pending_data_points[:limit]
+        if self.orientation is None:
+            self.logger.warning('orientation is not specified, will infer from the metadata')
         if len(pending_data_points) > 0:
             self.logger.info(f'{len(pending_data_points)} data points to be processed')
             self.case_data_root.mkdir(parents=True, exist_ok=True)
@@ -337,8 +339,8 @@ class Processor(ABC):
             masks = masks[pos_target_mask]
             pos_targets = [name for i, name in enumerate(targets) if pos_target_mask[i]]
             neg_targets = [name for i, name in enumerate(targets) if not pos_target_mask[i]]
-            save_pt_zst(as_tensor(masks).cpu(), save_dir / 'masks.pt.zst')
             if masks.shape[0] > 0:
+                save_pt_zst(as_tensor(masks).cpu(), save_dir / 'masks.pt.zst')
                 class_positions, class_offsets = self._compute_class_positions(masks)
                 torch.save(class_positions.cpu(), save_dir / 'class_positions.pt')
                 torch.save(class_offsets.cpu(), save_dir / 'class_offsets.pt')

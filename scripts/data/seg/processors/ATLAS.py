@@ -2,6 +2,7 @@ from ._base import Default3DImageLoaderMixin, Default3DMaskLoaderMixin, MultiLab
 
 class ATLASProcessor(Default3DImageLoaderMixin, Default3DMaskLoaderMixin, Processor):
     name = 'ATLAS'
+    orientation = 'SRA'
 
     @property
     def dataset_root(self):

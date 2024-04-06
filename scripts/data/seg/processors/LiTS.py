@@ -3,6 +3,7 @@ from ._base import Default3DImageLoaderMixin, Default3DMaskLoaderMixin, MultiCla
 
 class LiTSProcessor(Default3DImageLoaderMixin, Default3DMaskLoaderMixin, Processor):
     name = 'LiTS'
+    orientation = 'SRA'
 
     def orient(self, images: MetaTensor, masks: MetaTensor) -> tuple[MetaTensor, MetaTensor]:
         if self.key in ['48', '49', '50', '51', '52']:

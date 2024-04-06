@@ -2,7 +2,7 @@ from ._base import Default3DMaskLoaderMixin, Default3DImageLoaderMixin, MultiLab
 
 class ATM22Processor(Default3DImageLoaderMixin, Default3DMaskLoaderMixin, Processor):
     name = 'ATM22'
-    max_workers = 8
+    orientation = 'SRA'
 
     def get_data_points(self):
         ret = []

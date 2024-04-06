@@ -4,6 +4,7 @@ class LNQ2023Processor(Default3DImageLoaderMixin, Default3DMaskLoaderMixin, Proc
     name = 'LNQ2023'
     image_reader = 'nrrdreader'
     mask_reader = 'nrrdreader'
+    orientation = 'SRA'
 
     def get_data_points(self):
         ret = []

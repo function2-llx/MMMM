@@ -2,6 +2,7 @@ from ._base import Default3DMaskLoaderMixin, Default3DImageLoaderMixin, MultiLab
 
 class ISLES22Processor(Default3DImageLoaderMixin, Default3DMaskLoaderMixin, Processor):
     name = 'ISLES22'
+    orientation = 'SRA'
 
     @property
     def dataset_root(self):
