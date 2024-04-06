@@ -15,5 +15,7 @@ from .CTSpine1K import CTSpine1KProcessor
 from .CT_ORG import CT_ORGProcessor
 from .HaNSeg import HaNSegProcessor
 from .ISLES22 import ISLES22Processor
+from .LiTS import LiTSProcessor
 from .TotalSegmentator import TotalSegmentatorProcessor
 from .VerSe import VerSeProcessor
+from .LNQ2023 import LNQ2023Processor
