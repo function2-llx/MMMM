@@ -26,7 +26,7 @@ class CTPelvic1KProcessor(Default3DImageLoaderMixin, MultiClass3DMaskLoaderMixin
             case 2:
                 # CT COLONOGRAPHY
                 subject_id, series_idx, *_ = origin_key.split('_')
-                data_dir = ORIGIN_SEG_DATA_ROOT / 'NCTCT/download/CT COLONOGRAPHY' / subject_id
+                data_dir = ORIGIN_SEG_DATA_ROOT / 'CT-COLONOGRAPHY/download/CT COLONOGRAPHY' / subject_id
                 series_dirs = [*data_dir.glob(f'*/{series_idx}.*')]
                 if len(series_dirs) != 1:
                     return None, ''

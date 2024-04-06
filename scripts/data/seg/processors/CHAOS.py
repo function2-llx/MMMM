@@ -6,7 +6,7 @@ import numpy as np
 from monai import transforms as mt
 from monai.data import MetaTensor
 
-from ._base import DataPoint, Default3DImageLoaderMixin, MultiClassDataPoint, Processor
+from ._base import Default3DImageLoaderMixin, MultiClassDataPoint, Processor
 
 class CHAOSProcessor(Default3DImageLoaderMixin, Processor):
     name = 'CHAOS'

@@ -81,6 +81,7 @@ def convert_to_slicer(data_dir: PathLike, output_dir: PathLike | None = None, mu
     """convert the processed data by MMMM to the format readable by Slicer"""
     data_dir = Path(data_dir)
     output_dir = data_dir / 'slicer' if output_dir is None else Path(output_dir)
+    output_dir.mkdir(exist_ok=True, parents=True)
     img = torch.load(data_dir / 'images.pt')
     sparse: Sparse = pd.read_pickle(data_dir / 'sparse.pkl')
     for i, modality in enumerate(sparse.modalities):

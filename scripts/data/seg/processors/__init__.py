@@ -3,13 +3,15 @@
 from .ACDC import ACDCProcessor
 from .AMOS22 import AMOS22Processor
 from .ATM22 import ATM22Processor
+from .BTCV import BTCVAbdomenProcessor, BTCVCervixProcessor
+from .BUSI import BUSIProcessor
 from .BraTS2023 import (
     BraTS2023GLIProcessor, BraTS2023MENProcessor, BraTS2023METProcessor, BraTS2023PEDProcessor, BraTS2023SSAProcessor,
 )
-from .BTCV import BTCVAbdomenProcessor, BTCVCervixProcessor
-from .BUSI import BUSIProcessor
 from .CHAOS import CHAOSProcessor
-from .CT_ORG import CT_ORGProcessor
 from .CTPelvic1K import CTPelvic1KProcessor
+from .CTSpine1K import CTSpine1KProcessor
+from .CT_ORG import CT_ORGProcessor
 from .HaNSeg import HaNSegProcessor
 from .TotalSegmentator import TotalSegmentatorProcessor
+from .VerSe import VerSeProcessor
