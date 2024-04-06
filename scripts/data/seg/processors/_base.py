@@ -171,7 +171,6 @@ class Processor(ABC):
             - a tensor of segmentation masks (dtype = torch.bool)
             - target names corresponding to the channel dimension
         """
-        # loader = self.get_mask_loader()
         device = get_cuda_device()
         if isinstance(data_point, MultiLabelMultiFileDataPoint):
             targets, mask_paths = zip(*data_point.masks)
@@ -184,8 +183,10 @@ class Processor(ABC):
             affine = mask_list[0].affine
             for mask in mask_list[1:]:
                 assert torch.allclose(affine, mask.affine, atol=1e-2)
-            masks: MetaTensor = torch.cat(mask_list).to(dtype=torch.bool, device=device)
+            masks: MetaTensor = torch.cat(mask_list).to(device=device)
+            assert (0 <= masks <= 1).all()
             masks.affine = affine
+            masks = masks.bool()
         elif isinstance(data_point, MultiClassDataPoint):
             class_mapping = data_point.class_mapping
             label: MetaTensor = self.mask_loader(data_point.label).to(dtype=torch.int16, device=device)
@@ -467,14 +468,7 @@ class NaturalImageLoaderMixin:
         ])
         return loader(path), True
 
-class Binary3DMaskLoaderMixin:
-    mask_reader = None
-
-    def mask_loader(self, path: Path):
-        loader = mt.LoadImage(self.mask_reader, image_only=True, dtype=torch.bool, ensure_channel_first=True)
-        return loader(path)
-
-class MultiClass3DMaskLoaderMixin:
+class Default3DMaskLoaderMixin:
     mask_reader = None
 
     def mask_loader(self, path: Path):

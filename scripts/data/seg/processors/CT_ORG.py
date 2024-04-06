@@ -1,6 +1,6 @@
-from ._base import Default3DImageLoaderMixin, MultiClass3DMaskLoaderMixin, MultiClassDataPoint, Processor
+from ._base import Default3DImageLoaderMixin, Default3DMaskLoaderMixin, MultiClassDataPoint, Processor
 
-class CT_ORGProcessor(Default3DImageLoaderMixin, MultiClass3DMaskLoaderMixin, Processor):
+class CT_ORGProcessor(Default3DImageLoaderMixin, Default3DMaskLoaderMixin, Processor):
     name = 'CT-ORG'
 
     def get_data_points(self):

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from ._base import Default3DImageLoaderMixin, MultiClass3DMaskLoaderMixin, Processor, MultiClassDataPoint
+from ._base import Default3DImageLoaderMixin, Default3DMaskLoaderMixin, Processor, MultiClassDataPoint
 
 def parse_info(case_dir: Path):
     info = (case_dir / 'Info.cfg').read_text().strip()
@@ -10,7 +10,7 @@ def parse_info(case_dir: Path):
         ret[k] = v
     return ret
 
-class ACDCProcessor(Default3DImageLoaderMixin, MultiClass3DMaskLoaderMixin, Processor):
+class ACDCProcessor(Default3DImageLoaderMixin, Default3DMaskLoaderMixin, Processor):
     name = 'ACDC'
     max_workers = 8
 

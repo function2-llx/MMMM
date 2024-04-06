@@ -1,8 +1,8 @@
 import torch
 
-from ._base import DataPoint, Default3DImageLoaderMixin, MultiClass3DMaskLoaderMixin, Processor, MultiClassDataPoint
+from ._base import DataPoint, Default3DImageLoaderMixin, Default3DMaskLoaderMixin, Processor, MultiClassDataPoint
 
-class BraTS2023SegmentationProcessor(Default3DImageLoaderMixin, MultiClass3DMaskLoaderMixin, Processor):
+class BraTS2023SegmentationProcessor(Default3DImageLoaderMixin, Default3DMaskLoaderMixin, Processor):
     orientation = 'SRA'
 
     @property

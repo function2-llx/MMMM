@@ -1,6 +1,6 @@
-from ._base import Binary3DMaskLoaderMixin, Default3DImageLoaderMixin, MultiLabelMultiFileDataPoint, Processor
+from ._base import Default3DMaskLoaderMixin, Default3DImageLoaderMixin, MultiLabelMultiFileDataPoint, Processor
 
-class HaNSegProcessor(Default3DImageLoaderMixin, Binary3DMaskLoaderMixin, Processor):
+class HaNSegProcessor(Default3DImageLoaderMixin, Default3DMaskLoaderMixin, Processor):
     name = 'HaN-Seg'
     max_workers = 8
     image_reader = 'nrrdreader'
