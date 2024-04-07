@@ -8,6 +8,7 @@ from pathlib import Path
 import einops
 import numpy as np
 from numpy import typing as npt
+import orjson
 import pandas as pd
 from scipy.stats import norm
 import torch
@@ -280,12 +281,15 @@ class Processor(ABC):
             print('unknown targets:', unknown_targets)
             raise ValueError
 
-    def _generate_bbox_from_mask(self, masks: torch.BoolTensor) -> npt.NDArray[np.float64]:
+    def _generate_bbox_from_mask(self, masks: torch.BoolTensor) -> list[Sparse.BBox]:
         if masks.shape[0] == 0:
-            return np.empty(0, dtype=np.float64)
+            return []
         bbox_t = mt.BoundingRect()
         bbox = bbox_t(masks)
-        return bbox.astype(np.float64)
+        bbox = bbox.reshape((-1, 3, 2))
+        center = bbox.mean(axis=2)
+        shape = bbox[..., 1] - bbox[..., 0]
+        return [Sparse.BBox(tuple(c.tolist()), tuple(s.tolist())) for c, s in zip(center, shape)]
 
     def _compute_class_positions(self, masks: torch.BoolTensor) -> tuple[torch.ShortTensor, torch.LongTensor]:
         ret = []
@@ -356,31 +360,31 @@ class Processor(ABC):
                 torch.save(class_offsets.cpu(), save_dir / 'class_offsets.pt')
             # 4.4 handle and save sparse information
             sparse = Sparse(
-                new_spacing,
-                new_shape,
-                mean.cpu().numpy(),
-                std.cpu().numpy(),
-                self.do_normalize,
-                modalities,
-                Sparse.Anatomy(
+                spacing=new_spacing.tolist(),
+                shape=new_shape.tolist(),
+                mean=tuple(mean.tolist()),
+                std=tuple(std.tolist()),
+                normalized=self.do_normalize,
+                modalities=modalities,
+                anatomy=Sparse.Anatomy(
                     [*filter(lambda name: self.tax[name].category == 'anatomy', pos_targets)],
                     [*filter(lambda name: self.tax[name].category == 'anatomy', neg_targets)],
                 ),
-                Sparse.Anomaly(
+                anomaly=Sparse.Anomaly(
                     [*filter(lambda name: self.tax[name].category == 'anomaly', pos_targets)],
                     [*filter(lambda name: self.tax[name].category == 'anomaly', neg_targets)],
                     data_point.complete_anomaly,
                 ),
-                Sparse.Annotation(
+                annotation=Sparse.Annotation(
                     [(name, masks[i].sum().item()) for i, name in enumerate(pos_targets)],
                     [
                         (pos_targets[i], bbox)
                         for i, bbox in enumerate(self._generate_bbox_from_mask(masks))
                     ],
                 ),
-                data_point.extra,
+                extra=data_point.extra,
             )
-            pd.to_pickle(sparse, save_dir / 'sparse.pkl')
+            (save_dir / 'sparse.json').write_text(sparse.to_json(orjson_options=orjson.OPT_INDENT_2))
             # 4.5. save info, wait for collection
             pd.to_pickle(info, save_dir / 'info.pkl')
             # 5. complete

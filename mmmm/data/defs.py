@@ -1,9 +1,12 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
+from mashumaro.mixins.orjson import DataClassORJSONMixin
 import nibabel as nib
 import numpy as np
-from numpy import typing as npt
 import pandas as pd
 import torch
 
@@ -19,22 +22,22 @@ PROCESSED_SEG_DATA_ROOT = PROCESSED_DATA_ROOT / 'image'
 PROCESSED_VL_DATA_ROOT = PROCESSED_DATA_ROOT / 'vision-language'
 PROCESSED_VG_DATA_ROOT = PROCESSED_DATA_ROOT / 'visual-grounding'
 
-@dataclass
-class Sparse:
+@dataclass(kw_only=True)
+class Sparse(DataClassORJSONMixin):
     """
     Attributes:
-        mean: mean intensity for each modality
         modalities: all images of different modalities must be co-registered
+        mean: mean intensity for each modality
         normalized: whether the images are normalized during pre-processing
         anatomy: information for generating general conversation related to anatomy targets
         anomaly: information for generating general conversation related to anomaly targets
     """
-    spacing: npt.NDArray[np.float64]
-    shape: npt.NDArray[np.int32]
-    mean: npt.NDArray[np.float32]
-    std: npt.NDArray[np.float32]
-    normalized: bool
+    spacing: tuple3_t[float]
+    shape: tuple3_t[int]
     modalities: list[str]
+    mean: list[float]
+    std: list[float]
+    normalized: bool
 
     @dataclass
     class Anatomy:
@@ -61,6 +64,11 @@ class Sparse:
     anomaly: Anomaly
 
     @dataclass
+    class BBox:
+        center: tuple3_t[float]
+        shape: tuple3_t[float]
+
+    @dataclass
     class Annotation:
         """
         Attributes:
@@ -69,10 +77,10 @@ class Sparse:
             bbox: list of (target name, 3D bounding box coordinates), coordinates range: [0, shape - 1]
         """
         mask: list[tuple[str, int]]
-        bbox: list[tuple[str, npt.NDArray[np.float64]]]
+        bbox: list[tuple[str, Sparse.BBox]]
     annotation: Annotation
 
-    extra: ... = None
+    extra: Any = None
 
 def encode_patch_size(patch_size: tuple3_t[int]):
     return ','.join(map(str, patch_size))
