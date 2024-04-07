@@ -237,12 +237,22 @@ class Processor(ABC):
             return self.orientation
         codes = ['RAS', 'ASR', 'SRA']
         diff = np.empty(len(codes))
-        dummy = MetaTensor(torch.empty(1, 1, 1, 1), images.affine)
+        shape_diff = np.empty(len(codes), dtype=np.int32)
+        dummy = MetaTensor(torch.empty(1, *images.shape[1:], device=images.device), images.affine)
         for i, code in enumerate(codes):
             orientation = mt.Orientation(code)
-            spacing = orientation(dummy).pixdim
-            diff[i] = abs(spacing[1] - spacing[2])
-        orientation = codes[diff.argmin()]
+            dummy_t: MetaTensor = orientation(dummy)
+            diff[i] = abs(dummy_t.pixdim[1] - dummy_t.pixdim[2])
+            shape_diff[i] = abs(dummy_t.shape[2] - dummy_t.shape[3])
+
+        if diff.max() - diff.min() > 1e-3 * diff.min():
+            orientation = codes[diff.argmin()]
+        elif shape_diff.min() == 0 and shape_diff.max() != 0:
+            # select plane with edges of equal lengths
+            orientation = codes[shape_diff.argmin()]
+        else:
+            # fall back to SRA
+            orientation = 'SRA'
         return orientation
 
     def orient(self, images: MetaTensor, masks: MetaTensor) -> tuple[MetaTensor, MetaTensor]:
