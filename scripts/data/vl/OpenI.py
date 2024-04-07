@@ -16,24 +16,13 @@ def process(csv_file: str):
         for i, item in tqdm(list(enumerate((reader)))):
             text = ''
             images = glob(str(ORIGIN_VL_DATA_ROOT / 'OpenI' / 'images' / 'images_normalized' / (str(i) + '_IM*.dcm.png')))
-            if item['findings']:
-                text += 'Findings: ' + item['findings']
-            if item['impression']:
-                if text:
-                    text += ' '
-                text += 'Impression: ' + item['impression']
-            if text:
+            if item['findings'].strip() and item['impression'].strip():
                 data.append(
                     {
-                        'image': [os.path.join('images', os.path.basename(image)) for image in images],
-                        'caption': text,
+                        'image': images,
+                        'caption': 'Findings: ' + item['findings'] + ' Impression: ' + item['impression'],
                     }
                 )
-                for image in images:
-                    shutil.copyfile(
-                        image,
-                        PROCESSED_VL_DATA_ROOT / 'OpenI' / 'images' / os.path.basename(image)
-                    )
 
     train_data = data[:int(len(data) * 0.8)]
     val_data = data[int(len(data) * 0.8):int(len(data) * 0.9)]

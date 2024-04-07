@@ -5,13 +5,14 @@ from tqdm import tqdm
 
 from mmmm.data.defs import ORIGIN_VL_DATA_ROOT, PROCESSED_VL_DATA_ROOT
 
-def process_text(json_file: str):
-    with open(ORIGIN_VL_DATA_ROOT / 'VQA-RAD' / json_file) as f:
+def process():
+    os.makedirs(PROCESSED_VL_DATA_ROOT / 'VQA-RAD', exist_ok=True)
+    with open(ORIGIN_VL_DATA_ROOT / 'VQA-RAD' / 'VQA_RAD Dataset Public.json') as f:
         data = json.load(f)
     
     test_data = [
         {
-            'image': item['image_name'],
+            'image': str(ORIGIN_VL_DATA_ROOT / 'VQA-RAD' / 'VQA_RAD Image Folder' / item['image_name']),
             'question': item['question'],
             'answer': item['answer'],
         }
@@ -29,19 +30,6 @@ def process_text(json_file: str):
         json.dump(val_data, f, indent=4)
     with open(PROCESSED_VL_DATA_ROOT / 'VQA-RAD' / 'test.json', 'w') as f:
         json.dump(test_data, f, indent=4)
-
-def process_images():
-    (PROCESSED_VL_DATA_ROOT / 'VQA-RAD' / 'images').mkdir(parents=True, exist_ok=True)
-    for img in tqdm(os.listdir(ORIGIN_VL_DATA_ROOT / 'VQA-RAD' / 'VQA_RAD Image Folder')):
-        shutil.copyfile(
-            ORIGIN_VL_DATA_ROOT / 'VQA-RAD' / 'VQA_RAD Image Folder' / img,
-            PROCESSED_VL_DATA_ROOT / 'VQA-RAD' / 'images' / img
-        )
-
-def process():
-    os.makedirs(PROCESSED_VL_DATA_ROOT / 'VQA-RAD', exist_ok=True)
-    process_text('VQA_RAD Dataset Public.json')
-    process_images()
 
 if __name__ == '__main__':
     process()

@@ -29,7 +29,7 @@ from monai.utils import ensure_tuple_rep
 
 from mmmm.models import MMMMTokenizer
 from mmmm.models.cogvlm import LANGUAGE_TOKEN_TYPE, VISION_TOKEN_TYPE
-from .defs import Sparse, PROCESSED_SEG_DATA_ROOT, PROCESSED_VL_DATA_ROOT
+from .defs import Sparse, PROCESSED_SEG_DATA_ROOT, PROCESSED_VL_DATA_ROOT, CAPTION_PROMPTS, REPORT_PROMPTS
 
 __all__ = [
     'MMMMDataModule',
@@ -433,11 +433,10 @@ class VLTransform(mt.Transform):
         self.inference = inference
 
     def __call__(self, data: dict):
-        image_dir: Path = data['dataset_dir'] / 'images' / data['image']
-        if 'pt' in image_dir:
-            image = torch.load(image_dir)
+        if 'pt' in data['image']:
+            image = torch.load(data['image'])
         else:
-            image = Image.open(image_dir)
+            image = Image.open(idata['image'])
             image = tvt.functional.to_tensor(image)   
         if len(image.shape) == 3:
             if min(image.shape[1:]) > 512:
@@ -615,14 +614,15 @@ class VQADataModule(ExpDataModuleBase):
 
     def get_train_collate_fn(self):
         return mmmm_collate_fn
-    
+
 class CapDataModule(ExpDataModuleBase):
     def __init__(
         self,
         trans: TransConf,
         tokenizer: MMMMTokenizer,
         data_root: Path = PROCESSED_VL_DATA_ROOT,
-        datasets: List[str] = ['PMC-OA', 'Radiopaedia', 'OpenI'],
+        datasets: List[str] = ['PMC-OA'],
+        prompts: List[str] = CAPTION_PROMPTS,
         *args, **kwargs,
     ):
         super().__init__(*args, **kwargs)
@@ -630,49 +630,22 @@ class CapDataModule(ExpDataModuleBase):
         self.data_root = data_root
         self.datasets = datasets
         self.trans_conf = trans
-        self.prompts = [
-            'Can you provide a caption consists of finding and impression for this medical image?',
-            'Please caption this medical scan with finding and impression.',
-            'Describe this medical scan with finding and impression.',
-            'Please write a caption consists of finding and impression for this image.',
-            'Please provide a caption consists of finding and impression for this medical image.',
-            'Can you provide a summary consists of finding and impression of this radiograph?',
-            'What are the findings and impression presented in this medical scan?',
-            'Please write a caption consists of finding and impression for this scan.',
-            'Can you provide a description consists of finding and impression of this medical scan?',
-            'Please caption this medical scan with finding and impression.',
-            'Analyze this medical image and provide a detailed caption with both finding and impression.',
-            'Examine the medical image and construct a caption that includes finding and impression.',
-            'Based on your analysis, what would be an accurate caption for this medical image, including both finding and impression?',
-            'What is the most appropriate caption for this medical scan, detailing both the finding and impression?',
-        ]
+        self.prompts = prompts
 
     def train_data(self) -> Sequence:
         train_data = []
         for dataset in self.datasets:
             with open(self.data_root / dataset / 'train.json') as f:
                 data = json.load(f)
-            if dataset == 'Radiopaedia' or dataset == 'OpenI':
-                train_data.extend([
-                    {
-                        'dataset_dir': self.data_root / dataset,
-                        'image': random.choice(item['image']),
-                        'question': random.choice(self.prompts),
-                        'answer': item['caption'],
-                    }
-                    for item in data
-                
-                ])
-            else:
-                train_data.extend([
-                    {
-                        'dataset_dir': self.data_root / dataset,
-                        'image': item['image'],
-                        'question': random.choice(self.prompts),
-                        'answer': item['caption'],
-                    }
-                    for item in data
-                ])
+            train_data.extend([
+                {
+                    'dataset_dir': self.data_root / dataset,
+                    'image': item['image'],
+                    'question': random.choice(self.prompts),
+                    'answer': item['caption'],
+                }
+                for item in data
+            ])
         return train_data
 
     def val_data(self) -> Sequence:
@@ -684,6 +657,67 @@ class CapDataModule(ExpDataModuleBase):
                 {
                     'dataset_dir': self.data_root / dataset,
                     'image': item['image'],
+                    'question': random.choice(self.prompts),
+                    'answer': item['caption'],
+                }
+                for item in data
+            ])
+
+        return val_data
+    
+    def train_transform(self) -> Callable:
+        conf = self.trans_conf
+        return VLTransform(
+            conf.vit_patch_size,
+            self.tokenizer,
+        )
+
+    def get_train_collate_fn(self):
+        return mmmm_collate_fn
+    
+class RepDataModule(ExpDataModuleBase):
+    def __init__(
+        self,
+        trans: TransConf,
+        tokenizer: MMMMTokenizer,
+        data_root: Path = PROCESSED_VL_DATA_ROOT,
+        datasets: List[str] = ['Radiopaedia', 'OpenI'],
+        prompts: List[str] = REPORT_PROMPTS,
+        *args, **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        self.tokenizer = tokenizer
+        self.data_root = data_root
+        self.datasets = datasets
+        self.trans_conf = trans
+        self.prompts = prompts
+
+    def train_data(self) -> Sequence:
+        train_data = []
+        for dataset in self.datasets:
+            with open(self.data_root / dataset / 'train.json') as f:
+                data = json.load(f)
+            train_data.extend([
+                {
+                    'dataset_dir': self.data_root / dataset,
+                    'image': random.choice(item['image']),
+                    'question': random.choice(self.prompts),
+                    'answer': item['caption'],
+                }
+                for item in data
+            
+            ])
+        return train_data
+
+    def val_data(self) -> Sequence:
+        val_data = []
+        for dataset in self.datasets:
+            with open(self.data_root / dataset / 'validate.json') as f:
+                data = json.load(f)
+            val_data.extend([
+                {
+                    'dataset_dir': self.data_root / dataset,
+                    'image': random.choice(item['image']),
                     'question': random.choice(self.prompts),
                     'answer': item['caption'],
                 }
@@ -729,9 +763,10 @@ class MMMMDataModule(ExpDataModuleBase):
         vl_data_root: str = PROCESSED_VL_DATA_ROOT,
         seg_data: List[str] = ['AMOS22', 'AMOS22-debug'],
         vqa_data: List[str] = ['Slake', 'VQA-Med', 'Radiopaedia', 'VQA-RAD'],
-        cap_data: List[str] = ['PMC-OA', 'Radiopaedia', 'OpenI'],
+        cap_data: List[str] = ['PMC-OA'],
+        rep_data: List[str] = ['Radiopaedia', 'OpenI', 'MIMIC-CXR'],
         datamodules: List[str] = ['seg', 'vqa', 'cap'],
-        sample_rates: List[int] = [1, 1],
+        sample_rates: List[int] = [1, 1, 1, 1],
         *args, **kwargs,
     ):
         super().__init__(*args, **kwargs)
@@ -750,6 +785,10 @@ class MMMMDataModule(ExpDataModuleBase):
         if 'cap' in datamodules:
             self.datamodules.append(
                 CapDataModule(trans, tokenizer, vl_data_root, cap_data)
+            )
+        if 'rep' in datamodules:
+            self.datamodules.append(
+                RepDataModule(trans, tokenizer, vl_data_root, rep_data)
             )
 
     def train_dataset(self) -> Sequence:

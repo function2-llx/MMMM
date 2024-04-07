@@ -27,11 +27,65 @@ PROCESSED_SEG_DATA_ROOT = PROCESSED_DATA_ROOT / 'image'
 PROCESSED_VL_DATA_ROOT = PROCESSED_DATA_ROOT / 'vision-language'
 PROCESSED_VG_DATA_ROOT = PROCESSED_DATA_ROOT / 'visual-grounding'
 
+CAPTION_PROMPTS = [
+    'Describe the following image in detail.',
+    'Provide a detailed description of the given image.',
+    'Give an elaborate explanation of the image you see',
+    'Share a comprehensive rundown of the presented image',
+    'Offer a thorough analysis of the image',
+    'Explain the various aspects of the image before you',
+    'Clarify the contents of the displayed image with great detail',
+    'Characterize the image using a well-detailed description',
+    'Break down the elements of the image in a detailed manner',
+    'Walk through the important details of the image',
+    'Portray the image with a rich, descriptive narrative',
+    'Narrate the contents of the image with precision',
+    'Analyze the image in a comprehensive and detailed manner',
+    'Illustrate the image through a descriptive explanation',
+    'Examine the image closely and share its details',
+    'Write an exhaustive depiction of the given image',
+    "Summarize the visual content of the image."
+]
+
+REPORT_PROMPTS = [
+    'Can you provide a caption consists of finding and impression for this medical image?',
+    'Please caption this medical scan with finding and impression.',
+    'Describe this medical scan with finding and impression.',
+    'Please write a caption consists of finding and impression for this image.',
+    'Please provide a caption consists of finding and impression for this medical image.',
+    'Can you provide a summary consists of finding and impression of this radiograph?',
+    'What are the findings and impression presented in this medical scan?',
+    'Please write a caption consists of finding and impression for this scan.',
+    'Can you provide a description consists of finding and impression of this medical scan?',
+    'Please caption this medical scan with finding and impression.',
+    'Analyze this medical image and provide a detailed caption with both finding and impression.',
+    'Examine the medical image and construct a caption that includes finding and impression.',
+    'Based on your analysis, what would be an accurate caption for this medical image, including both finding and impression?',
+    'What is the most appropriate caption for this medical scan, detailing both the finding and impression?',
+    'Can you provide a radiology report for this medical image?',
+    'Please report this medical scan.',
+    'What is the medical significance of this image?',
+    'What can you infer from this picture?',
+    'Can you provide a quick summary of this image?',
+    'Describe this medical scan.',
+    'Please write a radiology report for this image.',
+    'Can you summarize the images presented?',
+    'Please generate a radiology report for this scan.',
+    'Describe the regions of interest in this scan.',
+    'Please provide a caption for this medical image.',
+    'Can you provide a brief summary of this radiograph?',
+    'Describe the structures involved in this medical image.',
+    'What are the findings presented in this medical scan?',
+    'Please write a radiology report for this scan.',
+    'Please caption this medical scan.',
+    'Can you provide a report summary for this medical scan?'
+]
+
 def _numpy_field(dtype: np.dtype):
     return field(metadata={'serialize': pass_through, 'deserialize': partial(np.array, dtype=dtype)})
 
-@dataclass(kw_only=True)
-class Sparse(DataClassORJSONMixin):
+@dataclass
+class Sparse:
     """
     Attributes:
         modalities: all images of different modalities must be co-registered

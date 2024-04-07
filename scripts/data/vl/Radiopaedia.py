@@ -1,3 +1,4 @@
+from builtins import isinstance
 import cv2
 from einops import repeat
 import json
@@ -29,25 +30,27 @@ def process_text(json_file: str, train_val: bool = False):
                 break
         if not valid:
             continue
-            
-        processed_data.append(
-            {
-                'image': [
-                    path.replace('/mnt/petrelfs/share_data/zhangxiaoman/DATA/Radio_VQA/processed_file/npys/', str(PROCESSED_VL_DATA_ROOT / 'Radiopaedia' / 'images/'))
-                        .replace('.nii.gz', '.pt')
-                        .replace('.npy', '.pt')
-                    for path in item['image_path']
-                ],
-                'image_modality': item['image_modality'],
-                'plane_projection': item['plane_projection'],
-                'aux_modality': item['aux_modality'],
-                'caption': item['image_caption'],
-                'qa_list': item['qa_list'],
-                'case_discussion': item['case_discussion'].replace('Case Discussion', ''),
-                'finding': item['finding'],
-                'impression': item['impression'],
-            }
-        )
+
+        text = ''
+        if isinstance(item['finding'], str):
+            text += 'Findings: ' + item['finding']
+            if isinstance(item['impression'], str):
+                if text:
+                    text += ' '
+                text += 'Impression: ' + item['impression']
+            if text:
+                processed_data.append(
+                    {
+                        'image': [
+                            path.replace('/mnt/petrelfs/share_data/zhangxiaoman/DATA/Radio_VQA/processed_file/npys/', str(PROCESSED_VL_DATA_ROOT / 'Radiopaedia' / 'images/'))
+                                .replace('.nii.gz', '.pt')
+                                .replace('.npy', '.pt')
+                            for path in item['image_path']
+                        ],
+                        'caption': text,
+                        'qa_list': item['qa_list'],
+                    }
+                )
 
     if train_val:
         random.shuffle(processed_data)
@@ -105,7 +108,7 @@ def process_images():
 
 def process():
     (PROCESSED_VL_DATA_ROOT / 'Radiopaedia').mkdir(parents=True, exist_ok=True)
-    process_images()
+    # process_images()
     process_text('radiology_train.json', train_val=True)
     process_text('radiology_test.json', train_val=False)
 
