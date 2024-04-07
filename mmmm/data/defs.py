@@ -91,7 +91,7 @@ class Sparse(DataClassORJSONMixin):
     extra: Any = None
 
     class Config(BaseConfig):
-        orjson_options = orjson.OPT_SERIALIZE_NUMPY
+        orjson_options = orjson.OPT_SERIALIZE_NUMPY | orjson.OPT_INDENT_2
 
 def encode_patch_size(patch_size: tuple3_t[int]):
     return ','.join(map(str, patch_size))

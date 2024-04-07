@@ -154,7 +154,7 @@ class Processor(ABC):
             if affine is None:
                 affine = image.affine
             else:
-                assert torch.allclose(affine, image.affine)
+                self._check_affine(affine, image.affine, atol=0)
             is_natural_list.append(is_natural)
             images.append(image)
         if any(is_natural_list):
@@ -167,6 +167,9 @@ class Processor(ABC):
 
     def _check_binary_mask(self, masks: torch.Tensor):
         assert ((masks == 0) | (masks == 1)).all()
+
+    def _check_affine(self, affine1: torch.Tensor, affine2: torch.Tensor, atol: float = 1e-2):
+        assert torch.allclose(affine1, affine2, atol=atol)
 
     def load_masks(self, data_point: DataPoint) -> tuple[MetaTensor, list[str]]:
         """
@@ -186,7 +189,7 @@ class Processor(ABC):
             )
             affine = mask_list[0].affine
             for mask in mask_list[1:]:
-                assert torch.allclose(affine, mask.affine, atol=1e-2)
+                self._check_affine(affine, mask.affine)
             masks: MetaTensor = torch.cat(mask_list).to(device=device)
             self._check_binary_mask(masks)
             masks.affine = affine
@@ -265,7 +268,7 @@ class Processor(ABC):
         images, masks = map(lambda x: trans(x).contiguous(), [images, masks])
         return images, masks
 
-    def compute_resize(self, spacing: torch.DoubleTensor, shape: tuple3_t[int]) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.int32]]:
+    def compute_resize(self, spacing: torch.DoubleTensor, shape: tuple3_t[int]) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.int16]]:
         if self.max_smaller_edge < (smaller_edge := min(shape[1:])):
             scale_xy = smaller_edge / self.max_smaller_edge
         else:
@@ -275,7 +278,7 @@ class Processor(ABC):
         new_spacing = np.array([new_spacing_z, new_spacing_xy, new_spacing_xy])
         scale_z = new_spacing_z / spacing[0].item()
         scale = np.array([scale_z, scale_xy, scale_xy])
-        new_shape = (np.array(shape) / scale).round().astype(np.int32)
+        new_shape = (np.array(shape) / scale).round().astype(np.int16)
         return new_spacing, new_shape
 
     def _check_targets(self, targets: list[str]):
@@ -325,7 +328,7 @@ class Processor(ABC):
             self._check_targets(targets)
             images, masks = self.orient(images, masks)
             assert images.shape[1:] == masks.shape[1:]
-            assert torch.allclose(images.affine, masks.affine, atol=1e-2)
+            self._check_affine(images.affine, masks.affine)
             spacing: torch.DoubleTensor = images.pixdim
             info = {
                 'key': key,
@@ -363,10 +366,10 @@ class Processor(ABC):
                 torch.save(class_offsets.cpu(), save_dir / 'class_offsets.pt')
             # 4.4 handle and save sparse information
             sparse = Sparse(
-                spacing=new_spacing.tolist(),
-                shape=new_shape.tolist(),
-                mean=tuple(mean.tolist()),
-                std=tuple(std.tolist()),
+                spacing=new_spacing,
+                shape=new_shape,
+                mean=mean.cpu().numpy(),
+                std=std.cpu().numpy(),
                 normalized=self.do_normalize,
                 modalities=modalities,
                 anatomy=Sparse.Anatomy(
@@ -387,7 +390,7 @@ class Processor(ABC):
                 ),
                 extra=data_point.extra,
             )
-            (save_dir / 'sparse.json').write_text(sparse.to_json(orjson_options=orjson.OPT_INDENT_2))
+            (save_dir / 'sparse.json').write_text(sparse.to_json())
             # 4.5. save info, wait for collection
             pd.to_pickle(info, save_dir / 'info.pkl')
             # 5. complete
@@ -490,7 +493,7 @@ class NaturalImageLoaderMixin:
 class Default3DMaskLoaderMixin:
     mask_reader = None
 
-    def mask_loader(self, path: Path):
+    def mask_loader(self, path: Path) -> MetaTensor:
         # int16 should be enough, right?
         loader = mt.LoadImage(self.mask_reader, image_only=True, dtype=torch.int16, ensure_channel_first=True)
         return loader(path)
