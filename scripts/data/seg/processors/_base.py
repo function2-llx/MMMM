@@ -165,6 +165,9 @@ class Processor(ABC):
     def mask_loader(self, path: Path) -> MetaTensor:
         pass
 
+    def _check_binary_mask(self, masks: torch.Tensor):
+        assert ((masks == 0) | (masks == 1)).all()
+
     def load_masks(self, data_point: DataPoint) -> tuple[MetaTensor, list[str]]:
         """
         NOTE: metadata for mask should be preserved to match with the image
@@ -185,7 +188,7 @@ class Processor(ABC):
             for mask in mask_list[1:]:
                 assert torch.allclose(affine, mask.affine, atol=1e-2)
             masks: MetaTensor = torch.cat(mask_list).to(device=device)
-            assert ((0 <= masks) & (masks <= 1)).all()
+            self._check_binary_mask(masks)
             masks.affine = affine
             masks = masks.bool()
         elif isinstance(data_point, MultiClassDataPoint):

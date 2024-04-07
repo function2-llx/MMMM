@@ -23,5 +23,6 @@ from .MSD import (
     MSDLungProcessor, MSDPancreasProcessor, MSDProstateProcessor, MSDSpleenProcessor,
 )
 from .PARSE2022 import PARSE2022Processor
+from .PI_CAI import PI_CAI2022Processor
 from .TotalSegmentator import TotalSegmentatorProcessor
 from .VerSe import VerSeProcessor
