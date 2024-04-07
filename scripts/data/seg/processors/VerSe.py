@@ -2,7 +2,6 @@ from ._base import Default3DImageLoaderMixin, Default3DMaskLoaderMixin, Processo
 
 class VerSeProcessor(Default3DImageLoaderMixin, Default3DMaskLoaderMixin, Processor):
     name = 'VerSe'
-    orientation = 'SRA'
 
     def get_data_points(self):
         class_mapping = {

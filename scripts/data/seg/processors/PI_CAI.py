@@ -6,10 +6,10 @@ class PI_CAI2022Processor(Default3DImageLoaderMixin, Default3DMaskLoaderMixin, P
     name = 'PI-CAI'
     orientation = 'SRA'
 
-    def _check_binary_mask(self, masks: torch.Tensor):
-        assert masks.shape[0] == 1
-        masks[masks >= 1] = 1
-        super()._check_binary_mask(masks)
+    def _ensure_binary_mask(self, mask: torch.Tensor):
+        assert mask.shape[0] == 1
+        mask[mask >= 1] = 1
+        return super()._ensure_binary_mask(mask)
 
     def get_data_points(self):
         ret = []

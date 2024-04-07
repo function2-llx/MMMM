@@ -165,8 +165,9 @@ class Processor(ABC):
     def mask_loader(self, path: Path) -> MetaTensor:
         pass
 
-    def _check_binary_mask(self, masks: torch.Tensor):
-        assert ((masks == 0) | (masks == 1)).all()
+    def _ensure_binary_mask(self, mask: torch.Tensor):
+        assert ((mask == 0) | (mask == 1)).all()
+        return mask.bool()
 
     def _check_affine(self, affine1: torch.Tensor, affine2: torch.Tensor, atol: float = 1e-2):
         assert torch.allclose(affine1, affine2, atol=atol)
@@ -191,9 +192,8 @@ class Processor(ABC):
             for mask in mask_list[1:]:
                 self._check_affine(affine, mask.affine)
             masks: MetaTensor = torch.cat(mask_list).to(device=device)
-            self._check_binary_mask(masks)
             masks.affine = affine
-            masks = masks.bool()
+            masks = self._ensure_binary_mask(masks)
         elif isinstance(data_point, MultiClassDataPoint):
             class_mapping = data_point.class_mapping
             label: MetaTensor = self.mask_loader(data_point.label).to(dtype=torch.int16, device=device)
