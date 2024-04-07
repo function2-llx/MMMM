@@ -66,7 +66,7 @@ class Sparse(DataClassORJSONMixin):
     @dataclass
     class BBox:
         center: tuple3_t[float]
-        shape: tuple3_t[float]
+        size: tuple3_t[float]
 
     @dataclass
     class Annotation:
