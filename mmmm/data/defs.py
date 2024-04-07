@@ -1,12 +1,17 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
 from typing import Any
 
+from mashumaro import pass_through
+from mashumaro.config import BaseConfig
 from mashumaro.mixins.orjson import DataClassORJSONMixin
 import nibabel as nib
 import numpy as np
+import numpy.typing as npt
+import orjson
 import pandas as pd
 import torch
 
@@ -22,6 +27,9 @@ PROCESSED_SEG_DATA_ROOT = PROCESSED_DATA_ROOT / 'image'
 PROCESSED_VL_DATA_ROOT = PROCESSED_DATA_ROOT / 'vision-language'
 PROCESSED_VG_DATA_ROOT = PROCESSED_DATA_ROOT / 'visual-grounding'
 
+def _numpy_field(dtype: np.dtype):
+    return field(metadata={'serialize': pass_through, 'deserialize': partial(np.array, dtype=dtype)})
+
 @dataclass(kw_only=True)
 class Sparse(DataClassORJSONMixin):
     """
@@ -32,11 +40,11 @@ class Sparse(DataClassORJSONMixin):
         anatomy: information for generating general conversation related to anatomy targets
         anomaly: information for generating general conversation related to anomaly targets
     """
-    spacing: tuple3_t[float]
-    shape: tuple3_t[int]
+    spacing: npt.NDArray[np.float64] = _numpy_field(np.float64)
+    shape: npt.NDArray[np.int16] = _numpy_field(np.int16)
     modalities: list[str]
-    mean: list[float]
-    std: list[float]
+    mean: npt.NDArray[np.float32] = _numpy_field(np.float32)
+    std: npt.NDArray[np.float32] = _numpy_field(np.float32)
     normalized: bool
 
     @dataclass
@@ -65,8 +73,8 @@ class Sparse(DataClassORJSONMixin):
 
     @dataclass
     class BBox:
-        center: tuple3_t[float]
-        size: tuple3_t[float]
+        center: npt.NDArray[np.float64] = _numpy_field(np.float64)
+        size: npt.NDArray[np.float64] = _numpy_field(np.float64)
 
     @dataclass
     class Annotation:
@@ -81,6 +89,9 @@ class Sparse(DataClassORJSONMixin):
     annotation: Annotation
 
     extra: Any = None
+
+    class Config(BaseConfig):
+        orjson_options = orjson.OPT_SERIALIZE_NUMPY
 
 def encode_patch_size(patch_size: tuple3_t[int]):
     return ','.join(map(str, patch_size))
