@@ -19,8 +19,9 @@ from .LNQ2023 import LNQ2023Processor
 from .LiTS import LiTSProcessor
 from .MRSpineSeg import MRSpineSegProcessor
 from .MSD import (
-    MSDHeartProcessor, MSDHippocampusProcessor, MSDLiverProcessor, MSDLungProcessor, MSDPancreasProcessor,
-    MSDProstateProcessor, MSDHepaticVesselProcessor, MSDSpleenProcessor, MSDColonProcessor,
+    MSDColonProcessor, MSDHeartProcessor, MSDHepaticVesselProcessor, MSDHippocampusProcessor, MSDLiverProcessor,
+    MSDLungProcessor, MSDPancreasProcessor, MSDProstateProcessor, MSDSpleenProcessor,
 )
+from .PARSE2022 import PARSE2022Processor
 from .TotalSegmentator import TotalSegmentatorProcessor
 from .VerSe import VerSeProcessor
