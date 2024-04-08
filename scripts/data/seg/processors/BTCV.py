@@ -55,5 +55,5 @@ class BTCVCervixProcessor(BTCVProcessor):
         1: 'bladder',
         2: 'uterus',
         3: 'rectum',
-        4: 'small bowel',
+        4: 'small intestine',
     }

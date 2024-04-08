@@ -30,3 +30,4 @@ from .SegRap2023 import SegRap2023Processor
 from .SegTHOR import SegTHORProcessor
 from .TotalSegmentator import TotalSegmentatorProcessor
 from .VerSe import VerSeProcessor
+from .WORD import WORDProcessor

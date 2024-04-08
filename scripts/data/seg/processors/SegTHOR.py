@@ -2,6 +2,7 @@ from ._base import Default3DImageLoaderMixin, Default3DMaskLoaderMixin, MultiCla
 
 class SegTHORProcessor(Default3DImageLoaderMixin, Default3DMaskLoaderMixin, Processor):
     name = 'SegTHOR'
+    orientation = 'SRA'
 
     def get_data_points(self):
         # https://github.com/chestnut111/SegTHOR2019
