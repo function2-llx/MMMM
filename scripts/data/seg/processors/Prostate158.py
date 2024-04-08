@@ -5,7 +5,7 @@ import pandas as pd
 import torch
 
 from monai.data import MetaTensor
-from monai.networks import one_hot
+
 from ._base import DataPoint, Default3DImageLoaderMixin, Default3DMaskLoaderMixin, Processor
 
 @dataclass(kw_only=True)

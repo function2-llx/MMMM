@@ -67,7 +67,7 @@ class MSDProstateProcessor(MSDProcessor):
         2: 'transition zone of prostate',
     }
 
-    def get_modality(self) -> list[str]:
+    def get_modalities(self) -> list[str]:
         return [f'{m} MRI' for m in super().get_modalities()]
 
 class MSDLungProcessor(MSDProcessor):
