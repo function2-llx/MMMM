@@ -26,5 +26,6 @@ from .PARSE2022 import PARSE2022Processor
 from .PI_CAI import PI_CAI2022Processor
 from .Prostate158 import Prostate158Processor
 from .SEGA2023 import SEGA2022Processor
+from .SegRap2023 import SegRap2023Processor
 from .TotalSegmentator import TotalSegmentatorProcessor
 from .VerSe import VerSeProcessor
