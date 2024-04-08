@@ -8,7 +8,6 @@ from pathlib import Path
 import einops
 import numpy as np
 from numpy import typing as npt
-import orjson
 import pandas as pd
 from scipy.stats import norm
 import torch
@@ -107,6 +106,7 @@ class Processor(ABC):
     do_normalize: bool = False
     max_class_positions: int = 5000
     cuda_cache_th: int = 15
+    _bbox_ignore_targets: set[str] = set()
 
     def __init__(self, logger: Logger, *, max_workers: int, chunksize: int, override: bool):
         self.tax = load_target_tax()
@@ -386,6 +386,7 @@ class Processor(ABC):
                     [
                         (pos_targets[i], bbox)
                         for i, bbox in enumerate(self._generate_bbox_from_mask(masks))
+                        if pos_targets[i] not in self._bbox_ignore_targets
                     ],
                 ),
                 extra=data_point.extra,

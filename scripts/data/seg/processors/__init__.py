@@ -31,3 +31,4 @@ from .SegTHOR import SegTHORProcessor
 from .TotalSegmentator import TotalSegmentatorProcessor
 from .VerSe import VerSeProcessor
 from .WORD import WORDProcessor
+from .RibFrac import RibFracProcessor
