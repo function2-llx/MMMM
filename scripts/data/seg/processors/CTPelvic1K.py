@@ -29,6 +29,7 @@ class CTPelvic1KProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Proce
                 data_dir = ORIGIN_SEG_DATA_ROOT / 'CT-COLONOGRAPHY/download/CT COLONOGRAPHY' / subject_id
                 series_dirs = [*data_dir.glob(f'*/{series_idx}.*')]
                 if len(series_dirs) != 1:
+                    # about 4 cases are ambiguous here, but they seem to be the same
                     return None, ''
                 return series_dirs[0], f'COLONOG-{origin_key}'
             case 3:

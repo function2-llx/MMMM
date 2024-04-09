@@ -4,6 +4,7 @@ import cytoolz
 
 from mmmm.data.defs import ORIGIN_SEG_DATA_ROOT
 from ._base import DefaultImageLoaderMixin, DefaultMaskLoaderMixin, MultiClassDataPoint, Processor
+from .VerSe import VerSeProcessor
 
 class CTSpine1KProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor):
     name = 'CTSpine1K'
@@ -36,21 +37,6 @@ class CTSpine1KProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Proces
         return path, f'{dataset}-{origin_key}'
 
     def get_data_points(self):
-        # VerSe
-        class_mapping = {
-            **{
-                i: f'C{i} vertebra'
-                for i in range(1, 8)
-            },
-            **{
-                i: f'T{i - 7} vertebra'
-                for i in range(8, 20)
-            },
-            **{
-                i: f'L{i - 19} vertebra'
-                for i in range(20, 26)
-            },
-        }
         ret = []
         for label_path in self.dataset_root.glob(f'CTSpine1K/*/gt/*_seg.nii.gz'):
             origin_key = label_path.name[:-len('_seg.nii.gz')]
@@ -60,7 +46,7 @@ class CTSpine1KProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Proces
                     key=key,
                     images={'CT': img_path},
                     label=label_path,
-                    class_mapping=class_mapping,
+                    class_mapping=VerSeProcessor.class_mapping,
                 ),
             )
         return ret
