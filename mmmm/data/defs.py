@@ -85,7 +85,7 @@ def _numpy_field(dtype: np.dtype):
     return field(metadata={'serialize': pass_through, 'deserialize': partial(np.array, dtype=dtype)})
 
 @dataclass
-class Sparse:
+class Sparse(DataClassORJSONMixin):
     """
     Attributes:
         modalities: all images of different modalities must be co-registered
