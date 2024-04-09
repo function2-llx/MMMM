@@ -6,14 +6,14 @@ import torch
 
 from monai.data import MetaTensor
 
-from ._base import DataPoint, Default3DImageLoaderMixin, Default3DMaskLoaderMixin, Processor
+from ._base import DataPoint, DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor
 
 @dataclass(kw_only=True)
 class Prostate158DataPoint(DataPoint):
     anatomy: Path
     tumor: Path | None = None
 
-class Prostate158Processor(Default3DImageLoaderMixin, Default3DMaskLoaderMixin, Processor):
+class Prostate158Processor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor):
     name = 'Prostate158'
     orientation = 'SRA'
 

@@ -1,8 +1,8 @@
 import torch
 
-from ._base import Default3DImageLoaderMixin, Default3DMaskLoaderMixin, MultiLabelMultiFileDataPoint, Processor
+from ._base import DefaultImageLoaderMixin, DefaultMaskLoaderMixin, MultiLabelMultiFileDataPoint, Processor
 
-class SEGA2022Processor(Default3DImageLoaderMixin, Default3DMaskLoaderMixin, Processor):
+class SEGA2022Processor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor):
     name = 'SEG.A.2023'
     orientation = 'SRA'
     image_reader = 'nrrdreader'

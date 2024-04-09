@@ -3,9 +3,9 @@ from pathlib import Path
 import cytoolz
 
 from mmmm.data.defs import ORIGIN_SEG_DATA_ROOT
-from ._base import Default3DImageLoaderMixin, Default3DMaskLoaderMixin, MultiClassDataPoint, Processor
+from ._base import DefaultImageLoaderMixin, DefaultMaskLoaderMixin, MultiClassDataPoint, Processor
 
-class CTSpine1KProcessor(Default3DImageLoaderMixin, Default3DMaskLoaderMixin, Processor):
+class CTSpine1KProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor):
     name = 'CTSpine1K'
     # https://nipy.org/nibabel/nifti_images.html#the-fall-back-header-affine
     image_reader = 'itkreader'

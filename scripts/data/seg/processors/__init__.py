@@ -32,4 +32,4 @@ from .TotalSegmentator import TotalSegmentatorProcessor
 from .VerSe import VerSeProcessor
 from .WORD import WORDProcessor
 from .RibFrac import RibFracProcessor
-from .PENGWIN import PENGWINT1Processor
+from .PENGWIN import PENGWINT1Processor, PENGWINT2Processor

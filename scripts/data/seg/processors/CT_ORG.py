@@ -1,6 +1,6 @@
-from ._base import Default3DImageLoaderMixin, Default3DMaskLoaderMixin, MultiClassDataPoint, Processor
+from ._base import DefaultImageLoaderMixin, DefaultMaskLoaderMixin, MultiClassDataPoint, Processor
 
-class CT_ORGProcessor(Default3DImageLoaderMixin, Default3DMaskLoaderMixin, Processor):
+class CT_ORGProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor):
     name = 'CT-ORG'
     orientation = 'SRA'
 

@@ -7,9 +7,9 @@ from monai.data import MetaTensor
 
 from mmmm.data.defs import ORIGIN_SEG_DATA_ROOT
 
-from ._base import Default3DImageLoaderMixin, Default3DMaskLoaderMixin, Processor, MultiClassDataPoint
+from ._base import DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor, MultiClassDataPoint
 
-class AMOS22Processor(Default3DImageLoaderMixin, Default3DMaskLoaderMixin, Processor):
+class AMOS22Processor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor):
     name = 'AMOS22'
     max_workers = 8
 

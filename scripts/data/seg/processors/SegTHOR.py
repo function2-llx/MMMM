@@ -1,6 +1,6 @@
-from ._base import Default3DImageLoaderMixin, Default3DMaskLoaderMixin, MultiClassDataPoint, Processor
+from ._base import DefaultImageLoaderMixin, DefaultMaskLoaderMixin, MultiClassDataPoint, Processor
 
-class SegTHORProcessor(Default3DImageLoaderMixin, Default3DMaskLoaderMixin, Processor):
+class SegTHORProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor):
     name = 'SegTHOR'
     orientation = 'SRA'
 

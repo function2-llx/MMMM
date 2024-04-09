@@ -1,11 +1,11 @@
 import torch
 
-from ._base import Default3DMaskLoaderMixin, Default3DImageLoaderMixin, MultiLabelMultiFileDataPoint, Processor
+from ._base import DefaultMaskLoaderMixin, DefaultImageLoaderMixin, MultiLabelMultiFileDataPoint, Processor
 
-class RibFracProcessor(Default3DImageLoaderMixin, Default3DMaskLoaderMixin, Processor):
+class RibFracProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor):
     name = 'RibFrac'
     orientation = 'SRA'
-    _bbox_ignore_targets = ['rib fracture']
+    bbox_ignore_targets = {'rib fracture'}
 
     def _ensure_binary_mask(self, mask: torch.Tensor):
         mask[mask != 0] = 1

@@ -106,7 +106,7 @@ class Processor(ABC):
     do_normalize: bool = False
     max_class_positions: int = 5000
     cuda_cache_th: int = 15
-    _bbox_ignore_targets: set[str] = set()
+    bbox_ignore_targets: set[str] = set()
 
     def __init__(self, logger: Logger, *, max_workers: int, chunksize: int, override: bool):
         self.tax = load_target_tax()
@@ -136,12 +136,12 @@ class Processor(ABC):
     def get_data_points(self) -> list[DataPoint]:
         pass
 
-    @abstractmethod
     def image_loader(self, path: Path) -> tuple[MetaTensor, bool]:
         """
         Returns:
             (image data, is natural)
         """
+        raise NotImplementedError
 
     def load_images(self, data_point: DataPoint) -> tuple[list[str], MetaTensor, bool]:
         modalities = []
@@ -161,9 +161,8 @@ class Processor(ABC):
             assert len(images) == 1, 'multiple natural images are not supported'
         return modalities, torch.cat(images).to(device=get_cuda_device()), is_natural_list[0]
 
-    @abstractmethod
     def mask_loader(self, path: Path) -> MetaTensor:
-        pass
+        raise NotImplementedError
 
     def _ensure_binary_mask(self, mask: torch.Tensor):
         assert ((mask == 0) | (mask == 1)).all()
@@ -386,7 +385,7 @@ class Processor(ABC):
                     [
                         (pos_targets[i], bbox)
                         for i, bbox in enumerate(self._generate_bbox_from_mask(masks))
-                        if pos_targets[i] not in self._bbox_ignore_targets
+                        if pos_targets[i] not in self.bbox_ignore_targets
                     ],
                 ),
                 extra=data_point.extra,
@@ -460,41 +459,53 @@ class Processor(ABC):
                 resized_masks[i:i + self.mask_batch_size] = batch[0] > 0.5
         return resized_masks
 
-class Default3DImageLoaderMixin:
-    image_reader = None
-
-    def image_loader(self, path: Path) -> tuple[MetaTensor, bool]:
-        loader = mt.LoadImage(self.image_reader, image_only=True, dtype=None, ensure_channel_first=True)
-        return loader(path), False
-
 INF_SPACING = 1e8
 
-class NaturalImageLoaderMixin:
+class _LoaderBase:
+    def _adapt_to_3d(self, image: MetaTensor):
+        image = image.unsqueeze(1)
+        image.affine[0, 0] = INF_SPACING
+        return image
+
+class DefaultImageLoaderMixin(_LoaderBase):
+    image_reader = None
+    image_dtype = None
     assert_gray_scale: bool = False
 
-    def check_and_adapt_to_3d(self, img):
-        img = MetaTensor(img.byte())
-        if img.shape[0] == 4:
-            assert (img[3] == 255).all()
-            img = img[:3]
-        if self.assert_gray_scale and img.shape[0] != 1:
-            assert (img[0] == img[1]).all() and (img[0] == img[2]).all()
-            img = img[0:1]
-        img = img.unsqueeze(1)
-        img.affine[0, 0] = INF_SPACING
-        return img
+    def _check_natural_image(self, image: MetaTensor):
+        if image.shape[0] == 4:
+            # check RGBA
+            assert image.dtype == torch.uint8
+            assert (image[3] == 255).all()
+            image = image[:3]
+        if self.assert_gray_scale and image.shape[0] != 1:
+            # check gray scale
+            assert (image[0] == image[1]).all() and (image[0] == image[2]).all()
+            image = image[0:1]
+        return image
 
-    def image_loader(self, path) -> tuple[MetaTensor, bool]:
-        loader = mt.Compose([
-            mt.LoadImage(dtype=torch.uint8, ensure_channel_first=True),
-            self.check_and_adapt_to_3d,
-        ])
-        return loader(path), True
+    def image_loader(self, path: Path) -> tuple[MetaTensor, bool]:
+        loader = mt.LoadImage(self.image_reader, image_only=True, dtype=self.image_dtype, ensure_channel_first=True)
+        image = loader(path)
+        assert image.ndim in [3, 4]
+        is_natural = image.ndim == 3
+        if is_natural:
+            image = self._check_natural_image(image)
+            image = self._adapt_to_3d(image)
+        return image, is_natural
 
-class Default3DMaskLoaderMixin:
+class NaturalImageLoaderMixin(DefaultImageLoaderMixin):
+    image_reader = 'pilreader'
+    image_dtype = torch.uint8
+
+class DefaultMaskLoaderMixin(_LoaderBase):
     mask_reader = None
+    # int16 should be enough, right?
+    mask_dtype = torch.int16
 
     def mask_loader(self, path: Path) -> MetaTensor:
-        # int16 should be enough, right?
-        loader = mt.LoadImage(self.mask_reader, image_only=True, dtype=torch.int16, ensure_channel_first=True)
-        return loader(path)
+        loader = mt.LoadImage(self.mask_reader, image_only=True, dtype=self.mask_dtype, ensure_channel_first=True)
+        mask = loader(path)
+        if mask.ndim == 3:
+            mask = self._adapt_to_3d(mask)
+        return mask

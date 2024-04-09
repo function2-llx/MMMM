@@ -1,6 +1,6 @@
-from ._base import Default3DImageLoaderMixin, Default3DMaskLoaderMixin, MultiLabelMultiFileDataPoint, Processor
+from ._base import DefaultImageLoaderMixin, DefaultMaskLoaderMixin, MultiLabelMultiFileDataPoint, Processor
 
-class LNQ2023Processor(Default3DImageLoaderMixin, Default3DMaskLoaderMixin, Processor):
+class LNQ2023Processor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor):
     name = 'LNQ2023'
     image_reader = 'nrrdreader'
     mask_reader = 'nrrdreader'

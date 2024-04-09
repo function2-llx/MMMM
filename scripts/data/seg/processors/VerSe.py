@@ -1,6 +1,6 @@
-from ._base import Default3DImageLoaderMixin, Default3DMaskLoaderMixin, Processor, MultiClassDataPoint
+from ._base import DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor, MultiClassDataPoint
 
-class VerSeProcessor(Default3DImageLoaderMixin, Default3DMaskLoaderMixin, Processor):
+class VerSeProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor):
     name = 'VerSe'
 
     def get_data_points(self):

@@ -1,6 +1,6 @@
-from ._base import Default3DImageLoaderMixin, Default3DMaskLoaderMixin, MultiLabelMultiFileDataPoint, Processor
+from ._base import DefaultImageLoaderMixin, DefaultMaskLoaderMixin, MultiLabelMultiFileDataPoint, Processor
 
-class PARSE2022Processor(Default3DImageLoaderMixin, Default3DMaskLoaderMixin, Processor):
+class PARSE2022Processor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor):
     name = 'PARSE2022'
     orientation = 'SRA'
 

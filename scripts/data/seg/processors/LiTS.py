@@ -1,7 +1,7 @@
 from monai.data import MetaTensor
-from ._base import Default3DImageLoaderMixin, Default3DMaskLoaderMixin, MultiClassDataPoint, Processor
+from ._base import DefaultImageLoaderMixin, DefaultMaskLoaderMixin, MultiClassDataPoint, Processor
 
-class LiTSProcessor(Default3DImageLoaderMixin, Default3DMaskLoaderMixin, Processor):
+class LiTSProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor):
     name = 'LiTS'
     orientation = 'SRA'
 

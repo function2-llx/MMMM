@@ -1,9 +1,9 @@
 import torch
 
 from monai.data import MetaTensor
-from ._base import Default3DImageLoaderMixin, Default3DMaskLoaderMixin, MultiLabelMultiFileDataPoint, Processor
+from ._base import DefaultImageLoaderMixin, DefaultMaskLoaderMixin, MultiLabelMultiFileDataPoint, Processor
 
-class SegRap2023Processor(Default3DImageLoaderMixin, Default3DMaskLoaderMixin, Processor):
+class SegRap2023Processor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor):
     name = 'SegRap2023'
     orientation = 'SRA'
 

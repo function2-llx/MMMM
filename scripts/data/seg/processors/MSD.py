@@ -4,9 +4,9 @@ import torch
 
 from luolib.utils import get_cuda_device
 from monai.data import MetaTensor
-from ._base import DataPoint, Default3DImageLoaderMixin, Default3DMaskLoaderMixin, Processor, MultiClassDataPoint
+from ._base import DataPoint, DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor, MultiClassDataPoint
 
-class MSDProcessor(Default3DImageLoaderMixin, Default3DMaskLoaderMixin, Processor):
+class MSDProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor):
     class_mapping: dict[int, str]
 
     @property

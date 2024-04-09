@@ -1,6 +1,6 @@
-from ._base import Default3DImageLoaderMixin, Default3DMaskLoaderMixin, MultiClassDataPoint, Processor
+from ._base import DefaultImageLoaderMixin, DefaultMaskLoaderMixin, MultiClassDataPoint, Processor
 
-class BTCVProcessor(Default3DImageLoaderMixin, Default3DMaskLoaderMixin, Processor):
+class BTCVProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor):
     class_mapping: dict[int, str]
 
     @property

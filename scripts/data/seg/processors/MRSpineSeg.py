@@ -1,6 +1,6 @@
-from ._base import Default3DImageLoaderMixin, Default3DMaskLoaderMixin, MultiClassDataPoint, Processor
+from ._base import DefaultImageLoaderMixin, DefaultMaskLoaderMixin, MultiClassDataPoint, Processor
 
-class MRSpineSegProcessor(Default3DImageLoaderMixin, Default3DMaskLoaderMixin, Processor):
+class MRSpineSegProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor):
     name = 'MRSpineSeg'
 
     def get_data_points(self):

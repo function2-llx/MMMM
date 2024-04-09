@@ -1,22 +1,11 @@
-from pathlib import Path
-
 import einops
 import torch
 
-from monai import transforms as mt
-from monai.data import MetaTensor
+from ._base import DataPoint, DefaultMaskLoaderMixin, MultiLabelMultiFileDataPoint, NaturalImageLoaderMixin, Processor
 
-from ._base import DataPoint, INF_SPACING, MultiLabelMultiFileDataPoint, NaturalImageLoaderMixin, Processor
-
-class BUSIProcessor(NaturalImageLoaderMixin, Processor):
+class BUSIProcessor(NaturalImageLoaderMixin, DefaultMaskLoaderMixin, Processor):
     name = 'BUSI'
-
-    def mask_loader(self, path: Path):
-        loader = mt.LoadImage(dtype=torch.bool, ensure_channel_first=True)
-        m: MetaTensor = loader(path)
-        m = m[:, None]
-        m.affine[0, 0] = INF_SPACING
-        return m
+    mask_dtype = torch.bool
 
     def load_masks(self, data_point: DataPoint) -> tuple[torch.BoolTensor, list[str]]:
         masks, targets = super().load_masks(data_point)

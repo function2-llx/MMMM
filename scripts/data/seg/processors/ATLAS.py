@@ -1,6 +1,6 @@
-from ._base import Default3DImageLoaderMixin, Default3DMaskLoaderMixin, MultiLabelMultiFileDataPoint, Processor
+from ._base import DefaultImageLoaderMixin, DefaultMaskLoaderMixin, MultiLabelMultiFileDataPoint, Processor
 
-class ATLASProcessor(Default3DImageLoaderMixin, Default3DMaskLoaderMixin, Processor):
+class ATLASProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor):
     name = 'ATLAS'
     orientation = 'SRA'
 

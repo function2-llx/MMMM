@@ -1,6 +1,6 @@
-from ._base import Default3DMaskLoaderMixin, Default3DImageLoaderMixin, MultiLabelMultiFileDataPoint, Processor
+from ._base import DefaultMaskLoaderMixin, DefaultImageLoaderMixin, MultiLabelMultiFileDataPoint, Processor
 
-class ISLES22Processor(Default3DImageLoaderMixin, Default3DMaskLoaderMixin, Processor):
+class ISLES22Processor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor):
     name = 'ISLES22'
     orientation = 'SRA'
 

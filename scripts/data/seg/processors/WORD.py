@@ -7,9 +7,9 @@ from monai.data import MetaTensor
 
 from mmmm.data.defs import ORIGIN_SEG_DATA_ROOT
 
-from ._base import Default3DImageLoaderMixin, Default3DMaskLoaderMixin, Processor, MultiClassDataPoint
+from ._base import DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor, MultiClassDataPoint
 
-class WORDProcessor(Default3DImageLoaderMixin, Default3DMaskLoaderMixin, Processor):
+class WORDProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor):
     name = 'WORD'
     orientation = 'SRA'
 
