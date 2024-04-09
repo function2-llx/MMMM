@@ -47,7 +47,7 @@ class CTSpine1KProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Proces
                 for i in range(8, 20)
             },
             **{
-                i: 'L1 vertebra'
+                i: f'L{i - 19} vertebra'
                 for i in range(20, 26)
             },
         }

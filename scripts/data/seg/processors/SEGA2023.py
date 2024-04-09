@@ -11,12 +11,11 @@ class SEGA2022Processor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Process
     def get_data_points(self):
         ret = []
         for mask_path in self.dataset_root.glob('*/*/*.seg.nrrd'):
-            case_dir = mask_path.parent
-            key = case_dir.name
+            key = mask_path.name[:-len('.seg.nrrd')]
             ret.append(
                 MultiLabelMultiFileDataPoint(
                     key=key,
-                    images={'CT angiography': case_dir / f'{key}.nrrd'},
+                    images={'CT angiography': mask_path.parent / f'{key}.nrrd'},
                     masks=[('aortic vessel tree', mask_path)],
                 ),
             )

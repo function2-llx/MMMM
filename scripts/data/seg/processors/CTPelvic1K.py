@@ -53,9 +53,9 @@ class CTPelvic1KProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Proce
         # https://github.com/MIRACLE-Center/CTPelvic1K/blob/ebd422e00d4ca64c6a7e1d3e92a50b75d5e87af7/nnunet/dataset_conversion/JstPelvisSegmentation_5label.py#L108-L114
         class_mapping = {
             1: 'sacrum',
-            2: 'right hip',
-            3: 'left hip',
-            4: 'lumbar vertebrae',
+            2: 'right hip bone',
+            3: 'left hip bone',
+            # 4: 'lumbar vertebrae',  seems it only includes L3-L5
         }
         ret = []
         for dataset_idx in range(1, 8):
