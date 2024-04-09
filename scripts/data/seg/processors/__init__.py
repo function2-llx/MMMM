@@ -23,13 +23,14 @@ from .MSD import (
     MSDLungProcessor, MSDPancreasProcessor, MSDProstateProcessor, MSDSpleenProcessor,
 )
 from .PARSE2022 import PARSE2022Processor
+from .PENGWIN import PENGWINT1Processor, PENGWINT2Processor
 from .PI_CAI import PI_CAI2022Processor
 from .Prostate158 import Prostate158Processor
+from .RibFrac import RibFracProcessor
 from .SEGA2023 import SEGA2022Processor
 from .SegRap2023 import SegRap2023Processor
 from .SegTHOR import SegTHORProcessor
 from .TotalSegmentator import TotalSegmentatorProcessor
 from .VerSe import VerSeProcessor
 from .WORD import WORDProcessor
-from .RibFrac import RibFracProcessor
-from .PENGWIN import PENGWINT1Processor, PENGWINT2Processor
+from .autoPET_III import AutoPETIIIProcessor
