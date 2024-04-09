@@ -29,7 +29,7 @@ from monai.utils import ensure_tuple_rep
 
 from mmmm.models import MMMMTokenizer
 from mmmm.models.cogvlm import LANGUAGE_TOKEN_TYPE, VISION_TOKEN_TYPE
-from .defs import Sparse, PROCESSED_SEG_DATA_ROOT, PROCESSED_VL_DATA_ROOT
+from .defs import Sparse, PROCESSED_SEG_DATA_ROOT, PROCESSED_VL_DATA_ROOT, CAPTION_PROMPTS, REPORT_PROMPTS
 
 __all__ = [
     'MMMMDataModule',
@@ -97,7 +97,7 @@ def gen_seg_conversation(
     if neg_mask:
         prompt = f'For the given {modality} image, output the segmentation masks for the following objects: {_convert_list(classes, False)}.'
     else:
-        prompt = f"For the given {modality} image, find the following objects, and output segmentation masks for the found objects: {_convert_list(classes, False)}. "
+        prompt = f'For the given {modality} image, find the following objects, and output segmentation masks for the found objects: {_convert_list(classes, False)}. '
     if len(pos_classes) > 0:
         if len(neg_classes) > 0:
             response = f'The following objects are found: {_convert_list(pos_classes, True)}. ' + \
@@ -125,7 +125,7 @@ def prepare_vlm_inputs(
     num_image_tokens: int,
     inference: bool = False,
 ):
-    """
+    '''
     Args:
         conversation:
         tokenizer:
@@ -133,7 +133,7 @@ def prepare_vlm_inputs(
         inference:
     Returns:
 
-    """
+    '''
     # TODO: refactor this function to support various VLM formats
     # template: CogVLM `chat_old_history_to_prompt`
     # just for viewing, don't tokenize it directly
@@ -433,11 +433,10 @@ class VLTransform(mt.Transform):
         self.inference = inference
 
     def __call__(self, data: dict):
-        image_dir: Path = data['dataset_dir'] / 'images' / data['image']
-        if 'pt' in image_dir:
-            image = torch.load(image_dir)
+        if 'pt' in data['image']:
+            image = torch.load(data['image'])
         else:
-            image = Image.open(image_dir)
+            image = Image.open(idata['image'])
             image = tvt.functional.to_tensor(image)   
         if len(image.shape) == 3:
             if min(image.shape[1:]) > 512:
@@ -615,14 +614,15 @@ class VQADataModule(ExpDataModuleBase):
 
     def get_train_collate_fn(self):
         return mmmm_collate_fn
-    
+
 class CapDataModule(ExpDataModuleBase):
     def __init__(
         self,
         trans: TransConf,
         tokenizer: MMMMTokenizer,
         data_root: Path = PROCESSED_VL_DATA_ROOT,
-        datasets: List[str] = ['Slake', 'VQA-Med'],
+        datasets: List[str] = ['PMC-OA'],
+        prompts: List[str] = CAPTION_PROMPTS,
         *args, **kwargs,
     ):
         super().__init__(*args, **kwargs)
@@ -630,36 +630,22 @@ class CapDataModule(ExpDataModuleBase):
         self.data_root = data_root
         self.datasets = datasets
         self.trans_conf = trans
-        self.prompts = [
-            '',
-        ]
+        self.prompts = prompts
 
     def train_data(self) -> Sequence:
         train_data = []
         for dataset in self.datasets:
             with open(self.data_root / dataset / 'train.json') as f:
                 data = json.load(f)
-            if dataset == 'Radiopaedia':
-                train_data.extend([
-                    {
-                        'dataset_dir': self.data_root / dataset,
-                        'image': random.choice(item['image']),
-                        'question': random.choice(self.prompts),
-                        'answer': item['caption'],
-                    }
-                    for item in data
-                
-                ])
-            else:
-                train_data.extend([
-                    {
-                        'dataset_dir': self.data_root / dataset,
-                        'image': item['image'],
-                        'question': random.choice(self.prompts),
-                        'answer': item['caption'],
-                    }
-                    for item in data
-                ])
+            train_data.extend([
+                {
+                    'dataset_dir': self.data_root / dataset,
+                    'image': item['image'],
+                    'question': random.choice(self.prompts),
+                    'answer': item['caption'],
+                }
+                for item in data
+            ])
         return train_data
 
     def val_data(self) -> Sequence:
@@ -671,6 +657,67 @@ class CapDataModule(ExpDataModuleBase):
                 {
                     'dataset_dir': self.data_root / dataset,
                     'image': item['image'],
+                    'question': random.choice(self.prompts),
+                    'answer': item['caption'],
+                }
+                for item in data
+            ])
+
+        return val_data
+    
+    def train_transform(self) -> Callable:
+        conf = self.trans_conf
+        return VLTransform(
+            conf.vit_patch_size,
+            self.tokenizer,
+        )
+
+    def get_train_collate_fn(self):
+        return mmmm_collate_fn
+    
+class RepDataModule(ExpDataModuleBase):
+    def __init__(
+        self,
+        trans: TransConf,
+        tokenizer: MMMMTokenizer,
+        data_root: Path = PROCESSED_VL_DATA_ROOT,
+        datasets: List[str] = ['Radiopaedia', 'OpenI'],
+        prompts: List[str] = REPORT_PROMPTS,
+        *args, **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        self.tokenizer = tokenizer
+        self.data_root = data_root
+        self.datasets = datasets
+        self.trans_conf = trans
+        self.prompts = prompts
+
+    def train_data(self) -> Sequence:
+        train_data = []
+        for dataset in self.datasets:
+            with open(self.data_root / dataset / 'train.json') as f:
+                data = json.load(f)
+            train_data.extend([
+                {
+                    'dataset_dir': self.data_root / dataset,
+                    'image': random.choice(item['image']),
+                    'question': random.choice(self.prompts),
+                    'answer': item['caption'],
+                }
+                for item in data
+            
+            ])
+        return train_data
+
+    def val_data(self) -> Sequence:
+        val_data = []
+        for dataset in self.datasets:
+            with open(self.data_root / dataset / 'validate.json') as f:
+                data = json.load(f)
+            val_data.extend([
+                {
+                    'dataset_dir': self.data_root / dataset,
+                    'image': random.choice(item['image']),
                     'question': random.choice(self.prompts),
                     'answer': item['caption'],
                 }
@@ -715,10 +762,11 @@ class MMMMDataModule(ExpDataModuleBase):
         seg_data_root: str = PROCESSED_SEG_DATA_ROOT,
         vl_data_root: str = PROCESSED_VL_DATA_ROOT,
         seg_data: List[str] = ['AMOS22', 'AMOS22-debug'],
-        vqa_data: List[str] = ['Slake', 'VQA-Med', 'Radiopaedia'],
-        cap_data: List[str] = ['PMC-OA', 'Radiopaedia'],
+        vqa_data: List[str] = ['Slake', 'VQA-Med', 'Radiopaedia', 'VQA-RAD'],
+        cap_data: List[str] = ['PMC-OA'],
+        rep_data: List[str] = ['Radiopaedia', 'OpenI', 'MIMIC-CXR'],
         datamodules: List[str] = ['seg', 'vqa', 'cap'],
-        sample_rates: List[int] = [1, 1],
+        sample_rates: List[int] = [1, 1, 1, 1],
         *args, **kwargs,
     ):
         super().__init__(*args, **kwargs)
@@ -737,6 +785,10 @@ class MMMMDataModule(ExpDataModuleBase):
         if 'cap' in datamodules:
             self.datamodules.append(
                 CapDataModule(trans, tokenizer, vl_data_root, cap_data)
+            )
+        if 'rep' in datamodules:
+            self.datamodules.append(
+                RepDataModule(trans, tokenizer, vl_data_root, rep_data)
             )
 
     def train_dataset(self) -> Sequence:
