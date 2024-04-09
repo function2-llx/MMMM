@@ -41,7 +41,6 @@ class DataPoint:
 """
 1. multi-label, multi-file (single-channel, binary values)
 2. multi-class, single-file (single-channel, multiple values)
-3. multi-label, single-file (multi-channel, binary values)
 """
 
 @dataclass(kw_only=True)
