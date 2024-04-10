@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from functools import cache
 import json
 from pathlib import Path
-from typing import Callable, List, Sequence, Iterator, Optional
+from typing import Callable, List, Sequence, Iterator, Optional, TypedDict
 import random
 
 from einops import repeat
@@ -37,6 +37,14 @@ __all__ = [
 ]
 
 CE_IGNORE_INDEX = -100
+
+class DataPoint(TypedDict):
+    image: torch.Tensor
+    grounding_image: torch.Tensor
+    vit_patch_size: tuple3_t[int]
+    vlm_inputs: dict
+    mask: list[torch.Tensor | None]
+    bbox: list[torch.Tensor | None]
 
 def mmmm_collate_fn(batch: list[dict]):
     list_data = {key: [] for key in ['mask_classes', 'masks']}
