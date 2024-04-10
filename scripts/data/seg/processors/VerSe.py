@@ -2,6 +2,7 @@ from ._base import DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor, M
 
 class VerSeProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor):
     name = 'VerSe'
+    mask_batch_size = 32
     class_mapping = {
         **{
             i: f'C{i} vertebra'

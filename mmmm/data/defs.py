@@ -147,9 +147,6 @@ class Sparse(DataClassORJSONMixin):
     class Config(BaseConfig):
         orjson_options = orjson.OPT_SERIALIZE_NUMPY | orjson.OPT_INDENT_2
 
-def encode_patch_size(patch_size: tuple3_t[int]):
-    return ','.join(map(str, patch_size))
-
 def convert_to_slicer(data_dir: PathLike, output_dir: PathLike | None = None, multiclass: bool = True):
     """convert the processed data by MMMM to the format readable by Slicer"""
     data_dir = Path(data_dir)
