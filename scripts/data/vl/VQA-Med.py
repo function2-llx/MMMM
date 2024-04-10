@@ -9,14 +9,26 @@ def process_text(txt_file: str, out_file: str, test: bool =False):
     with open(ORIGIN_VL_DATA_ROOT / 'VQA-Med' / txt_file, 'r') as f:
         data = f.readlines()
     
+    data = sorted([item.split('|') for item in data], key=lambda x: x[0])
     processed_data = []
+
+    vqa = []
+    img = ''
     for item in data:
-        item = item.split('|')
-        processed_data.append(
+        if item[0] != img:
+            if vqa:
+                processed_data.append(
+                    {
+                        'image': [str(PROCESSED_VL_DATA_ROOT / 'VQA-Med' / 'images' / (img + '.jpg'))],
+                        'vqa': vqa
+                    }
+                )
+            img = item[0]
+            vqa = []
+        vqa.append(
             {
-                'image': str(PROCESSED_VL_DATA_ROOT / 'VQA-Med' / 'images' / (item[0] + '.jpg')),
                 'question': item[2 if test else 1],
-                'answer': item[3 if test else 2].strip(),
+                'answer': item[3 if test else 2].strip()
             }
         )
         

@@ -444,7 +444,7 @@ class VLTransform(mt.Transform):
         if 'pt' in data['image']:
             image = torch.load(data['image'])
         else:
-            image = Image.open(idata['image'])
+            image = Image.open(data['image'])
             image = tvt.functional.to_tensor(image)   
         if len(image.shape) == 3:
             if min(image.shape[1:]) > 512:

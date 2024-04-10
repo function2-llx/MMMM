@@ -31,26 +31,21 @@ def process_text(json_file: str, train_val: bool = False):
         if not valid:
             continue
 
-        text = ''
-        if isinstance(item['finding'], str):
-            text += 'Findings: ' + item['finding']
-            if isinstance(item['impression'], str):
-                if text:
-                    text += ' '
-                text += 'Impression: ' + item['impression']
-            if text:
-                processed_data.append(
-                    {
-                        'image': [
-                            path.replace('/mnt/petrelfs/share_data/zhangxiaoman/DATA/Radio_VQA/processed_file/npys/', str(PROCESSED_VL_DATA_ROOT / 'Radiopaedia' / 'images/'))
-                                .replace('.nii.gz', '.pt')
-                                .replace('.npy', '.pt')
-                            for path in item['image_path']
-                        ],
-                        'caption': text,
-                        'qa_list': item['qa_list'],
-                    }
-                )
+        if isinstance(item['finding'], str) and item['finding'].strip() and isinstance(item['impression'], str) and item['impression'].strip():
+            processed_data.append(
+                {
+                    'image': [
+                        path.replace('/mnt/petrelfs/share_data/zhangxiaoman/DATA/Radio_VQA/processed_file/npys/', str(PROCESSED_VL_DATA_ROOT / 'Radiopaedia' / 'images/'))
+                            .replace('.nii.gz', '.pt')
+                            .replace('.npy', '.pt')
+                        for path in item['image_path']
+                    ],
+                    'modality': item['image_modality'],
+                    'findings': item['finding'],
+                    'impression': item['impression'],
+                    'vqa': item['qa_list'],
+                }
+            )
 
     if train_val:
         random.shuffle(processed_data)

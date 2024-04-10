@@ -20,7 +20,9 @@ def process(csv_file: str):
                 data.append(
                     {
                         'image': images,
-                        'caption': 'Findings: ' + item['findings'] + ' Impression: ' + item['impression'],
+                        'modality': ['X-Ray'] * len(images),
+                        'findings': item['findings'],
+                        'impression': item['impression'],
                     }
                 )
 

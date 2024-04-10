@@ -421,7 +421,9 @@ def process():
                 impression = impression.replace('\t', '')
                 new_data = {
                     'image': [str(p) for p in (ORIGIN_VL_DATA_ROOT / 'MIMIC-CXR-JPG' / 'files' / group_id / subject_id / study_id).iterdir()],
-                    'caption': 'Findings: ' + findings + ' Impression: ' + impression
+                    'modality': ['X-Ray'] * len([str(p) for p in (ORIGIN_VL_DATA_ROOT / 'MIMIC-CXR-JPG' / 'files' / group_id / subject_id / study_id).iterdir()]),
+                    'findings': findings,
+                    'impression': impression,
                 }
                 if split[(study_id, subject_id)] == 'train':
                     train_data.append(new_data)

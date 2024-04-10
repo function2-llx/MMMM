@@ -12,7 +12,7 @@ def process_text(jsonl_file: str, out_file: str):
     
     data = [
         {
-            'image': str(ORIGIN_VL_DATA_ROOT / 'caption_T060_filtered_top4_sep_v0_subfigures' / item['image']),
+            'image': [str(ORIGIN_VL_DATA_ROOT / 'caption_T060_filtered_top4_sep_v0_subfigures' / item['image'])],
             'caption': item['caption'],
         }
         for item in data
