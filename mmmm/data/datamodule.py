@@ -40,7 +40,7 @@ CE_IGNORE_INDEX = -100
 
 class DataPoint(TypedDict):
     image: torch.Tensor
-    grounding_image: torch.Tensor
+    grounding_image: torch.Tensor | None
     vit_patch_size: tuple3_t[int]
     vlm_inputs: dict
     mask: list[torch.Tensor | None]
