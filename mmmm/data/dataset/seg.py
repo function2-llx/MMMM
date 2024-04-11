@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -99,7 +101,6 @@ class SamplePatch(mt.RandomizableTransform):
         1. determine scale, sample patch size, vit patch size
         2. determine crop center
         3. (later) flip, rotate 90 (isotropic plane)
-        Returns:
         """
         sparse: Sparse = data['sparse']
 

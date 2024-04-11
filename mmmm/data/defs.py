@@ -126,3 +126,4 @@ class DataPoint(TypedDict):
     bbox: list[torch.Tensor | None]
 
 split_t = Literal['train', 'val']
+CE_IGNORE_INDEX = -100

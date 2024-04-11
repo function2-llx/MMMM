@@ -1,1 +1,1 @@
-from ._dataset import MMMMDataset, DatasetSpec
+from ._dataset import MMMMDataset, DatasetSpec, DatasetConf

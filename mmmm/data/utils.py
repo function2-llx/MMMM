@@ -1,8 +1,8 @@
 import torch
 
-from mmmm.data import CE_IGNORE_INDEX
 from mmmm.models import MMMMTokenizer
 from mmmm.models.cogvlm import LANGUAGE_TOKEN_TYPE, VISION_TOKEN_TYPE
+from .defs import CE_IGNORE_INDEX
 
 def prepare_vlm_inputs(
     conversation: list[tuple[str, str]],

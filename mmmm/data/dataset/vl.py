@@ -116,7 +116,7 @@ class VLTransform(mt.Transform):
 class VQADataModule(ExpDataModuleBase):
     def __init__(
         self,
-        trans: SegTransConf,
+        trans,
         tokenizer: MMMMTokenizer,
         data_root: Path = PROCESSED_VL_DATA_ROOT,
         datasets: list[str] = ['Slake', 'VQA-Med'],
@@ -191,7 +191,7 @@ class VQADataModule(ExpDataModuleBase):
 class CapDataModule(ExpDataModuleBase):
     def __init__(
         self,
-        trans: SegTransConf,
+        trans,
         tokenizer: MMMMTokenizer,
         data_root: Path = PROCESSED_VL_DATA_ROOT,
         datasets: list[str] = ['PMC-OA'],
@@ -255,7 +255,7 @@ class CapDataModule(ExpDataModuleBase):
 class RepDataModule(ExpDataModuleBase):
     def __init__(
         self,
-        trans: SegTransConf,
+        trans,
         tokenizer: MMMMTokenizer,
         data_root: Path = PROCESSED_VL_DATA_ROOT,
         datasets: list[str] = ['Radiopaedia', 'OpenI'],

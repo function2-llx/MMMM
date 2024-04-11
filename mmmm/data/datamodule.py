@@ -7,16 +7,15 @@ from torch.utils.data import DataLoader, Sampler
 
 from luolib.data.utils import list_data_collate
 from luolib.datamodule import ExpDataModuleBase
+
 from mmmm.models import MMMMTokenizer
-from .dataset import MMMMDataset
-from .dataset._dataset import DatasetConf
+from .dataset import MMMMDataset, DatasetConf
 
 __all__ = [
     'MMMMDataModule',
-    'CE_IGNORE_INDEX',
 ]
 
-CE_IGNORE_INDEX = -100
+from .defs import CE_IGNORE_INDEX
 
 def mmmm_collate_fn(batch: list[dict]):
     list_data = {key: [] for key in ['mask_classes', 'masks']}
