@@ -103,7 +103,7 @@ class Processor(ABC):
     min_aniso_ratio: float = 0.5
     mask_batch_size: int = 32
     do_normalize: bool = False
-    max_class_positions: int = 5000
+    max_class_positions: int = 10000
     cuda_cache_th: int = 15
     bbox_ignore_targets: set[str] = set()
 
