@@ -290,10 +290,10 @@ class Processor(ABC):
             return []
         bbox_t = mt.BoundingRect()
         bbox = bbox_t(masks)
-        bbox = bbox.reshape((-1, 3, 2))
+        bbox = bbox.reshape((-1, 3, 2)) / np.array(masks.shape[1:])[:, None]
         center = bbox.mean(axis=2)
         shape = bbox[..., 1] - bbox[..., 0]
-        return [Sparse.BBox(tuple(c.tolist()), tuple(s.tolist())) for c, s in zip(center, shape)]
+        return [Sparse.BBox(c, s) for c, s in zip(center, shape)]
 
     def _compute_class_positions(self, masks: torch.BoolTensor) -> tuple[torch.ShortTensor, torch.LongTensor]:
         ret = []
