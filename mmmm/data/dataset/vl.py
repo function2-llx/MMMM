@@ -35,40 +35,41 @@ CAPTION_PROMPTS = [
     'Write an exhaustive depiction of the given image',
     'Summarize the visual content of the image.',
     'What can you infer from this picture?',
-    'Please caption this medical scan.',
+    'Please caption this image.',
     'Can you summarize the image presented?',
+    'Describe this {}.',
 ]
 
 REPORT_PROMPTS = [
-    'Can you provide a report consists of findings and impression for this medical image?',
-    'Please report this medical scan with findings and impression.',
-    'Describe this medical scan with findings and impression.',
-    'Please write a report consists of findings and impression for this image.',
-    'Please provide a report consists of findings and impression for this medical image.',
-    'Can you provide a summary consists of findings and impression of this radiograph?',
-    'What are the findings and impression presented in this medical scan?',
-    'Please write a report consists of findings and impression for this scan.',
-    'Can you provide a description consists of findings and impression of this medical scan?',
-    'Please report this medical scan with finding and impression.',
-    'Analyze this medical image and provide a detailed report with both findings and impression.',
-    'Examine the medical image and construct a report that includes findings and impression.',
-    'Based on your analysis, what would be an accurate report for this medical image, including both findings and impression?',
-    'What is the most appropriate report for this medical scan, detailing both the findings and impression?',
-    'Can you provide a radiology report for this medical image?',
-    'Please report this medical scan.',
-    'What is the medical significance of this image?',
-    'Can you provide a quick summary of this image?',
-    'Describe this medical scan.',
-    'Please write a radiology report for this image.',
-    'Please generate a radiology report for this scan.',
-    'Describe the regions of interest in this scan.',
-    'Please provide a report for this medical image.',
-    'Can you provide a brief summary of this radiograph?',
-    'Describe the structures involved in this medical image.',
-    'Please write a radiology report for this scan.',
-    'Please report this medical scan.',
-    'Can you provide a report summary for this medical scan?'
+    'Can you provide a report consists of findings and impression for this {}?',
+    'Please report this {} with findings and impression.',
+    'Describe this {} with findings and impression.',
+    'Please write a report consists of findings and impression for this {}.',
+    'Please provide a report consists of findings and impression for this {}.',
+    'Can you provide a summary consists of findings and impression of this {}?',
+    'What are the findings and impression presented in this {}?',
+    'Please write a report consists of findings and impression for this {}.',
+    'Can you provide a description consists of findings and impression of this {}?',
+    'Please report this {} with finding and impression.',
+    'Analyze this {} and provide a detailed report with both findings and impression.',
+    'Examine the {} and construct a report that includes findings and impression.',
+    'Based on your analysis, what would be an accurate report for this {}, including both findings and impression?',
+    'What is the most appropriate report for this {}, detailing both the findings and impression?',
+    'Can you provide a radiology report for this {}?',
+    'Please report this {}.',
+    'What is the medical significance of this {}?',
+    'Can you provide a summary of this {}?',
+    'Please write a radiology report for this {}.',
+    'Please generate a radiology report for this {}.',
+    'Please provide a report for this {}.',
+    'Can you provide a brief summary of this {}?',
+    'Please write a radiology report for this {}.',
+    'Can you provide a report summary for this {}?'
 ]
+
+COMPLETE_REFERRINGS = ['medical image', 'radiograph', 'scan', 'radiology image', 'radiology scan', 'medical scan']
+
+PARTIAL_REFERRINGS = [' image', ' scan', ' radiograph']
 
 def get_vl_data_list(name: str, split: split_t):
     dataset_dir = PROCESSED_VL_DATA_ROOT / name
@@ -112,7 +113,10 @@ class VLTransform(mt.Transform):
         if data.get('caption'):
             conversation.append((random.choice(CAPTION_PROMPTS), data['caption']))
         if data.get('findings') and data.get('impression'):
-            conversation.append((random.choice(REPORT_PROMPTS), 'Findings: ' + data['findings'] + ' Impression: ' + data['impression']))
+            referring = random.choice(COMPLETE_REFERRINGS)
+            if data.get('modality'):
+                referring = random.choice(referring, data['modality'] + random.choice(PARTIAL_REFERRINGS))
+            conversation.append((random.choice(REPORT_PROMPTS).format(random.choice(referring)), 'Findings: ' + data['findings'] + ' Impression: ' + data['impression']))
         if data.get('vqa'):
             conversation.extend([(qa['question'], qa['answer']) for qa in data['vqa']])
 
