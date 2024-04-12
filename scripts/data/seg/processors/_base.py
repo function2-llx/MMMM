@@ -88,6 +88,7 @@ def crop(images: torch.Tensor, masks: torch.BoolTensor, crop_mask: torch.BoolTen
 
 class Processor(ABC):
     """
+    TODO: check aspect ratio
     Attributes:
         name: name of the dataset to be processed by the processor
         orientation: if orientation is None, will determine it from the spacing

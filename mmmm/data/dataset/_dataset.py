@@ -4,7 +4,6 @@ from typing import Literal
 import torch
 from torch.utils.data import Dataset
 
-from luolib.types import param3_t
 from monai.transforms import apply_transform
 
 from mmmm.models import MMMMTokenizer
@@ -35,7 +34,8 @@ class DatasetSpec:
 class DatasetConf:
     datasets: list[DatasetSpec]
     max_vision_tokens: int
-    base_vit_patch_size: param3_t[int]
+    base_vit_patch_size_z: int = 16
+    vit_patch_size_xy: int = 16
     seg_trans: SegTransConf
 
 class MMMMDataset(Dataset):

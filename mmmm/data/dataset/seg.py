@@ -1,27 +1,25 @@
-from __future__ import annotations
+from __future__ import annotations as _
 
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Mapping
 
-import h5py
 import numpy as np
 from numpy import typing as npt
 import pandas as pd
 import torch
 from torch.types import Device
 
-from luolib.types import param3_t, tuple2_t, tuple3_t
+from luolib.types import tuple2_t
 from luolib.utils.misc import ensure_rgb
 from monai import transforms as mt
 from monai.data import MetaTensor
-from monai.utils import ensure_tuple_rep
 
-from mmmm.models import MMMMTokenizer
 import mmmm.data.dataset._dataset as _dataset
+from mmmm.models import MMMMTokenizer
+from ..defs import DataPoint, PROCESSED_SEG_DATA_ROOT, Sparse, split_t
 from ..utils import prepare_vlm_inputs
-from ..defs import PROCESSED_SEG_DATA_ROOT, Sparse, DataPoint, split_t
 
 def get_seg_data_list(name: str, split: split_t):
     if split != 'train':
@@ -39,14 +37,14 @@ def get_seg_data_list(name: str, split: split_t):
 
 @dataclass(kw_only=True)
 class SegTransConf:
-    scale_z: tuple2_t[float] = (0.5, 1.5)
-    scale_z_p: float = 0.25
-    scale_xy: tuple2_t[float] = (0.5, 1.5)
-    base_vit_patch_size: param3_t[int] = 16
-    num_pos: int = 40  # I've encountered cases setting this to larger than 48 causing NCCL timeout
-    num_neg: int = 4
-
-    force_fg_ratio: float = 0.9
+    scale_z: tuple2_t[float]
+    scale_z_p: float
+    max_tokens_z: int
+    scale_xy: tuple2_t[float]
+    scale_xy_p: float
+    num_pos: int  # I've encountered cases setting this to larger than 48 causing NCCL timeout
+    num_neg: int
+    force_fg_ratio: float
 
 def get_seg_transform(
     conf: _dataset.DatasetConf,
@@ -64,36 +62,30 @@ def get_seg_transform(
         InputTransformD(),
     ])
 
-class InputTransformD(mt.Transform):
-    def __call__(self, data: dict) -> DataPoint:
+class LoadSparse(mt.Transform):
+    def __call__(self, data: Mapping):
         data = dict(data)
-        img = data['image']
-        if isinstance(img, MetaTensor):
-            img = img.as_tensor()
-        data['image'], _ = ensure_rgb(img)
-        masks = data['masks']
-        if isinstance(masks, MetaTensor):
-            masks = masks.as_tensor()
-        if masks.dtype != torch.bool:
-            masks = masks.round().bool()
-        data['masks'] = masks
+        dataset_dir: Path = data['dataset_dir']
+        key = data['key']
+        data['data_dir'] = data_dir = dataset_dir / 'data' / key
+        data['sparse'] = Sparse.from_json((data_dir / 'sparse.json').read_bytes())
         return data
 
-class SamplePatch(mt.RandomizableTransform):
+def toss(R: np.random.RandomState, prob: float):
+    return R.uniform() < prob
+
+class SamplePatch(mt.Randomizable):
     def __init__(
         self,
-        max_vision_tokens: int,
-        conf: SegTransConf,
+        conf: _dataset.DatasetConf,
         tokenizer: MMMMTokenizer,
         inference: bool,
         device: Device = 'cpu',
     ):
         super().__init__()
-        self.max_vision_tokens = max_vision_tokens
         self.conf = conf
         self.tokenizer = tokenizer
         self.device = device
-        self.base_vit_patch_size: tuple3_t[int] = ensure_tuple_rep(base_vit_patch_size, 3)
         self.inference = inference
 
     def __call__(self, data: dict):
@@ -102,20 +94,44 @@ class SamplePatch(mt.RandomizableTransform):
         2. determine crop center
         3. (later) flip, rotate 90 (isotropic plane)
         """
+        data = dict(data)
+        conf = self.conf
+        trans_conf = conf.seg_trans
         sparse: Sparse = data['sparse']
+        data_dir = data['data_dir']
+        annotation = sparse.annotation
+        if sparse.shape[0] == 1:
+            tokens_z = 1
+        else:
+            # TODO: maybe there's a better approximation for tokens_z
+            tokens_z = self.R.randint(1, trans_conf.max_tokens_z + 1)
+        tokens_xy = int((conf.max_vision_tokens / tokens_z) ** 0.5)
+        patch_size_xy = tokens_xy * conf.vit_patch_size_xy
+        if (max_scale_xy := max(sparse.shape[1:]) / patch_size_xy) <= trans_conf.scale_xy[0]:
+            # the original image is too small, just resize
+            scale_xy = max_scale_xy
+        elif toss(self.R, trans_conf.scale_xy_p):
+            scale_xy = self.R.uniform(
+                trans_conf.scale_xy[0],
+                min(trans_conf.scale_xy[1], max_scale_xy),
+            )
+        else:
+            scale_xy = 1.
+        spacing_xy = min(sparse.spacing[1:]) * scale_xy
 
         # sample patch position
         position: npt.NDArray[np.int16]
-        if self.R.uniform() < self.force_fg_ratio:
+        if self.R.uniform() < conf.force_fg_ratio:
             # foreground oversampling
-            c = self.R.randint(len(image_pos_classes))
-            with h5py.File(patch_dir / 'class_positions.h5') as f:
-                positions: h5py.Dataset = f[str(c)]
-                position = positions[self.R.randint(positions.shape[0])]
+            # TODO: handle data with bbox only
+            c = self.R.randint(len(annotation.mask))
+            class_positions: torch.Tensor = torch.load(data_dir / 'class_positions.pt', mmap=True)
+            class_offsets: torch.Tensor = torch.load(data_dir / 'class_offsets.pt', mmap=True)
+
         else:
             # sample a random patch position
             c = None
-            position = np.array([self.R.randint(s) for s in patches_class_mask.shape[:-1]], dtype=np.int16)
+            position = np.array([self.R.randint(s) for s in 4patches_class_mask.shape[:-1]], dtype=np.int16)
 
         # sample negative classes
         neg_class_ids, = (~pos_class_mask).nonzero()
@@ -179,12 +195,19 @@ class SamplePatch(mt.RandomizableTransform):
         }
         return data
 
-class LoadSparse(mt.Transform):
-    def __call__(self, data: Mapping):
-        dataset_dir: Path = data['dataset_dir']
-        key = data['key']
+class InputTransformD(mt.Transform):
+    def __call__(self, data: dict) -> DataPoint:
         data = dict(data)
-        data['sparse'] = Sparse.from_json((dataset_dir / f'data/{key}/sparse.json').read_bytes())
+        img = data['image']
+        if isinstance(img, MetaTensor):
+            img = img.as_tensor()
+        data['image'], _ = ensure_rgb(img)
+        masks = data['masks']
+        if isinstance(masks, MetaTensor):
+            masks = masks.as_tensor()
+        if masks.dtype != torch.bool:
+            masks = masks.round().bool()
+        data['masks'] = masks
         return data
 
 def gen_seg_conversation(
