@@ -30,6 +30,9 @@ class DatasetSpec:
             case _:
                 raise ValueError
 
+def _is_power_of_2(x: int):
+    return x & (x - 1) == 0
+
 @dataclass
 class DatasetConf:
     datasets: list[DatasetSpec]
@@ -37,6 +40,10 @@ class DatasetConf:
     base_vit_patch_size_z: int = 16
     vit_patch_size_xy: int = 16
     seg_trans: SegTransConf
+
+    def __post_init__(self):
+        assert _is_power_of_2(self.vit_patch_size_xy)
+        assert _is_power_of_2(self.base_vit_patch_size_z)
 
 class MMMMDataset(Dataset):
     def __init__(self, conf: DatasetConf, split: split_t, tokenizer: MMMMTokenizer):

@@ -42,6 +42,8 @@ class SegTransConf:
     max_tokens_z: int
     scale_xy: tuple2_t[float]
     scale_xy_p: float
+    aniso_ratio_range: tuple2_t[float] = (0.5, 2.)
+    log_vit_patch_size_z_std = 0.25  # 2-sigma, 95.45%
     num_pos: int  # I've encountered cases setting this to larger than 48 causing NCCL timeout
     num_neg: int
     force_fg_ratio: float
@@ -88,6 +90,64 @@ class SamplePatch(mt.Randomizable):
         self.device = device
         self.inference = inference
 
+    def gen_patch_info(self, sparse):
+        conf = self.conf
+        trans_conf = conf.seg_trans
+        # 1. sample tokens_z, tokens_xy, thus obtain patch_size_xy
+        if sparse.shape[0] == 1:
+            tokens_z = 1
+        else:
+            # TODO: maybe there's a better approximation for tokens_z
+            tokens_z = self.R.randint(1, trans_conf.max_tokens_z + 1)
+        tokens_xy = int((conf.max_vision_tokens / tokens_z) ** 0.5)
+        patch_size_xy = tokens_xy * conf.vit_patch_size_xy
+        # 2. sample scale_xy
+        if (max_scale_xy := max(sparse.shape[1:]) / patch_size_xy) <= trans_conf.scale_xy[0]:
+            # the original image is too small, just resize to patch size
+            scale_xy = max_scale_xy
+        elif toss(self.R, trans_conf.scale_xy_p):
+            scale_xy = self.R.uniform(
+                trans_conf.scale_xy[0],
+                min(trans_conf.scale_xy[1], max_scale_xy),
+            )
+        else:
+            scale_xy = 1.
+        # 3. sample scale_z
+        if sparse.spacing[0] < 2 * min(sparse.spacing[1:]):
+            # initialize with isotropic scale
+            scale_z = scale_xy
+            if toss(self.R, trans_conf.scale_z_p):
+                scale_z *= self.R.uniform(
+                    max(
+                        trans_conf.scale_z[0],
+                        trans_conf.aniso_ratio_range[0] * min(sparse.spacing[1:]) / sparse.spacing[0],
+                    ),
+                    min(
+                        trans_conf.scale_z[1],
+                        trans_conf.aniso_ratio_range[1] * min(sparse.spacing[1:]) / sparse.spacing[0],
+                    ),
+                )
+        else:
+            scale_z = 1.
+        # 4. determine vit_patch_size_z
+        if sparse.shape[0] == 1:
+            vit_patch_size_z = 1
+        else:
+            spacing_xy = min(sparse.spacing[1:]) * scale_xy
+            spacing_z = sparse.spacing[0] * scale_z
+            log_vit_patch_size_z = self.R.normal(
+                conf.base_vit_patch_size_z * spacing_xy / spacing_z,
+                trans_conf.log_vit_patch_size_z_std,
+            )
+            log_vit_patch_size_z = np.clip(
+                np.rint(log_vit_patch_size_z), 0, conf.base_vit_patch_size_z.bit_length() - 1,
+            )
+            vit_patch_size_z = 1 << int(log_vit_patch_size_z)
+        vit_patch_size = np.array((vit_patch_size_z, conf.vit_patch_size_xy, conf.vit_patch_size_xy))
+        scale = np.array((scale_z, scale_xy, scale_xy))
+        patch_size = np.array((tokens_z * vit_patch_size_z, patch_size_xy, patch_size_xy))
+        return patch_size, scale, vit_patch_size
+
     def __call__(self, data: dict):
         """
         1. determine scale, sample patch size, vit patch size
@@ -100,34 +160,16 @@ class SamplePatch(mt.Randomizable):
         sparse: Sparse = data['sparse']
         data_dir = data['data_dir']
         annotation = sparse.annotation
-        if sparse.shape[0] == 1:
-            tokens_z = 1
-        else:
-            # TODO: maybe there's a better approximation for tokens_z
-            tokens_z = self.R.randint(1, trans_conf.max_tokens_z + 1)
-        tokens_xy = int((conf.max_vision_tokens / tokens_z) ** 0.5)
-        patch_size_xy = tokens_xy * conf.vit_patch_size_xy
-        if (max_scale_xy := max(sparse.shape[1:]) / patch_size_xy) <= trans_conf.scale_xy[0]:
-            # the original image is too small, just resize
-            scale_xy = max_scale_xy
-        elif toss(self.R, trans_conf.scale_xy_p):
-            scale_xy = self.R.uniform(
-                trans_conf.scale_xy[0],
-                min(trans_conf.scale_xy[1], max_scale_xy),
-            )
-        else:
-            scale_xy = 1.
-        spacing_xy = min(sparse.spacing[1:]) * scale_xy
-
+        patch_size, scale, vit_patch_size = self.gen_patch_info(sparse)
         # sample patch position
-        position: npt.NDArray[np.int16]
-        if self.R.uniform() < conf.force_fg_ratio:
+        if self.R.uniform() < trans_conf.force_fg_ratio:
             # foreground oversampling
             # TODO: handle data with bbox only
             c = self.R.randint(len(annotation.mask))
             class_positions: torch.Tensor = torch.load(data_dir / 'class_positions.pt', mmap=True)
             class_offsets: torch.Tensor = torch.load(data_dir / 'class_offsets.pt', mmap=True)
-
+            position_idx = self.R.randint(class_offsets[c], class_offsets[c + 1])
+            position = class_positions[position_idx]
         else:
             # sample a random patch position
             c = None
