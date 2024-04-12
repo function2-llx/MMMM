@@ -33,7 +33,7 @@ CAPTION_PROMPTS = [
     'Illustrate the image through a descriptive explanation',
     'Examine the image closely and share its details',
     'Write an exhaustive depiction of the given image',
-    "Summarize the visual content of the image."
+    'Summarize the visual content of the image.'
 ]
 
 REPORT_PROMPTS = [
@@ -71,7 +71,10 @@ REPORT_PROMPTS = [
 ]
 
 def get_vl_data_list(name: str, split: split_t):
-    pass
+    dataset_dir = PROCESSED_VL_DATA_ROOT / name
+    with open(dataset_dir / f'{split}.json') as f:
+        info = json.load(f)
+    return info
 
 class VLTransform(mt.Transform):
     def __init__(
@@ -86,233 +89,43 @@ class VLTransform(mt.Transform):
         self.inference = inference
 
     def __call__(self, data: dict) -> DataPoint:
-        if 'pt' in data['image']:
-            image = torch.load(data['image'])
+        image_path = random.choice(data['image'])
+        if 'pt' in image_path:
+            image = torch.load(image_path)
         else:
-            image = Image.open(data['image'])
+            image = Image.open(image_path)
             image = tvt.functional.to_tensor(image)
         if len(image.shape) == 3:
             if min(image.shape[1:]) > 512:
                 image = tvt.functional.resize(image, 512)
             image = repeat(image, 'c h w -> c 1 h w')
+            vit_patch_size = (1, *self.vit_patch_size[1:])
         elif len(image.shape) == 4:
             if min(image.shape[1:]) > 512:
                 slices = []
                 for i in range(image.shape[3]):
                     slices.append(tvt.functional.resize(image[:, :, :, i], 512))
                 image = torch.stack(slices, dim=3)
-        conversation = [(data['question'], data['answer'])]
+            vit_patch_size = self.vit_patch_size
+        
+        conversation = []
+        if data.get('caption'):
+            conversation.append((random.choice(CAPTION_PROMPTS), data['caption']))
+        if data.get('findings') and data.get('impression'):
+            conversation.append((random.choice(REPORT_PROMPTS), 'Findings: ' + data['findings'] + ' Impression: ' + data['impression']))
+        if data.get('vqa'):
+            conversation.extend([(qa['question'], qa['answer']) for qa in data['vqa']])
+
+        random.shuffle(conversation)
         vlm_inputs, conversation_text = prepare_vlm_inputs(
-            conversation, self.tokenizer, self.patch_size, self.vit_patch_size, self.inference,
+            conversation, self.tokenizer, self.patch_size, vit_patch_size, self.inference,
         )
         data = {
             'image': image,
-            'masks': None,
-            'mask_classes': 0,
+            'grounding_image': None,
+            'vit_patch_size': vit_patch_size,
             'vlm_inputs': vlm_inputs,
+            'mask': [],
+            'bbox': [],
         }
         return data
-
-class VQADataModule(ExpDataModuleBase):
-    def __init__(
-        self,
-        trans,
-        tokenizer: MMMMTokenizer,
-        data_root: Path = PROCESSED_VL_DATA_ROOT,
-        datasets: list[str] = ['Slake', 'VQA-Med'],
-        *args, **kwargs,
-    ):
-        super().__init__(*args, **kwargs)
-        self.tokenizer = tokenizer
-        self.data_root = data_root
-        self.datasets = datasets
-        self.trans_conf = trans
-
-    def train_data(self) -> Sequence:
-        train_data = []
-        for dataset in self.datasets:
-            with open(self.data_root / dataset / 'train.json') as f:
-                data = json.load(f)
-            if dataset == 'Radiopaedia':
-                train_data.extend(
-                    [
-                        {
-                            'dataset_dir': self.data_root / dataset,
-                            'image': random.choice(item['image']),
-                            **random.choice(item['qa_list']),
-                        }
-                        for item in data
-
-                    ]
-                )
-            else:
-                train_data.extend(
-                    [
-                        {
-                            'dataset_dir': self.data_root / dataset,
-                            'image': item['image'],
-                            'question': item['question'],
-                            'answer': item['answer'],
-                        }
-                        for item in data
-                    ]
-                )
-        return train_data
-
-    def val_data(self) -> Sequence:
-        val_data = []
-        for dataset in self.datasets:
-            with open(self.data_root / dataset / 'validate.json') as f:
-                data = json.load(f)
-            val_data.extend(
-                [
-                    {
-                        'dataset_dir': self.data_root / dataset,
-                        'image': item['image'],
-                        'question': item['question'],
-                        'answer': item['answer'],
-                    }
-                    for item in data
-                ]
-            )
-
-        return val_data
-
-    def train_transform(self) -> Callable:
-        conf = self.trans_conf
-        return VLTransform(
-            conf.vit_patch_size,
-            self.tokenizer,
-        )
-
-    # def get_train_collate_fn(self):
-    #     return mmmm_collate_fn
-
-class CapDataModule(ExpDataModuleBase):
-    def __init__(
-        self,
-        trans,
-        tokenizer: MMMMTokenizer,
-        data_root: Path = PROCESSED_VL_DATA_ROOT,
-        datasets: list[str] = ['PMC-OA'],
-        prompts: list[str] = CAPTION_PROMPTS,
-        *args, **kwargs,
-    ):
-        super().__init__(*args, **kwargs)
-        self.tokenizer = tokenizer
-        self.data_root = data_root
-        self.datasets = datasets
-        self.trans_conf = trans
-        self.prompts = prompts
-
-    def train_data(self) -> Sequence:
-        train_data = []
-        for dataset in self.datasets:
-            with open(self.data_root / dataset / 'train.json') as f:
-                data = json.load(f)
-            train_data.extend(
-                [
-                    {
-                        'dataset_dir': self.data_root / dataset,
-                        'image': item['image'],
-                        'question': random.choice(self.prompts),
-                        'answer': item['caption'],
-                    }
-                    for item in data
-                ]
-            )
-        return train_data
-
-    def val_data(self) -> Sequence:
-        val_data = []
-        for dataset in self.datasets:
-            with open(self.data_root / dataset / 'validate.json') as f:
-                data = json.load(f)
-            val_data.extend(
-                [
-                    {
-                        'dataset_dir': self.data_root / dataset,
-                        'image': item['image'],
-                        'question': random.choice(self.prompts),
-                        'answer': item['caption'],
-                    }
-                    for item in data
-                ]
-            )
-
-        return val_data
-
-    def train_transform(self) -> Callable:
-        conf = self.trans_conf
-        return VLTransform(
-            conf.vit_patch_size,
-            self.tokenizer,
-        )
-
-    # def get_train_collate_fn(self):
-    #     return mmmm_collate_fn
-
-class RepDataModule(ExpDataModuleBase):
-    def __init__(
-        self,
-        trans,
-        tokenizer: MMMMTokenizer,
-        data_root: Path = PROCESSED_VL_DATA_ROOT,
-        datasets: list[str] = ['Radiopaedia', 'OpenI'],
-        prompts: list[str] = REPORT_PROMPTS,
-        *args, **kwargs,
-    ):
-        super().__init__(*args, **kwargs)
-        self.tokenizer = tokenizer
-        self.data_root = data_root
-        self.datasets = datasets
-        self.trans_conf = trans
-        self.prompts = prompts
-
-    def train_data(self) -> Sequence:
-        train_data = []
-        for dataset in self.datasets:
-            with open(self.data_root / dataset / 'train.json') as f:
-                data = json.load(f)
-            train_data.extend(
-                [
-                    {
-                        'dataset_dir': self.data_root / dataset,
-                        'image': random.choice(item['image']),
-                        'question': random.choice(self.prompts),
-                        'answer': item['caption'],
-                    }
-                    for item in data
-
-                ]
-            )
-        return train_data
-
-    def val_data(self) -> Sequence:
-        val_data = []
-        for dataset in self.datasets:
-            with open(self.data_root / dataset / 'validate.json') as f:
-                data = json.load(f)
-            val_data.extend(
-                [
-                    {
-                        'dataset_dir': self.data_root / dataset,
-                        'image': random.choice(item['image']),
-                        'question': random.choice(self.prompts),
-                        'answer': item['caption'],
-                    }
-                    for item in data
-                ]
-            )
-
-        return val_data
-
-    def train_transform(self) -> Callable:
-        conf = self.trans_conf
-        return VLTransform(
-            conf.vit_patch_size,
-            self.tokenizer,
-        )
-
-    # def get_train_collate_fn(self):
-    #     return mmmm_collate_fn

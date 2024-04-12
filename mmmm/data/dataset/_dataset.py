@@ -22,7 +22,7 @@ class DatasetSpec:
     type: Literal['seg', 'vl']
     weight: float = 1.
 
-    def get_data_list(self, split: Literal['train', 'val']) -> list:
+    def get_data_list(self, split: Literal['train', 'validate', 'test']) -> list:
         match self.type:
             case 'seg':
                 return get_seg_data_list(self.name, split)
