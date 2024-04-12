@@ -1,6 +1,4 @@
-from collections.abc import Callable, Sequence
 import json
-from pathlib import Path
 import random
 
 from PIL import Image
@@ -8,7 +6,6 @@ from einops import repeat
 import torch
 from torchvision.transforms import v2 as tvt
 
-from luolib.datamodule import ExpDataModuleBase
 from luolib.types import tuple3_t
 from monai import transforms as mt
 
@@ -91,7 +88,7 @@ class VLTransform(mt.Transform):
 
     def __call__(self, data: dict) -> DataPoint:
         image_path = random.choice(data['image'])
-        if 'pt' in image_path:
+        if image_path.endswith('.pt'):
             image = torch.load(image_path)
         else:
             image = Image.open(image_path)
