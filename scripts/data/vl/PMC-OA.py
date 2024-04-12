@@ -19,7 +19,7 @@ def process_text(jsonl_file: str, out_file: str):
     ]
 
     with open(PROCESSED_VL_DATA_ROOT / 'PMC-OA' / out_file, 'w') as f:
-        json.dump(data, f, indent=4)
+        json.dump(data, f, indent=4, ensure_ascii=False)
 
 def process():
     (PROCESSED_VL_DATA_ROOT / 'PMC-OA').mkdir(parents=True, exist_ok=True)
