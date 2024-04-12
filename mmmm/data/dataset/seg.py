@@ -2,16 +2,14 @@ from __future__ import annotations as _
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Iterable, Mapping
 
 import numpy as np
-from numpy import typing as npt
 import pandas as pd
 import torch
 from torch.types import Device
 
 from luolib.types import tuple2_t
+from luolib.utils import load_pt_zst
 from luolib.utils.misc import ensure_rgb
 from monai import transforms as mt
 from monai.data import MetaTensor
@@ -54,24 +52,9 @@ def get_seg_transform(
     inference: bool,
 ) -> Callable[[dict], DataPoint]:
     return mt.Compose([
-        LoadSparse(),
-        SamplePatch(
-            max_vision_tokens=conf.max_vision_tokens,
-            conf=conf.seg_trans,
-            tokenizer=tokenizer,
-            inference=inference,
-        ),
+        SamplePatch(conf, tokenizer, inference),
         InputTransformD(),
     ])
-
-class LoadSparse(mt.Transform):
-    def __call__(self, data: Mapping):
-        data = dict(data)
-        dataset_dir: Path = data['dataset_dir']
-        key = data['key']
-        data['data_dir'] = data_dir = dataset_dir / 'data' / key
-        data['sparse'] = Sparse.from_json((data_dir / 'sparse.json').read_bytes())
-        return data
 
 def toss(R: np.random.RandomState, prob: float):
     return R.uniform() < prob
@@ -148,6 +131,12 @@ class SamplePatch(mt.Randomizable):
         patch_size = np.array((tokens_z * vit_patch_size_z, patch_size_xy, patch_size_xy))
         return patch_size, scale, vit_patch_size
 
+    def get_patch_start(self, maybe_patch_center: np.ndarray, effective_patch_size: np.ndarray, shape: np.ndarray):
+        # TODO: add randomization
+        patch_start = maybe_patch_center - effective_patch_size >> 1
+        patch_start = np.clip(patch_start, 0, shape - effective_patch_size)
+        return patch_start
+
     def __call__(self, data: dict):
         """
         1. determine scale, sample patch size, vit patch size
@@ -157,10 +146,11 @@ class SamplePatch(mt.Randomizable):
         data = dict(data)
         conf = self.conf
         trans_conf = conf.seg_trans
-        sparse: Sparse = data['sparse']
-        data_dir = data['data_dir']
+        data_dir = data['dataset_dir'] / 'data' / data['key']
+        sparse = Sparse.from_json((data_dir / 'sparse.json').read_bytes())
         annotation = sparse.annotation
         patch_size, scale, vit_patch_size = self.gen_patch_info(sparse)
+        effective_patch_size = np.ceil(patch_size * scale).astype(np.int64)
         # sample patch position
         if self.R.uniform() < trans_conf.force_fg_ratio:
             # foreground oversampling
@@ -169,13 +159,23 @@ class SamplePatch(mt.Randomizable):
             class_positions: torch.Tensor = torch.load(data_dir / 'class_positions.pt', mmap=True)
             class_offsets: torch.Tensor = torch.load(data_dir / 'class_offsets.pt', mmap=True)
             position_idx = self.R.randint(class_offsets[c], class_offsets[c + 1])
-            position = class_positions[position_idx]
+            maybe_patch_center = class_positions[position_idx].numpy()
+            patch_start = self.get_patch_start(maybe_patch_center, effective_patch_size, sparse.shape)
         else:
-            # sample a random patch position
-            c = None
-            position = np.array([self.R.randint(s) for s in 4patches_class_mask.shape[:-1]], dtype=np.int16)
-
-        # sample negative classes
+            patch_start = self.R.randint(sparse.shape - effective_patch_size)
+        patch_slice = [
+            slice(start, start + size)
+            for start, size in zip(patch_start, effective_patch_size)
+        ]
+        # crop patch & mask (without transform)
+        modality_idx = self.R.randint(len(sparse.modalities))
+        modality = sparse.modalities[modality_idx]
+        # TODO: handle RGB
+        images: torch.HalfTensor = torch.load(data_dir / 'images.pt', mmap=True)
+        patch = images[modality_idx, *patch_slice]
+        masks: torch.BoolTensor = load_pt_zst(data_dir / 'masks.pt.zst')
+        masks = masks[:, *patch_slice]
+        # determine positive & negative classes
         neg_class_ids, = (~pos_class_mask).nonzero()
         # all negative classes for this patch:
         # - positive classes in the whole image but not in this patch
@@ -183,7 +183,7 @@ class SamplePatch(mt.Randomizable):
         neg_classes: list[str] = [image_pos_classes[i] for i in neg_class_ids] + meta['negative_classes']
         neg_classes = self.R.choice(neg_classes, min(len(neg_classes), self.num_neg), replace=False).tolist()
 
-        # sample positive classes
+        # sample positive cccclasses
         if c is not None:
             pos_class_mask[c] = False
         pos_class_ids, = pos_class_mask.nonzero()
@@ -197,7 +197,7 @@ class SamplePatch(mt.Randomizable):
         data_dir = dataset_dir / 'data' / key
         modalities = meta['modalities']
         modality_id = self.R.randint(len(modalities))
-        patch_slice = [slice(p, p + s) for p, s in zip(position, self.patch_size)]
+        patch_slice = [slice(p, p + s) for p, s in zip(maybe_patch_center, self.patch_size)]
         # TODO: support RGB
         image = np.load(data_dir / 'images.npy', 'r')[modality_id:modality_id + 1, *patch_slice]
         image = torch.as_tensor(np.array(image), device=self.device)
