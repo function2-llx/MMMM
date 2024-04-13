@@ -33,7 +33,7 @@ class DatasetSpec:
 def _is_power_of_2(x: int):
     return x & (x - 1) == 0
 
-@dataclass
+@dataclass(kw_only=True)
 class DatasetConf:
     datasets: list[DatasetSpec]
     max_vision_tokens: int

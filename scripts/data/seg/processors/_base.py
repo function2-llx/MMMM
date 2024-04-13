@@ -409,7 +409,7 @@ class Processor(ABC):
         if not is_natural:
             images = images - einops.reduce(images, 'c ... -> c 1 1 1', 'min')
         # 2. resize
-        if not np.array_equiv(new_shape, images.shape[1:]):
+        if not np.array_equal(new_shape, images.shape[1:]):
             if new_shape[0] == images.shape[1] == 1:
                 # use torchvision for 2D images
                 if not np.array_equal(new_shape[1:], images.shape[2:]):

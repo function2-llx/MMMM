@@ -2,10 +2,10 @@ import torch
 
 from mmmm.models import MMMMTokenizer
 from mmmm.models.cogvlm import LANGUAGE_TOKEN_TYPE, VISION_TOKEN_TYPE
-from .defs import CE_IGNORE_INDEX
+from .defs import CE_IGNORE_INDEX, ConvTurn
 
 def prepare_vlm_inputs(
-    conversation: list[tuple[str, str]],
+    conversation: list[ConvTurn],
     tokenizer: MMMMTokenizer,
     num_image_tokens: int,
     inference: bool = False,
@@ -15,18 +15,19 @@ def prepare_vlm_inputs(
         num_image_tokens: the number of tokens corresponding to image patches (does not include special tokens)
     """
     # TODO: refactor this function to support various VLM formats
-    # template: CogVLM `chat_old_history_to_prompt`
+    # user_start = 'Question:'
+    # sys_start = 'Answer:'
+    user_start = tokenizer.usr_token
+    sys_start = tokenizer.sys_token
     # just for viewing, don't tokenize it directly
-    user_start = 'Question:'
-    sys_start = 'Answer:'
     text = '\n'.join(
-        f'{user_start} {query} {sys_start} {answer}'
+        f'{user_start} {query}\n{sys_start} {answer}'
         for query, answer in conversation
     )
     dtype = torch.long
     text_ids = []
     # the last response is empty iff inference
-    assert inference ^ (conversation[-1][1] == '')
+    assert inference ^ (conversation[-1].response == '')
     if not inference:
         lm_targets = []
     for i, (query, answer) in enumerate(conversation):
@@ -51,9 +52,6 @@ def prepare_vlm_inputs(
     if not inference:
         lm_targets = torch.cat(lm_targets)
 
-    # text_ids = torch.tensor(tokenizer.encode(text, add_special_tokens=False))
-    # TODO: dynamically adjust patch size according to image spacing
-    # num_vision_tokens = np.prod([s // ps for s, ps in zip(image_size, vit_patch_size)]).item() + 2  # including boi and eoi
     num_image_tokens += 2  # including boi and eoi
     input_ids = torch.cat([
         torch.tensor([tokenizer.bos_token_id]),

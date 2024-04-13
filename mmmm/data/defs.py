@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal, NamedTuple, TypedDict
 
 from mashumaro import pass_through
 from mashumaro.config import BaseConfig
@@ -54,20 +54,20 @@ class Sparse(DataClassORJSONMixin):
             pos: anatomical structures that are assured to be observable in the image
             neg: anatomical structures that are assured to be unobservable in the image
         """
-        pos: list[str]
-        neg: list[str]
+        pos: set[str]
+        neg: set[str]
     anatomy: Anatomy
 
     @dataclass
     class Anomaly:
         """
         Attributes:
-            pos: anomalies that are assured to be observable in the image
+            pos: anomalies that are assured to be observable in the image; multiple instances is not supported yet
             neg: anomalies that are assured to be unobservable in the image
             complete: indicating that `pos` covers all anomalies in the image
         """
-        pos: list[str]
-        neg: list[str]
+        pos: set[str]
+        neg: set[str]
         complete: bool
     anomaly: Anomaly
 
@@ -127,3 +127,7 @@ class DataPoint(TypedDict):
 
 split_t = Literal['train', 'val']
 CE_IGNORE_INDEX = -100
+
+class ConvTurn(NamedTuple):
+    prompt: str
+    response: str

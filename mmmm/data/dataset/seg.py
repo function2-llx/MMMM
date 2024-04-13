@@ -1,8 +1,9 @@
 from __future__ import annotations as _
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
+import einops
 import numpy as np
 import pandas as pd
 import torch
@@ -14,10 +15,11 @@ from luolib.utils.misc import ensure_rgb
 from monai import transforms as mt
 from monai.data import MetaTensor
 
-import mmmm.data.dataset._dataset as _dataset
 from mmmm.models import MMMMTokenizer
-from ..defs import DataPoint, PROCESSED_SEG_DATA_ROOT, Sparse, split_t
+import mmmm.data.dataset._dataset as _dataset
+from ..defs import ConvTurn, DataPoint, PROCESSED_SEG_DATA_ROOT, Sparse, split_t
 from ..utils import prepare_vlm_inputs
+from .modality import gen_modality_conversation
 
 def get_seg_data_list(name: str, split: split_t):
     if split != 'train':
@@ -137,21 +139,23 @@ class SamplePatch(mt.Randomizable):
         patch_start = np.clip(patch_start, 0, shape - effective_patch_size)
         return patch_start
 
-    def __call__(self, data: dict):
-        """
-        1. determine scale, sample patch size, vit patch size
-        2. determine crop center
-        3. (later) flip, rotate 90 (isotropic plane)
-        """
+    def _is_positive(self, patch_mask_size: int, mask_size: int):
+        return 2 * patch_mask_size >= mask_size
+
+    def __call__(self, data: dict) -> DataPoint:
         data = dict(data)
         conf = self.conf
         trans_conf = conf.seg_trans
         data_dir = data['dataset_dir'] / 'data' / data['key']
         sparse = Sparse.from_json((data_dir / 'sparse.json').read_bytes())
         annotation = sparse.annotation
+        # 1. generate patch information
         patch_size, scale, vit_patch_size = self.gen_patch_info(sparse)
-        effective_patch_size = np.ceil(patch_size * scale).astype(np.int64)
-        # sample patch position
+        patch_tokens, _rem = np.divmod(patch_size, vit_patch_size)
+        assert np.array_equiv(_rem, 0)
+        effective_patch_size = np.minimum(np.ceil(patch_size * scale).astype(np.int64), sparse.shape)
+        assert np.all(effective_patch_size)
+        # 2. sample patch position
         if self.R.uniform() < trans_conf.force_fg_ratio:
             # foreground oversampling
             # TODO: handle data with bbox only
@@ -167,75 +171,89 @@ class SamplePatch(mt.Randomizable):
             slice(start, start + size)
             for start, size in zip(patch_start, effective_patch_size)
         ]
-        # crop patch & mask (without transform)
+        # 3. crop patch & mask (without further affine transform)
         modality_idx = self.R.randint(len(sparse.modalities))
         modality = sparse.modalities[modality_idx]
         # TODO: handle RGB
         images: torch.HalfTensor = torch.load(data_dir / 'images.pt', mmap=True)
         patch = images[modality_idx, *patch_slice]
         masks: torch.BoolTensor = load_pt_zst(data_dir / 'masks.pt.zst')
-        masks = masks[:, *patch_slice]
-        # determine positive & negative classes
-        neg_class_ids, = (~pos_class_mask).nonzero()
-        # all negative classes for this patch:
-        # - positive classes in the whole image but not in this patch
-        # - negative classes for the whole image
-        neg_classes: list[str] = [image_pos_classes[i] for i in neg_class_ids] + meta['negative_classes']
-        neg_classes = self.R.choice(neg_classes, min(len(neg_classes), self.num_neg), replace=False).tolist()
-
-        # sample positive cccclasses
-        if c is not None:
-            pos_class_mask[c] = False
-        pos_class_ids, = pos_class_mask.nonzero()
-        num_pos = self.num_pos - (c is not None)
-        pos_class_ids = self.R.choice(pos_class_ids, min(pos_class_ids.shape[0], num_pos), replace=False)
-        if c is not None:
-            pos_class_ids = np.insert(pos_class_ids, 0, c)
-        pos_classes: list[str] = [image_pos_classes[i] for i in pos_class_ids]
-
-        # construct image & masks patch
-        data_dir = dataset_dir / 'data' / key
-        modalities = meta['modalities']
-        modality_id = self.R.randint(len(modalities))
-        patch_slice = [slice(p, p + s) for p, s in zip(maybe_patch_center, self.patch_size)]
-        # TODO: support RGB
-        image = np.load(data_dir / 'images.npy', 'r')[modality_id:modality_id + 1, *patch_slice]
-        image = torch.as_tensor(np.array(image), device=self.device)
-        pos_masks = np.load(data_dir / 'masks.npy', 'r')[:, *patch_slice]
-        pos_masks = pos_masks[pos_class_ids]
-        pos_masks = torch.as_tensor(np.array(pos_masks), device=self.device)
-
-        # prepare sample output
-        modality = modalities[modality_id]
-        conversation, mask_classes = gen_seg_conversation(
-            modality, pos_classes, neg_classes, self.tokenizer, self.R, inference=self.inference,
+        patch_masks = masks[:, *patch_slice]
+        # TODO: crop bbox
+        # 4. determine positive & negative classes within the cropped patch
+        patch_mask_sizes: list[int] = einops.reduce(patch_masks, 'c ... -> c', 'sum').tolist()
+        if len(dict(annotation.mask)) != len(annotation.mask):
+            raise NotImplementedError
+        anatomy_pos, anatomy_neg = [], list(sparse.anatomy.neg)
+        anomaly_pos, anomaly_neg = [], list(sparse.anomaly.neg)
+        for c, (name, mask_size) in enumerate(annotation.mask):
+            patch_mask_size = patch_mask_sizes[c]
+            if self._is_positive(patch_mask_size, mask_size):
+                if name in sparse.anatomy.pos:
+                    anatomy_pos.append(name)
+                else:
+                    anomaly_pos.append(name)
+            elif patch_mask_size == 0:
+                if name in sparse.anatomy.pos:
+                    anatomy_neg.append(name)
+                else:
+                    anomaly_neg.append(name)
+        # restricted number of classes for anatomy
+        if len(anatomy_pos) > trans_conf.num_pos:
+            anatomy_pos = self.R.choice(anatomy_pos, trans_conf.num_pos, replace=False).tolist()
+        if len(anatomy_neg) > trans_conf.num_neg:
+            anatomy_neg = self.R.choice(anatomy_neg, trans_conf.num_neg, replace=False).tolist()
+        # 5. apply affine transform!
+        affine_trans = mt.Compose(
+            [
+                *[
+                    mt.RandFlipD(['image', 'masks'], 0.5, i)
+                    for i in range(3)
+                ],
+                mt.RandRotate90D(['image', 'masks'], 0.5, spatial_axes=(1, 2)),
+                mt.AffineD(
+                    ['image', 'masks'],
+                    scale_params=scale,
+                    spatial_size=patch_size,
+                ),
+            ],
+            lazy=True,
         )
-        masks = pos_masks.new_zeros((len(mask_classes), *pos_masks.shape[1:]))
-        pos_class_to_idx = {name: i for i, name in enumerate(pos_classes)}
-        for i, name in enumerate(mask_classes):
-            if (pos_idx := pos_class_to_idx.get(name, -1)) != -1:
-                masks[i] = pos_masks[pos_idx]
-
+        _dict_data = affine_trans({'image': patch, 'mask': patch_masks})
+        patch, patch_masks = _dict_data['image'], _dict_data['mask'].bool()
+        # 6. generate conversation
+        conversation = gen_modality_conversation(modality, self.R)
+        mask_classes = []
+        conversation_anatomy, mask_classes_anatomy = gen_anatomy_conversation(
+            anatomy_pos, anatomy_neg, self.tokenizer, self.R,
+        )
+        conversation.extend(conversation_anatomy)
+        mask_classes.extend(mask_classes_anatomy)
+        conversation_anomaly, mask_classes_anomaly = gen_anomaly_conversation(
+            anomaly_pos, anomaly_neg, sparse.anomaly.complete, self.tokenizer, self.R,
+        )
+        conversation.extend(conversation_anomaly)
+        mask_classes.extend(mask_classes_anomaly)
         vlm_inputs, conversation_text = prepare_vlm_inputs(
-            conversation, self.tokenizer, self.patch_size, self.vit_patch_size, self.inference,
+            conversation, self.tokenizer, patch_tokens.prod(), self.inference,
         )
-        if np.less(image.shape[1:], self.patch_size).any():
-            mean, std = meta['mean'], meta['std']
-            padder = mt.SpatialPad(self.patch_size)
-            image = torch.cat([
-                padder(image[i:i + 1], value=-mean[i] / std[i])
-                for i in range(image.shape[0])
-            ])
-            masks = padder(masks)
-        data = {
-            'image': image,
-            'spacing': sparse.spacing,
-            'modality': modality,
-            'masks': masks,
-            'mask_classes': mask_classes,
+        class_to_idx = {name: i for i, (name, _) in enumerate(annotation.mask)}
+        mask_label = []
+        for mask_class in mask_classes:
+            if (c := class_to_idx.get(mask_class)) is None:
+                mask_label.append(torch.zeros(patch.shape[1:], dtype=torch.bool))
+            else:
+                mask_label.append(patch_masks[c])
+        data_point: DataPoint = {
+            'image': patch,
+            # TODO: apply transform on grounding image
+            'grounding_image': patch,
+            'vit_patch_size': tuple(vit_patch_size.tolist()),
             'vlm_inputs': vlm_inputs,
+            'mask': mask_label,
+            'bbox': [None] * len(mask_label),
         }
-        return data
+        return data_point
 
 class InputTransformD(mt.Transform):
     def __call__(self, data: dict) -> DataPoint:
@@ -252,24 +270,26 @@ class InputTransformD(mt.Transform):
         data['masks'] = masks
         return data
 
-def gen_seg_conversation(
-    modality: str,
+def gen_anatomy_conversation(
     pos_classes: list[str],
     neg_classes: list[str],
     tokenizer: MMMMTokenizer,
-    R: np.random.RandomState | int,
+    R: np.random.RandomState,
     p_use_neg_mask: float = 1.,
-    inference: bool = False,
-):
+) -> tuple[list[ConvTurn], list[str]]:
+    """
+    Returns:
+      - conversation
+      - class names, following the order occurring in the conversation
+    """
     def _convert_list(names: Iterable[str], mask: bool):
         # FIXME: do not use special tokens explicitly in text
         if mask:
             names = map(tokenizer.wrap_name, names)
         return ', '.join(names)
 
-    if isinstance(R, int):
-        R = np.random.RandomState(R)
-
+    if len(pos_classes) == 0 and len(neg_classes) == 0:
+        return [], []
     # copy the input list because the shuffling is in-place
     pos_classes = list(pos_classes)
     R.shuffle(pos_classes)
@@ -288,9 +308,9 @@ def gen_seg_conversation(
     assert len(classes) > 0
     neg_mask = R.uniform() < p_use_neg_mask
     if neg_mask:
-        prompt = f'For the given {modality} image, output the segmentation masks for the following objects: {_convert_list(classes, False)}.'
+        prompt = f'Output the segmentation masks for the following objects: {_convert_list(classes, False)}.'
     else:
-        prompt = f'For the given {modality} image, find the following objects, and output segmentation masks for the found objects: {_convert_list(classes, False)}. '
+        prompt = f'Find the following objects, and output segmentation masks for the found objects: {_convert_list(classes, False)}. '
     if len(pos_classes) > 0:
         if len(neg_classes) > 0:
             response = f'The following objects are found: {_convert_list(pos_classes, True)}. ' + \
@@ -306,8 +326,14 @@ def gen_seg_conversation(
         else:
             response = 'None of the requested objects are found. '
             mask_classes = []
-    # mask_classes: the list of classes that with masks, following the order occurring in the conversation
-    if inference:
-        # TODO: refactor this function
-        response = ''
-    return [(prompt, response)], mask_classes
+    return [ConvTurn(prompt, response)], mask_classes
+
+def gen_anomaly_conversation(
+    pos_classes: list[str],
+    neg_classes: list[str],
+    complete: bool,
+    tokenizer: MMMMTokenizer,
+    R: np.random.RandomState | int,
+    p_use_neg_mask: float = 1.,
+):
+    return gen_anatomy_conversation(pos_classes, neg_classes, tokenizer, R, p_use_neg_mask)

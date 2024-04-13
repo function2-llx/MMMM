@@ -3,13 +3,13 @@ model:
   init_args:
     pretrained_model_name_or_path: THUDM/cogvlm-chat-hf
     vision_override:
-      patch_size: [8, 16, 16]
-      pos_embed_shape: [6, 14, 14]
+      patch_size: 16
+      pos_embed_shape: [6, 35, 35]
       pt_pos_embed_shape: [35, 35]
     lora_lang: true
     sam:
-      patch_size: [8, 16, 16]
-      pos_embed_shape: [6, 14, 14]
+      patch_size: 16
+      pos_embed_shape: [6, 35, 35]
       pt_in_channels: 1
       pt_patch_size: [4, 16, 16]
       pt_pos_embed_shape: [8, 16, 16]
