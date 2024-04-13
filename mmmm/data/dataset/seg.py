@@ -55,7 +55,7 @@ def get_seg_transform(
 ) -> Callable[[dict], DataPoint]:
     return mt.Compose([
         SamplePatch(conf, tokenizer, inference),
-        InputTransformD(),
+        # InputTransformD(),
     ])
 
 def toss(R: np.random.RandomState, prob: float):
@@ -121,7 +121,7 @@ class SamplePatch(mt.Randomizable):
             spacing_xy = min(sparse.spacing[1:]) * scale_xy
             spacing_z = sparse.spacing[0] * scale_z
             log_vit_patch_size_z = self.R.normal(
-                conf.base_vit_patch_size_z * spacing_xy / spacing_z,
+                np.log2(conf.base_vit_patch_size_z * spacing_xy / spacing_z),
                 trans_conf.log_vit_patch_size_z_std,
             )
             log_vit_patch_size_z = np.clip(
@@ -135,7 +135,7 @@ class SamplePatch(mt.Randomizable):
 
     def get_patch_start(self, maybe_patch_center: np.ndarray, effective_patch_size: np.ndarray, shape: np.ndarray):
         # TODO: add randomization
-        patch_start = maybe_patch_center - effective_patch_size >> 1
+        patch_start = maybe_patch_center - (effective_patch_size >> 1)
         patch_start = np.clip(patch_start, 0, shape - effective_patch_size)
         return patch_start
 
@@ -154,14 +154,14 @@ class SamplePatch(mt.Randomizable):
         patch_tokens, _rem = np.divmod(patch_size, vit_patch_size)
         assert np.array_equiv(_rem, 0)
         effective_patch_size = np.minimum(np.ceil(patch_size * scale).astype(np.int64), sparse.shape)
-        assert np.all(effective_patch_size)
         # 2. sample patch position
         if self.R.uniform() < trans_conf.force_fg_ratio:
             # foreground oversampling
             # TODO: handle data with bbox only
             c = self.R.randint(len(annotation.mask))
-            class_positions: torch.Tensor = torch.load(data_dir / 'class_positions.pt', mmap=True)
-            class_offsets: torch.Tensor = torch.load(data_dir / 'class_offsets.pt', mmap=True)
+            # use str for mmap, will be fixed in PyTorch 2.3: https://github.com/pytorch/pytorch/pull/116104
+            class_positions: torch.Tensor = torch.load(str(data_dir / 'class_positions.pt'), mmap=True)
+            class_offsets: torch.Tensor = torch.load(data_dir / 'class_offsets.pt')
             position_idx = self.R.randint(class_offsets[c], class_offsets[c + 1])
             maybe_patch_center = class_positions[position_idx].numpy()
             patch_start = self.get_patch_start(maybe_patch_center, effective_patch_size, sparse.shape)
@@ -175,8 +175,8 @@ class SamplePatch(mt.Randomizable):
         modality_idx = self.R.randint(len(sparse.modalities))
         modality = sparse.modalities[modality_idx]
         # TODO: handle RGB
-        images: torch.HalfTensor = torch.load(data_dir / 'images.pt', mmap=True)
-        patch = images[modality_idx, *patch_slice]
+        images: torch.HalfTensor = torch.load(str(data_dir / 'images.pt'), mmap=True)
+        patch = images[modality_idx:modality_idx + 1, *patch_slice]
         masks: torch.BoolTensor = load_pt_zst(data_dir / 'masks.pt.zst')
         patch_masks = masks[:, *patch_slice]
         # TODO: crop bbox
@@ -213,14 +213,14 @@ class SamplePatch(mt.Randomizable):
                 mt.RandRotate90D(['image', 'masks'], 0.5, spatial_axes=(1, 2)),
                 mt.AffineD(
                     ['image', 'masks'],
-                    scale_params=scale,
-                    spatial_size=patch_size,
+                    scale_params=scale.tolist(),
+                    spatial_size=patch_size.tolist(),
                 ),
             ],
             lazy=True,
         )
-        _dict_data = affine_trans({'image': patch, 'mask': patch_masks})
-        patch, patch_masks = _dict_data['image'], _dict_data['mask'].bool()
+        _dict_data = affine_trans({'image': patch, 'masks': patch_masks})
+        patch, patch_masks = _dict_data['image'], _dict_data['masks'].round().bool()
         # 6. generate conversation
         conversation = gen_modality_conversation(modality, self.R)
         mask_classes = []
@@ -255,20 +255,20 @@ class SamplePatch(mt.Randomizable):
         }
         return data_point
 
-class InputTransformD(mt.Transform):
-    def __call__(self, data: dict) -> DataPoint:
-        data = dict(data)
-        img = data['image']
-        if isinstance(img, MetaTensor):
-            img = img.as_tensor()
-        data['image'], _ = ensure_rgb(img)
-        masks = data['masks']
-        if isinstance(masks, MetaTensor):
-            masks = masks.as_tensor()
-        if masks.dtype != torch.bool:
-            masks = masks.round().bool()
-        data['masks'] = masks
-        return data
+# class InputTransformD(mt.Transform):
+#     def __call__(self, data: dict) -> DataPoint:
+#         data = dict(data)
+#         img = data['image']
+#         if isinstance(img, MetaTensor):
+#             img = img.as_tensor()
+#         data['image'], _ = ensure_rgb(img)
+#         masks = data['masks']
+#         if isinstance(masks, MetaTensor):
+#             masks = masks.as_tensor()
+#         if masks.dtype != torch.bool:
+#             masks = masks.round().bool()
+#         data['masks'] = masks
+#         return data
 
 def gen_anatomy_conversation(
     pos_classes: list[str],

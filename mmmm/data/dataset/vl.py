@@ -1,3 +1,5 @@
+from __future__ import annotations as _
+
 import json
 import random
 
@@ -10,6 +12,7 @@ from luolib.types import tuple3_t
 from monai import transforms as mt
 
 from mmmm.models import MMMMTokenizer
+import mmmm.data.dataset._dataset as _dataset
 from ..defs import DataPoint, PROCESSED_VL_DATA_ROOT, split_t
 from ..utils import prepare_vlm_inputs
 
@@ -92,16 +95,17 @@ def get_vl_data_list(name: str, split: split_t):
 class VLTransform(mt.Transform):
     def __init__(
         self,
-        base_vit_patch_size: tuple3_t[int],
+        conf: _dataset.DatasetConf,
         tokenizer: MMMMTokenizer,
         inference: bool = False
     ):
         super().__init__()
-        self.vit_patch_size: tuple3_t[int] = base_vit_patch_size
+        self.conf = conf
         self.tokenizer = tokenizer
         self.inference = inference
 
     def __call__(self, data: dict) -> DataPoint:
+        conf = self.conf
         image_path = random.choice(data['image'])
         if image_path.endswith('.pt'):
             image = torch.load(image_path)
@@ -112,14 +116,15 @@ class VLTransform(mt.Transform):
             if min(image.shape[1:]) > 512:
                 image = tvt.functional.resize(image, 512)
             image = repeat(image, 'c h w -> c 1 h w')
-            vit_patch_size = (1, *self.vit_patch_size[1:])
+            vit_patch_size = (1, conf.vit_patch_size_xy, conf.vit_patch_size_xy)
         elif len(image.shape) == 4:
             if min(image.shape[1:]) > 512:
                 slices = []
                 for i in range(image.shape[3]):
                     slices.append(tvt.functional.resize(image[:, :, :, i], 512))
                 image = torch.stack(slices, dim=3)
-            vit_patch_size = self.vit_patch_size
+            # TODO: update vit_patch_size_z
+            vit_patch_size = (conf.base_vit_patch_size_z, conf.vit_patch_size_xy, conf.vit_patch_size_xy)
         
         conversation = []
         if data.get('caption'):
@@ -136,7 +141,7 @@ class VLTransform(mt.Transform):
         vlm_inputs, conversation_text = prepare_vlm_inputs(
             conversation, self.tokenizer, self.patch_size, vit_patch_size, self.inference,
         )
-        data = {
+        data: DataPoint = {
             'image': image,
             'grounding_image': None,
             'vit_patch_size': vit_patch_size,

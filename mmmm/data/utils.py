@@ -27,7 +27,7 @@ def prepare_vlm_inputs(
     dtype = torch.long
     text_ids = []
     # the last response is empty iff inference
-    assert inference ^ (conversation[-1].response == '')
+    assert inference == (conversation[-1].response == '')
     if not inference:
         lm_targets = []
     for i, (query, answer) in enumerate(conversation):

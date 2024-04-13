@@ -55,12 +55,15 @@ class MMMMDataset(Dataset):
         ]
         self.transforms = {
             'seg': get_seg_transform(conf, tokenizer, False),
-            'vl': VLTransform(conf.base_vit_patch_size, tokenizer, False),
+            'vl': VLTransform(conf, tokenizer, False),
         }
 
     @property
     def dataset_weights(self):
-        weights = torch.tensor([dataset.weight * len(data_list) for dataset, data_list in self.data_lists.values()])
+        weights = torch.tensor([
+            dataset.weight * len(data_list)
+            for dataset, data_list in zip(self.conf.datasets, self.data_lists)
+        ])
         weights /= weights.max()
         return weights
 

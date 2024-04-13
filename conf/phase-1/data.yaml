@@ -97,8 +97,8 @@ init_args:
       scale_z: [0.5, 2]
       scale_z_p: 0.2
       max_tokens_z: 6
-      scale_xy: [0.5, 2]
-      scale_xy_p: 0.5
+      scale_xy: [0.5, 3]
+      scale_xy_p: 0.75
       num_pos: 24
       num_neg: 2
       force_fg_ratio: 0.9
