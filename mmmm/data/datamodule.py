@@ -15,10 +15,12 @@ __all__ = [
     'MMMMDataModule',
 ]
 
-from .defs import CE_IGNORE_INDEX
+from .defs import CE_IGNORE_INDEX, DataPoint
 
-def mmmm_collate_fn(batch: list[dict]):
-    list_data = {key: [] for key in ['mask_classes', 'masks']}
+def _collate_fn(batch: list[DataPoint]):
+    # maybe TODO: can we follow the type annotation of Batch?
+    list_keys = ['image', 'grounding_image', 'patch_size', 'mask', 'mask_index', 'bbox', 'bbox_index']
+    list_data = {key: [] for key in list_keys}
     batch_vlm_inputs: list[dict] = []
     for x in batch:
         for key, data in list_data.items():
@@ -91,4 +93,4 @@ class MMMMDataModule(ExpDataModuleBase):
         )
 
     def get_train_collate_fn(self):
-        return mmmm_collate_fn
+        return _collate_fn

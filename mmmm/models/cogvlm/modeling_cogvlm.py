@@ -16,6 +16,7 @@ from transformers.modeling_outputs import BaseModelOutputWithPast, CausalLMOutpu
 
 from luolib.models.param import NoWeightDecayParameter
 from luolib.models.utils import forward_gc
+from luolib.types import tuple3_t
 
 from mmmm.utils import apply_prefix, get_lora_modules_default
 from .configuration_cogvlm import CogVLMConfig
@@ -424,22 +425,24 @@ class CogVLMModel(CogVLMPreTrainedModel):
             modules_to_save.extend(c_modules_to_save)
         return target_modules, modules_to_save
 
-    def encode_images(self, image_lists: List[List[torch.Tensor]]) -> torch.Tensor:
-        images = []
-        for image_list in image_lists:
-            assert len(image_list) == 1  # only single image is supported
-            images.append(image_list[0])
-
-        images = torch.stack(images)
-        images_features = self.vision(images)
-        return images_features
+    # def encode_images(self, image_lists: List[List[torch.Tensor]]) -> torch.Tensor:
+    #     images = []
+    #     for image_list in image_lists:
+    #         assert len(image_list) == 1  # only single image is supported
+    #         images.append(image_list[0])
+    #
+    #     images = torch.stack(images)
+    #     images_features = self.vision(images)
+    #     return images_features
 
     def forward(
         self,
         input_ids: torch.LongTensor = None,
-        image: torch.Tensor | None = None,
+        *,
+        image: list[torch.Tensor] | None = None,
+        patch_size: list[tuple3_t[int]] | None = None,
         token_type_ids: Optional[torch.LongTensor] = None,
-        image_features_mask: torch.BoolTensor | None = None,
+        image_features_mask: list[torch.BoolTensor] | None = None,
         attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
         past_key_values: Optional[List[torch.FloatTensor]] = None,
@@ -450,7 +453,6 @@ class CogVLMModel(CogVLMPreTrainedModel):
         return_dict: Optional[bool] = None,
     ) -> Union[Tuple, BaseModelOutputWithPast]:
         """take care of image_encode, token_type_ids, position_ids and (attention_mask = None is fine)"""
-
         if past_key_values is not None:
             pass  # generate mode with past_key_values. the image features are already mapped
         else:
@@ -461,8 +463,9 @@ class CogVLMModel(CogVLMPreTrainedModel):
                 assert image_features_mask is not None
                 assert len(input_ids) == len(image), f"batch size mismatch: {len(input_ids)} {len(image)}"
                 inputs_embeds = self.embed_tokens(input_ids)
-                images_features = self.vision(image)
-                inputs_embeds[image_features_mask] = einops.rearrange(images_features, 'n l d -> (n l) d')
+                image_features_list: list[torch.Tensor] = self.vision(image, patch_size)
+                for i, (image_features, mask) in enumerate(zip(image_features_list, image_features_mask)):
+                    inputs_embeds[i, mask] = image_features[0]
             else:  # single-modality
                 if token_type_ids is None:
                     token_type_ids = torch.ones_like(input_ids, dtype=torch.long, device=input_ids.device) * LANGUAGE_TOKEN_TYPE
@@ -682,8 +685,10 @@ class CogVLMForCausalLM(CogVLMPreTrainedModel):
     def forward(
         self,
         input_ids: torch.LongTensor = None,
+        *,
         image_features_mask: torch.BoolTensor | None = None,
-        image: torch.Tensor = None,
+        image: list[torch.Tensor] = None,
+        patch_size: list[tuple3_t[int]] = None,
         token_type_ids: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
@@ -703,8 +708,9 @@ class CogVLMForCausalLM(CogVLMPreTrainedModel):
 
         # decoder outputs consists of (dec_features, layer_state, dec_hidden, dec_attn)
         output: BaseModelOutputWithPast = self.model(
-            input_ids=input_ids,
+            input_ids,
             image=image,
+            patch_size=patch_size,
             image_features_mask=image_features_mask,
             token_type_ids=token_type_ids,
             attention_mask=attention_mask,

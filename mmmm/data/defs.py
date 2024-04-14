@@ -118,12 +118,30 @@ def convert_to_slicer(data_dir: PathLike, output_dir: PathLike | None = None, mu
     )
 
 class DataPoint(TypedDict):
+    """
+    Attributes:
+        mask: (c, *spatial)
+        mask_index: select targets from text that corresponds to the mask
+        bbox: (c, [center, size]), or (c, 2, 3)
+    """
     image: torch.Tensor
     grounding_image: torch.Tensor | None
-    vit_patch_size: tuple3_t[int]
-    vlm_inputs: dict
-    mask: list[torch.Tensor | None]
-    bbox: list[torch.Tensor | None]
+    patch_size: tuple3_t[int]
+    vlm_inputs: dict[str, torch.Tensor]
+    mask: torch.BoolTensor
+    mask_index: torch.BoolTensor
+    bbox: torch.Tensor
+    bbox_index: torch.BoolTensor
+
+class Batch(TypedDict):
+    image: list[torch.Tensor]
+    grounding_image: list[torch.Tensor | None]
+    patch_size: list[tuple3_t[int]]
+    vlm_inputs: dict[str, torch.Tensor]
+    mask: list[torch.BoolTensor]
+    mask_index: list[torch.BoolTensor]
+    bbox: list[torch.Tensor]
+    bbox_index: list[torch.BoolTensor]
 
 split_t = Literal['train', 'val']
 CE_IGNORE_INDEX = -100

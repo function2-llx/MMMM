@@ -11,9 +11,7 @@ from torch.types import Device
 
 from luolib.types import tuple2_t
 from luolib.utils import load_pt_zst
-from luolib.utils.misc import ensure_rgb
 from monai import transforms as mt
-from monai.data import MetaTensor
 
 from mmmm.models import MMMMTokenizer
 import mmmm.data.dataset._dataset as _dataset
@@ -140,6 +138,7 @@ class SamplePatch(mt.Randomizable):
         return patch_start
 
     def _is_positive(self, patch_mask_size: int, mask_size: int):
+        """check should a mask be considered positive in a patch"""
         return 2 * patch_mask_size >= mask_size
 
     def __call__(self, data: dict) -> DataPoint:
@@ -172,11 +171,16 @@ class SamplePatch(mt.Randomizable):
             for start, size in zip(patch_start, effective_patch_size)
         ]
         # 3. crop patch & mask (without further affine transform)
-        modality_idx = self.R.randint(len(sparse.modalities))
-        modality = sparse.modalities[modality_idx]
-        # TODO: handle RGB
+        if len(sparse.modalities) == 1:
+            modality = sparse.modalities[0]
+            modality_slice = slice(None)
+        else:
+            # NOTE: currently, it is assumed that there will not be multiple RGB images
+            modality_idx = self.R.randint(len(sparse.modalities))
+            modality = sparse.modalities[modality_idx]
+            modality_slice = slice(modality_idx, modality_idx + 1)
         images: torch.HalfTensor = torch.load(str(data_dir / 'images.pt'), mmap=True)
-        patch = images[modality_idx:modality_idx + 1, *patch_slice]
+        patch = images[modality_slice, *patch_slice]
         masks: torch.BoolTensor = load_pt_zst(data_dir / 'masks.pt.zst')
         patch_masks = masks[:, *patch_slice]
         # TODO: crop bbox
@@ -216,9 +220,11 @@ class SamplePatch(mt.Randomizable):
                     scale_params=scale.tolist(),
                     spatial_size=patch_size.tolist(),
                 ),
+                mt.ToTensor(track_meta=False),
             ],
             lazy=True,
         )
+        affine_trans.set_random_state(state=self.R)
         _dict_data = affine_trans({'image': patch, 'masks': patch_masks})
         patch, patch_masks = _dict_data['image'], _dict_data['masks'].round().bool()
         # 6. generate conversation
@@ -237,23 +243,36 @@ class SamplePatch(mt.Randomizable):
         vlm_inputs, conversation_text = prepare_vlm_inputs(
             conversation, self.tokenizer, patch_tokens.prod(), self.inference,
         )
-        class_to_idx = {name: i for i, (name, _) in enumerate(annotation.mask)}
-        mask_label = []
-        for mask_class in mask_classes:
-            if (c := class_to_idx.get(mask_class)) is None:
-                mask_label.append(torch.zeros(patch.shape[1:], dtype=torch.bool))
-            else:
-                mask_label.append(patch_masks[c])
+        # TODO: handle normalization
+        if patch.shape[0] == 1:
+            # ensure RGB
+            patch = einops.repeat(patch, '1 ... -> c ...', c=3).contiguous()
         data_point: DataPoint = {
             'image': patch,
             # TODO: apply transform on grounding image
             'grounding_image': patch,
-            'vit_patch_size': tuple(vit_patch_size.tolist()),
+            'patch_size': tuple(vit_patch_size.tolist()),
             'vlm_inputs': vlm_inputs,
-            'mask': mask_label,
-            'bbox': [None] * len(mask_label),
+            'mask': self._create_mask_label(annotation.mask, mask_classes, patch, patch_masks),
+            'mask_index': torch.ones(len(mask_classes), dtype=torch.bool),
+            'bbox': torch.empty(0, 2, 3),
+            'bbox_index': torch.zeros(0, dtype=torch.bool),
         }
         return data_point
+
+    def _create_mask_label(
+        self,
+        mask: list[tuple[str, int]],
+        mask_classes: list[str],
+        patch: torch.Tensor,
+        patch_masks: torch.BoolTensor,
+    ) -> torch.BoolTensor:
+        class_to_idx = {name: i for i, (name, _) in enumerate(mask)}
+        mask_label = torch.zeros(len(mask_classes), *patch.shape[1:], dtype=torch.bool)
+        for i, mask_class in enumerate(mask_classes):
+            if (c := class_to_idx.get(mask_class)) is not None:
+                mask_label[i] = patch_masks[c]
+        return mask_label
 
 # class InputTransformD(mt.Transform):
 #     def __call__(self, data: dict) -> DataPoint:
@@ -331,7 +350,7 @@ def gen_anatomy_conversation(
 def gen_anomaly_conversation(
     pos_classes: list[str],
     neg_classes: list[str],
-    complete: bool,
+    _complete: bool,
     tokenizer: MMMMTokenizer,
     R: np.random.RandomState | int,
     p_use_neg_mask: float = 1.,

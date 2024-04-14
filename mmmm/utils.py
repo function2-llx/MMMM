@@ -51,6 +51,7 @@ def get_lora_modules_finetune_all(module: nn.Module, prefix: str):
 class ParameterWrapper(nn.Module):
     """peft does not support parameter in `modules_to_save`
     use "weight" as the name for the wrapped parameter because peft happens to support this
+    see https://github.com/huggingface/peft/issues/1492
     """
     def __init__(self, weight: nn.Parameter):
         super().__init__()

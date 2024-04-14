@@ -144,9 +144,11 @@ class VLTransform(mt.Transform):
         data: DataPoint = {
             'image': image,
             'grounding_image': None,
-            'vit_patch_size': vit_patch_size,
+            'patch_size': vit_patch_size,
             'vlm_inputs': vlm_inputs,
-            'mask': [],
-            'bbox': [],
+            'mask': torch.empty(0, *image.shape[1:], dtype=torch.bool),
+            'mask_index': torch.empty(0, dtype=torch.bool),
+            'bbox': torch.empty(0, 2, 3),
+            'bbox_index': torch.zeros(0, dtype=torch.bool),
         }
         return data

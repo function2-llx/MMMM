@@ -11,7 +11,9 @@ from transformers.modeling_outputs import CausalLMOutputWithPast
 
 from luolib.lightning import LightningModule
 from luolib.types import param3_t, tuple2_t, tuple3_t
+
 from mmmm.utils import apply_prefix, get_lora_modules_default, get_lora_modules_finetune_all
+from mmmm.data.defs import Batch
 from .cogvlm import CogVLMConfig, CogVLMForCausalLM
 from .loss import DiceFocalLoss
 from .segvol import SamArgs, build_sam_vit_3d
@@ -21,6 +23,7 @@ __all__ = [
     'MMMMForCausalLM',
     'from_pretrained',
 ]
+
 
 @dataclass
 class VisionArgs:
@@ -105,7 +108,8 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         self.val_sw = val_sw
         self.seg_hidden_layer = seg_hidden_layer
         self.model.config.lora_lang = lora_lang
-        # make the `from_pretrained` interface consistent, since `resize_token_embeddings` will create new modules without preserving original attributes
+        # make the `from_pretrained` interface consistent
+        # since `resize_token_embeddings` will create new modules without preserving original attributes
         self.eval()
         return self
 
@@ -166,9 +170,11 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
     def forward_with_sam(
         self,
         *,
-        global_enc_image: torch.FloatTensor,
-        grounding_enc_image: torch.FloatTensor,
-        masks: list[torch.BoolTensor] | None = None,
+        global_enc_image: list[torch.Tensor],
+        grounding_enc_image: list[torch.Tensor | None],
+        patch_size: list[tuple3_t[int]],
+        mask: list[torch.BoolTensor] | None = None,
+        bbox: list[torch.Tensor] | None = None,
         input_ids: torch.LongTensor,
         lm_targets: torch.LongTensor | None = None,
         **kwargs,
@@ -181,8 +187,9 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         # VLM part
         vlm_output: CausalLMOutputWithPast = CogVLMForCausalLM.forward(
             self,
-            input_ids=input_ids,
+            input_ids,
             image=global_enc_image,
+            patch_size=patch_size,
             labels=lm_targets,
             return_dict=True,
             output_hidden_states=True,
@@ -205,7 +212,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             for i in range(seg_layer_hidden_states.shape[0])
         ]
         masks_logits = self._generate_and_postprocess_masks(grounding_enc_image, seg_hidden_states)
-        mask_loss = None if masks is None else self._compute_mask_loss(masks_logits, masks)
+        mask_loss = None if mask is None else self._compute_mask_loss(masks_logits, mask)
         return MMMMOutputWithPast(
             lm_loss=vlm_output.loss,
             lm_logits=vlm_output.logits,
@@ -252,13 +259,13 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         )
         return model_inputs
 
-    def training_step(self, batch: dict, *args, **kwargs):
-        image = batch['image']
+    def training_step(self, batch: Batch, *args, **kwargs):
         vlm_inputs = batch['vlm_inputs']
         output: MMMMOutputWithPast = self.forward_with_sam(
-            global_enc_image=image,
-            grounding_enc_image=image,
-            masks=batch['masks'],
+            global_enc_image=batch['image'],
+            grounding_enc_image=batch['grounding_image'],
+            patch_size=batch['patch_size'],
+            mask=batch['mask'],
             **vlm_inputs,
             use_cache=False,
         )
