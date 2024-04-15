@@ -1,14 +1,20 @@
+from collections.abc import Sequence
+from functools import partial
+
 import einops
 import torch
 import torch.nn as nn
+from xformers import ops as xops
+from xformers.ops.fmha import BlockDiagonalMask
 
 from luolib.models import spadop
 from luolib.models.param import NoWeightDecayParameter
 from luolib.models.utils import forward_gc
 from luolib.types import param3_t, tuple3_t
-from monai.networks.blocks import TransformerBlock
+from monai.networks.blocks import SABlock, TransformerBlock
 
 from mmmm.utils import ParameterWrapper
+from mmmm.models import resample
 
 class PatchEmbeddingBlock(nn.Module):
     """
@@ -42,10 +48,7 @@ class PatchEmbeddingBlock(nn.Module):
         if hidden_size % num_heads != 0:
             raise ValueError(f"hidden size {hidden_size} should be divisible by num_heads {num_heads}.")
 
-        self.proj = spadop.InputConv3D(
-            in_channels=in_channels, out_channels=hidden_size, kernel_size=patch_size, stride=patch_size, adaptive=False,
-        )
-
+        self.proj = resample.Downsample(in_channels, hidden_size, patch_size)
         self.position_embeddings = ParameterWrapper(NoWeightDecayParameter(torch.zeros(1, hidden_size, *pos_embed_shape)))
         self.dropout = nn.Dropout(dropout_rate, inplace=True)
 
@@ -54,13 +57,22 @@ class PatchEmbeddingBlock(nn.Module):
         self.pt_patch_size = pt_patch_size
         self.pt_pos_embed_shape = pt_pos_embed_shape
 
-    def forward(self, x):
-        x = self.proj(x)
-        shape = x.shape[2:]
-        embeddings = x + spadop.resample(self.position_embeddings.weight, shape)
-        embeddings = einops.rearrange(embeddings, 'n c ... -> n (...) c').contiguous()
-        embeddings = self.dropout(embeddings)
-        return embeddings, shape
+    @property
+    def in_channels(self):
+        return self.proj.in_channels
+
+    def forward(self, image_list: list[torch.Tensor], patch_size_list: list[tuple3_t[int]]):
+        x_list, shape_list = [], []
+        for image, patch_size in zip(image_list, patch_size_list):
+            x = self.proj(image[None], patch_size)
+            shape = x.shape[2:]
+            pos_embed = spadop.resample(self.position_embeddings.weight, shape)
+            x = einops.rearrange(x + pos_embed, '1 c ... -> 1 (...) c')
+            x_list.append(x)
+            shape_list.append(shape)
+        attn_mask, x = BlockDiagonalMask.from_tensor_list(x_list)
+        x = self.dropout(x)
+        return x, shape_list, attn_mask
 
     def _load_from_state_dict(self, state_dict: dict[str, torch.Tensor], prefix: str, *args, **kwargs):
         if (proj_weight := state_dict.pop(f'{prefix}patch_embeddings.1.weight', None)) is not None and proj_weight.ndim == 2:
@@ -74,6 +86,8 @@ class PatchEmbeddingBlock(nn.Module):
                 self.proj.kernel_size,
                 scale=True,
             )
+            if self.pt_in_channels == 1 and self.in_channels != 1:
+                proj_weight = einops.repeat(proj_weight, 'co 1 ... -> co ci ...', ci=self.in_channels) / self.in_channels
             state_dict[f'{prefix}proj.weight'] = proj_weight
             state_dict[f'{prefix}proj.bias'] = state_dict.pop(f'{prefix}patch_embeddings.1.bias')
 
@@ -89,7 +103,24 @@ class PatchEmbeddingBlock(nn.Module):
         ParameterWrapper.wrap(self, state_dict, prefix)
         return super()._load_from_state_dict(state_dict, prefix, *args, **kwargs)
 
+def _patch_TransformerBlock_forward(self: TransformerBlock, x: torch.Tensor, attn_mask: BlockDiagonalMask):
+    x = x + self.attn(self.norm1(x), attn_mask)
+    x = x + self.mlp(self.norm2(x))
+    return x
+
+def _patch_SABlock_forward(self: SABlock, x: torch.Tensor, attn_mask: BlockDiagonalMask):
+    qkv = self.qkv(x)
+    qkv = einops.rearrange(qkv, 'n l (qkv h d) -> qkv n l h d', qkv=3, h=self.num_heads)
+    q, k, v = qkv[0], qkv[1], qkv[2]
+    out = xops.memory_efficient_attention(q, k, v, attn_mask, scale=self.scale)
+    out = einops.rearrange(out, 'n l h d -> n l (h d)')
+    out = self.out_proj(out)
+    out = self.drop_output(out)
+    return out
+
 class ImageEncoderViT(nn.Module):
+    blocks: Sequence[TransformerBlock] | nn.ModuleList
+
     """
     modified from monai.networks.nets.ViT
     """
@@ -104,7 +135,6 @@ class ImageEncoderViT(nn.Module):
         num_heads: int = 12,
         dropout_rate: float = 0.0,
         qkv_bias: bool = False,
-        save_attn: bool = False,
         pt_in_channels: int | None = None,
         pt_patch_size: tuple3_t[int] | None = None,
         pt_pos_embed_shape: tuple3_t[int] | None = None,
@@ -148,21 +178,31 @@ class ImageEncoderViT(nn.Module):
                     num_heads=num_heads,
                     dropout_rate=dropout_rate,
                     qkv_bias=qkv_bias,
-                    save_attn=save_attn,
+                    save_attn=False,
                 )
                 for _ in range(num_layers)
             ]
         )
         self.norm = nn.LayerNorm(hidden_size)
+        # monkey patch go brrrrr
+        for block in self.blocks:
+            block.forward = partial(_patch_TransformerBlock_forward, block)
+            block.attn.forward = partial(_patch_SABlock_forward, block.attn)
         self.gradient_checkpointing = False
         self._gradient_checkpointing_func = None
 
-    def forward(self, x):
-        x, (d, h, w) = self.patch_embedding(x)
+    def forward(self, image: list[torch.Tensor], patch_size: list[tuple3_t[int]]):
+        attn_mask: BlockDiagonalMask
+        x, shape_list, attn_mask = self.patch_embedding(image, patch_size)
         for blk in self.blocks:
             x = forward_gc(
-                blk, self.gradient_checkpointing, self._gradient_checkpointing_func, x,
+                blk,
+                self.gradient_checkpointing, self._gradient_checkpointing_func,
+                x, attn_mask,
             )
         x = self.norm(x)
-        x = einops.rearrange(x, 'n (d h w) c -> n c d h w', d=d, h=h, w=w).contiguous()
-        return x
+        x_list = list(attn_mask.split(x))
+        for i, (x, (d, h, w)) in enumerate(zip(x_list, shape_list)):
+            x = einops.rearrange(x, '1 (d h w) c -> 1 c d h w', d=d, h=h, w=w).contiguous()
+            x_list[i] = x
+        return x_list

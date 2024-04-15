@@ -84,8 +84,9 @@ class Upsample(nn.ConvTranspose3d):
     def forward(self, x: torch.Tensor, patch_size_z: int):
         kernel_size = list(self.kernel_size)
         if patch_size_z < self.patch_size_th:
-            weight = einops.reduce(self.weight, '... d h w -> ... 1 h w', 'sum')
+            weight = einops.reduce(self.weight, '... d h w -> ... 1 h w', 'mean')
             kernel_size[0] = 1
         else:
             weight = self.weight
-        return nnf.conv_transpose3d(x, weight, self.bias, kernel_size)
+        x = nnf.conv_transpose3d(x, weight, self.bias, kernel_size)
+        return x

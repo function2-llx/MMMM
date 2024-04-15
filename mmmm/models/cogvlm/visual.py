@@ -4,6 +4,7 @@ from einops import einops
 import torch
 from torch import nn
 from transformers.activations import ACT2FN
+import xformers.ops as xops
 from xformers.ops.fmha import BlockDiagonalMask
 
 from luolib.models import spadop
@@ -70,10 +71,9 @@ class Attention(nn.Module):
     def forward(self, x: torch.Tensor, attn_mask: BlockDiagonalMask) -> torch.Tensor:
         B, L, _ = x.shape
         qkv = self.query_key_value(x)
+        # n l (qkv h d) -> qkv n l h d
         qkv = qkv.reshape(B, L, 3, self.num_heads, -1).permute(2, 0, 1, 3, 4)  # 3, B, L, H, D
         q, k, v = qkv[0], qkv[1], qkv[2]
-
-        from xformers import ops as xops
         out = xops.memory_efficient_attention(
             q, k, v, attn_mask, scale=self.scale,
         )

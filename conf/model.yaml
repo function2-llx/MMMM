@@ -1,5 +1,5 @@
 model:
-  class_path: mmmm.models.mmmm.from_pretrained
+  class_path: mmmm.models.mmmm.build_finetune
   init_args:
     pretrained_model_name_or_path: THUDM/cogvlm-chat-hf
     vision_override:

@@ -16,7 +16,7 @@ from mmmm.utils import apply_prefix, get_lora_modules_default, get_lora_modules_
 from mmmm.data.defs import Batch
 from .cogvlm import CogVLMConfig, CogVLMForCausalLM
 from .loss import DiceFocalLoss
-from .segvol import SamArgs, build_sam_vit_3d
+from .segvol import Sam, SamArgs, build_sam_vit_3d
 from .tokenizer import MMMMTokenizer
 
 __all__ = [
@@ -63,9 +63,10 @@ class SlidingWindow:
 
 class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
     tokenizer: MMMMTokenizer
+    sam_model: Sam
 
     @classmethod
-    def from_pretrained(
+    def build_finetune(
         cls,
         pretrained_model_name_or_path: str | os.PathLike | None,
         *args,
@@ -79,7 +80,6 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         val_sw: SlidingWindow | None = None,
         seg_hidden_layer: Literal[0, -1] = -1,
         lora_lang: bool = False,
-        **kwargs,
     ):
         """make jsonargparse happy
         This works thanks to that AST does not support this (according to the debug information)
@@ -88,10 +88,9 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             lora_lang: whether to fine-tune language weights
         """
         self: Self = super().from_pretrained(
-            pretrained_model_name_or_path, *args,
+            pretrained_model_name_or_path,
             vision_override=vision_override,
             torch_dtype=torch_dtype,
-            **kwargs,
         )
         self.resize_token_embeddings(len(tokenizer))
         self.sam_model = build_sam_vit_3d(sam)
@@ -120,13 +119,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
     def hidden_size(self):
         return self.model.embed_tokens.embedding_dim
 
-    def __init__(
-        self,
-        vlm_config: CogVLMConfig,
-        *,
-        vision_override: VisionArgs,
-        **kwargs,
-    ):
+    def __init__(self, vlm_config: CogVLMConfig, *, vision_override: VisionArgs, **kwargs):
         # adapt vision config
         vision_config: dict = vlm_config.vision_config
         vision_config.update(vars(vision_override))
@@ -211,7 +204,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             seg_layer_hidden_states[i, seg_token_mask[i]]
             for i in range(seg_layer_hidden_states.shape[0])
         ]
-        masks_logits = self._generate_and_postprocess_masks(grounding_enc_image, seg_hidden_states)
+        masks_logits = self._generate_and_postprocess_masks(grounding_enc_image, patch_size, seg_hidden_states)
         mask_loss = None if mask is None else self._compute_mask_loss(masks_logits, mask)
         return MMMMOutputWithPast(
             lm_loss=vlm_output.loss,
@@ -333,36 +326,42 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
                 output_hidden_states=True
             )
             output_hidden_states.append(output_i.hidden_states)
-            torch.cuda.empty_cache()
+            # torch.cuda.empty_cache()
 
         output_hidden_states = torch.cat(output_hidden_states, dim=0)
         output_hidden_states = [output_hidden_states]
         return output_hidden_states
 
-    def _generate_and_postprocess_masks(self, image: torch.Tensor, seg_hidden_states: list[torch.Tensor]) -> list[torch.Tensor]:
+    def _generate_and_postprocess_masks(
+        self,
+        image_list: list[torch.Tensor],
+        patch_size_list: list[tuple3_t[int]],
+        seg_hidden_states: list[torch.Tensor],
+    ) -> list[torch.Tensor]:
         sam = self.sam_model
         # TODO: check grad vs no_grad
-        image_embeddings = sam.image_encoder(image)
+        image_embedding_list: list[torch.Tensor] = sam.image_encoder(image_list, patch_size_list)
         masks_logits_list = []
-        for i in range(image_embeddings.shape[0]):
+        for i, (image, image_embedding, patch_size) in enumerate(zip(image_list, image_embedding_list, patch_size_list)):
             if seg_hidden_states[i].shape[0] > 0:
                 text_embedding = self.seg_proj(seg_hidden_states[i])
                 sparse_embeddings, dense_embeddings = sam.prompt_encoder(
-                    image_embeddings.shape[2:], text_embedding=text_embedding,
+                    image_embedding.shape[2:], text_embedding=text_embedding,
                 )
                 sparse_embeddings = sparse_embeddings.to(text_embedding.dtype)
                 masks_logits, _ = sam.mask_decoder(
-                    image_embeddings=image_embeddings[i:i + 1],
+                    image_embeddings=image_embedding_list[i],
                     text_embedding=text_embedding,  # make SegVol happy
-                    image_pe=sam.prompt_encoder.get_dense_pe(image_embeddings.shape[2:]),
+                    image_pe=sam.prompt_encoder.get_dense_pe(image_embedding.shape[2:]),
                     sparse_prompt_embeddings=sparse_embeddings,
                     dense_prompt_embeddings=dense_embeddings,
                     multimask_output=False,
+                    patch_size_z=patch_size[0],
                 )
-                masks_logits = nnf.interpolate(masks_logits, image.shape[2:], mode='trilinear')
+                masks_logits = nnf.interpolate(masks_logits, image.shape[1:], mode='trilinear')
                 masks_logits_list.append(masks_logits[:, 0])
             else:
-                masks_logits_list.append(image.new_empty(0, *image.shape[2:]))
+                masks_logits_list.append(image.new_empty(0, *image.shape[1:]))
         return masks_logits_list
 
     def _compute_mask_loss(self, masks_logits: list[torch.Tensor], masks_label: list[torch.BoolTensor]) -> dict[str, torch.Tensor]:
@@ -416,4 +415,4 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             )
         return generated_output_ids, pred_masks
 
-from_pretrained = class_from_function(MMMMForCausalLM.from_pretrained, MMMMForCausalLM)
+build_finetune = class_from_function(MMMMForCausalLM.build_finetune, MMMMForCausalLM)

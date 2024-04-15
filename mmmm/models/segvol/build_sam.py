@@ -7,7 +7,7 @@ from luolib.types import tuple3_t
 
 from .modeling import ImageEncoderViT, MaskDecoder, PromptEncoder, Sam, TwoWayTransformer
 
-@dataclass
+@dataclass(kw_only=True)
 class SamArgs:
     pos_embed_shape: tuple3_t[int]
     pt_in_channels: int | None = None
