@@ -14,6 +14,7 @@ from torch.nn import functional as F
 from luolib.models import spadop
 from luolib.utils import channel_first, channel_last
 
+from mmmm.models import resample
 from .transformer import TwoWayTransformer
 
 class LayerNormNd(nn.LayerNorm):
@@ -39,7 +40,7 @@ class MaskDecoder(nn.Module):
         activation: Type[nn.Module] = nn.GELU,
         iou_head_depth: int = 3,
         iou_head_hidden_dim: int = 256,
-        text_sim: bool = True,
+        text_sim: bool = False,
     ) -> None:
         """
         Predicts masks given an image and prompt embeddings, using a
@@ -56,6 +57,7 @@ class MaskDecoder(nn.Module):
             mask quality
           iou_head_hidden_dim (int): the hidden dimension of the MLP
             used to predict mask quality
+          text_sim (bool): whether to use text similarity, disable by default
         """
         super().__init__()
         self.transformer_dim = transformer_dim
@@ -68,13 +70,13 @@ class MaskDecoder(nn.Module):
         self.mask_tokens = nn.Embedding(self.num_mask_tokens, transformer_dim)
 
         self.output_upscaling = nn.Sequential(
-            spadop.ConvTranspose3d(transformer_dim, transformer_dim // 4, kernel_size=2, stride=2, adaptive=False),
+            resample.Upsample(transformer_dim, transformer_dim // 4, cnt=0),
             # This is what SegVol originally used:
             #   nn.LayerNorm((transformer_dim // 4, int(self.feat_shape[0]), int(self.feat_shape[1]), int(self.feat_shape[2])))
             # Why? Perhaps they don't want to reshape the tensor here
             LayerNormNd(transformer_dim // 4),
             activation(),
-            spadop.ConvTranspose3d(transformer_dim // 4, transformer_dim // 8, kernel_size=2, stride=2, adaptive=False),
+            resample.Upsample(transformer_dim // 4, transformer_dim // 8, cnt=1),
             activation(),
         )
         self.output_hypernetworks_mlps = nn.ModuleList(
@@ -107,6 +109,7 @@ class MaskDecoder(nn.Module):
         sparse_prompt_embeddings: torch.Tensor,
         dense_prompt_embeddings: torch.Tensor,
         multimask_output: bool,
+        patch_size_z: int,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Predict masks given image and prompt embeddings.
@@ -121,6 +124,7 @@ class MaskDecoder(nn.Module):
             image_pe=image_pe,
             sparse_prompt_embeddings=sparse_prompt_embeddings,
             dense_prompt_embeddings=dense_prompt_embeddings,
+            patch_size_z=patch_size_z,
         )
 
         # Select the correct mask or masks for output
@@ -141,10 +145,10 @@ class MaskDecoder(nn.Module):
         image_pe: torch.Tensor,
         sparse_prompt_embeddings: torch.Tensor,
         dense_prompt_embeddings: torch.Tensor,
+        patch_size_z: int,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Predicts masks. See 'forward' for more details."""
         # Concatenate output tokens
-        num_queries = sparse_prompt_embeddings.shape[0]
         output_tokens = torch.cat([self.iou_token.weight, self.mask_tokens.weight], dim=0)
         output_tokens = output_tokens.unsqueeze(0).expand(sparse_prompt_embeddings.size(0), -1, -1)
         # output_tokens = einops.repeat(output_tokens, '... -> n ...', n=num_queries)
@@ -168,7 +172,14 @@ class MaskDecoder(nn.Module):
         # Upscale mask embeddings and predict masks using the mask tokens
         src = src.transpose(1, 2).view(b, c, h, w, d)
         # src = einops.rearrange(src, 'n (d h w) c -> n c d h w')
-        upscaled_embedding = self.output_upscaling(src)
+        # upscaled_embedding = self.output_upscaling(src)
+        # 对不起, 实在想不到更好看的写法了，下次还敢
+        upscaled_embedding = src
+        for i, module in enumerate(self.output_upscaling):
+            if i % 3 == 0:
+                upscaled_embedding = module(upscaled_embedding, patch_size_z=patch_size_z)
+            else:
+                upscaled_embedding = module(upscaled_embedding)
         hyper_in_list: List[torch.Tensor] = []
         for i in range(self.num_mask_tokens):
             hyper_in_list.append(self.output_hypernetworks_mlps[i](mask_tokens_out[:, i, :]))

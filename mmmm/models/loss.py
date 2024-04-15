@@ -4,18 +4,16 @@ import warnings
 from einops import einops
 import torch
 
-from monai.losses import DiceFocalLoss as _MONAIDiceFocalLoss
+from monai.losses import DiceFocalLoss as _MONAIDiceFocalLoss, DiceLoss
+from monai.networks import one_hot
+from monai.utils import LossReduction
 
 __all__ = [
     'DiceFocalLoss',
 ]
 
-from monai.networks import one_hot
-from monai.utils import LossReduction
-
-# fix: https://github.com/MIC-DKFZ/nnUNet/issues/812
-
-def patched_dice_forward(self, input: torch.Tensor, target: torch.Tensor):
+def patched_dice_forward(self: DiceLoss, input: torch.Tensor, target: torch.Tensor):
+    # fix: https://github.com/MIC-DKFZ/nnUNet/issues/812
     if self.sigmoid:
         input = torch.sigmoid(input)
 

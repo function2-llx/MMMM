@@ -88,6 +88,7 @@ def crop(images: torch.Tensor, masks: torch.BoolTensor, crop_mask: torch.BoolTen
 
 class Processor(ABC):
     """
+    TODO: check aspect ratio
     Attributes:
         name: name of the dataset to be processed by the processor
         orientation: if orientation is None, will determine it from the spacing
@@ -103,7 +104,7 @@ class Processor(ABC):
     min_aniso_ratio: float = 0.5
     mask_batch_size: int = 32
     do_normalize: bool = False
-    max_class_positions: int = 5000
+    max_class_positions: int = 10000
     cuda_cache_th: int = 15
     bbox_ignore_targets: set[str] = set()
 
@@ -290,10 +291,10 @@ class Processor(ABC):
             return []
         bbox_t = mt.BoundingRect()
         bbox = bbox_t(masks)
-        bbox = bbox.reshape((-1, 3, 2))
+        bbox = bbox.reshape((-1, 3, 2)) / np.array(masks.shape[1:])[:, None]
         center = bbox.mean(axis=2)
         shape = bbox[..., 1] - bbox[..., 0]
-        return [Sparse.BBox(tuple(c.tolist()), tuple(s.tolist())) for c, s in zip(center, shape)]
+        return [Sparse.BBox(c, s) for c, s in zip(center, shape)]
 
     def _compute_class_positions(self, masks: torch.BoolTensor) -> tuple[torch.ShortTensor, torch.LongTensor]:
         ret = []
@@ -408,7 +409,7 @@ class Processor(ABC):
         if not is_natural:
             images = images - einops.reduce(images, 'c ... -> c 1 1 1', 'min')
         # 2. resize
-        if not np.array_equiv(new_shape, images.shape[1:]):
+        if not np.array_equal(new_shape, images.shape[1:]):
             if new_shape[0] == images.shape[1] == 1:
                 # use torchvision for 2D images
                 if not np.array_equal(new_shape[1:], images.shape[2:]):

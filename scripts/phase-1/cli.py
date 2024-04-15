@@ -39,6 +39,8 @@ class CLI(LightningCLI):
         lora_config: LoraConfig = config.lora
         lora_config.target_modules, lora_config.modules_to_save = get_lora_modules_default(model)
         model.set_peft_model(get_peft_model(model, lora_config))
+        # MetaTensor is required for lazy transform orz
+        # set_track_meta(False)
 
 def main():
     CLI(

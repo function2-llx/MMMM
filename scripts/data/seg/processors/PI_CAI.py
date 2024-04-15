@@ -3,7 +3,7 @@ import torch
 
 from ._base import DefaultImageLoaderMixin, DefaultMaskLoaderMixin, MultiLabelMultiFileDataPoint, Processor
 
-class PI_CAI2022Processor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor):
+class PI_CAIProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor):
     name = 'PI-CAI'
     orientation = 'SRA'
 
@@ -18,7 +18,6 @@ class PI_CAI2022Processor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Proce
             key = label_path.name[:-len('.nii.gz')]
             patient_id, study_id = key.split('_')
             patient_dir = cytoolz.first(self.dataset_root.glob(f'picai_public_images_fold*/{patient_id}'))
-            # patient_dir = next(iter(self.dataset_root.glob(f'picai_public_images_fold*/{patient_id}')))
             ret.append(
                 MultiLabelMultiFileDataPoint(
                     key=key,

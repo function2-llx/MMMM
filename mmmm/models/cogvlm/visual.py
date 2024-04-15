@@ -4,24 +4,22 @@ from einops import einops
 import torch
 from torch import nn
 from transformers.activations import ACT2FN
+import xformers.ops as xops
+from xformers.ops.fmha import BlockDiagonalMask
 
 from luolib.models import spadop
 from luolib.models.param import NoWeightDecayParameter
 from luolib.models.utils import forward_gc
 from luolib.types import tuple2_t, tuple3_t
 
+from mmmm.models import resample
 from mmmm.utils import ParameterWrapper
 
 class PatchEmbedding(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.proj = spadop.InputConv3D(
-            config.in_channels,
-            config.hidden_size,
-            config.patch_size,
-            config.patch_size,
-            adaptive=False,
-            interpolate_2d=True,
+        self.proj = resample.Downsample(
+            config.in_channels, config.hidden_size, config.patch_size, interpolate_2d=True,
         )
         self.pos_embed_shape: tuple3_t[int] = config.pos_embed_shape
         self.pt_pos_embed_shape: tuple2_t[int] = config.pt_pos_embed_shape
@@ -44,17 +42,21 @@ class PatchEmbedding(nn.Module):
         ParameterWrapper.wrap(self, state_dict, prefix)
         return super()._load_from_state_dict(state_dict, prefix, *args, **kwargs)
 
-    def forward(self, images: "tensor(B, C, H, W)") -> "tensor(B, L, D)":
-        x = self.proj(images)
-        pos_embed = spadop.resample(self.position_embedding.weight, x.shape[2:])
-        x = torch.cat(
-            [
-                einops.repeat(self.cls_embedding.weight + self.cls_pos_embed.weight, '1 c -> n 1 c', n=x.shape[0]),
-                einops.rearrange(x + pos_embed, 'n c ... -> n (...) c'),
-            ],
-            dim=1,
-        ).contiguous()
-        return x
+    def forward(self, image_list: list[torch.Tensor], patch_size_list: list[tuple3_t[int]]) -> tuple[torch.Tensor, BlockDiagonalMask]:
+        x_list = []
+        for image, patch_size in zip(image_list, patch_size_list):
+            x = self.proj(image[None], patch_size)
+            pos_embed = spadop.resample(self.position_embedding.weight, x.shape[2:])
+            x = torch.cat(
+                [
+                    einops.repeat(self.cls_embedding.weight + self.cls_pos_embed.weight, '1 c -> 1 1 c'),
+                    einops.rearrange(x + pos_embed, '1 c ... -> 1 (...) c'),
+                ],
+                dim=1,
+            )
+            x_list.append(x)
+        attn_mask, x = BlockDiagonalMask.from_tensor_list(x_list)
+        return x, attn_mask
 
 class Attention(nn.Module):
     def __init__(self, config):
@@ -66,15 +68,14 @@ class Attention(nn.Module):
         self.dense = nn.Linear(config.hidden_size, config.hidden_size)
         self.output_dropout = torch.nn.Dropout(config.dropout_prob)
 
-    def forward(self, x: "tensor(B, L, D)") -> "tensor(B, L, D)":
+    def forward(self, x: torch.Tensor, attn_mask: BlockDiagonalMask) -> torch.Tensor:
         B, L, _ = x.shape
         qkv = self.query_key_value(x)
+        # n l (qkv h d) -> qkv n l h d
         qkv = qkv.reshape(B, L, 3, self.num_heads, -1).permute(2, 0, 1, 3, 4)  # 3, B, L, H, D
         q, k, v = qkv[0], qkv[1], qkv[2]
-
-        from xformers import ops as xops
         out = xops.memory_efficient_attention(
-            q, k, v, scale=self.scale,
+            q, k, v, attn_mask, scale=self.scale,
         )
         output = self.dense(out.view(B, L, -1))
         output = self.output_dropout(output)
@@ -110,9 +111,9 @@ class TransformerLayer(nn.Module):
         self.mlp = MLP(config)
         self.post_attention_layernorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
 
-    def forward(self, hidden_states):
+    def forward(self, hidden_states: torch.Tensor, attn_mask: BlockDiagonalMask):
         attention_input = hidden_states
-        attention_output = self.input_layernorm(self.attention(attention_input))
+        attention_output = self.input_layernorm(self.attention(attention_input, attn_mask))
         hidden_states = attention_input + attention_output
         mlp_input = hidden_states
         mlp_output = self.post_attention_layernorm(self.mlp(mlp_input))
@@ -127,13 +128,13 @@ class Transformer(nn.Module):
         self._gradient_checkpointing_func = None
         self.layers = nn.ModuleList([TransformerLayer(config) for _ in range(config.num_hidden_layers)])
 
-    def forward(self, hidden_states):
+    def forward(self, hidden_states: torch.Tensor, attn_mask: BlockDiagonalMask):
         for layer_module in self.layers:
             hidden_states = forward_gc(
                 layer_module,
                 self.gradient_checkpointing,
                 self._gradient_checkpointing_func,
-                hidden_states,
+                hidden_states, attn_mask,
             )
         return hidden_states
 
@@ -167,12 +168,17 @@ class EVA2CLIPModel(nn.Module):
         self.boi = NoWeightDecayParameter(torch.zeros(1, 1, config.hidden_size))
         self.eoi = NoWeightDecayParameter(torch.zeros(1, 1, config.hidden_size))
 
-    def forward(self, images: "tensor(B, C, H, W)") -> "tensor(B, L, D)":
-        x = self.patch_embedding(images)
-        x = self.transformer(x)
-        x = x[:, 1:]
+    def forward(self, image: list[torch.Tensor], patch_size: list[tuple3_t[int]]) -> list[torch.Tensor]:
+        attn_mask: BlockDiagonalMask
+        x, attn_mask = self.patch_embedding(image, patch_size)
+        x = self.transformer(x, attn_mask)
+        # proj as a whole for efficiency, while computation for [CLS] has no effect
         x = self.linear_proj(x)
-        boi = self.boi.expand(x.shape[0], -1, -1)
-        eoi = self.eoi.expand(x.shape[0], -1, -1)
-        x = torch.cat((boi, x, eoi), dim=1)
-        return x
+        x_list = list(attn_mask.split(x))
+        for i, x in enumerate(x_list):
+            x = x[:, 1:]
+            boi = self.boi.expand(x.shape[0], -1, -1)
+            eoi = self.eoi.expand(x.shape[0], -1, -1)
+            x = torch.cat((boi, x, eoi), dim=1)
+            x_list[i] = x
+        return x_list

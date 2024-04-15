@@ -1,4 +1,0 @@
-class_path: mmmm.models.tokenizer.build
-init_args:
-  hf_model_path: lmsys/vicuna-7b-v1.5
-  share_seg_token: false
