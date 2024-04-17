@@ -20,6 +20,7 @@ dependencies:
 - sentencepiece
 - timm
 - wandb
+- cytoolz
 - llvm-openmp<16  # https://github.com/pytorch/pytorch/issues/99625
 - pandas
 - pyarrow  # https://github.com/pandas-dev/pandas/issues/54466
@@ -28,7 +29,6 @@ dependencies:
 - nibabel
 - pydicom
 - itk
-- cytoolz
 - zstandard
 - pip
 - pip:

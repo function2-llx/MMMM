@@ -92,8 +92,8 @@ init_args:
       type: vl
     - name: VQA-RAD
       type: vl
-    max_vision_tokens: 300
     seg_trans:
+      max_vision_tokens: 300
       scale_z: [0.5, 2]
       scale_z_p: 0.2
       max_tokens_z: 6
@@ -102,5 +102,8 @@ init_args:
       num_pos: 24
       num_neg: 2
       force_fg_ratio: 0.9
+    vl_trans:
+      max_smaller_edge: 256
+      max_slices: 64
   dataloader:
     train_batch_size: 4

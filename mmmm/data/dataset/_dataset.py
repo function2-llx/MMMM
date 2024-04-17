@@ -9,7 +9,7 @@ from monai.transforms import apply_transform
 from mmmm.models import MMMMTokenizer
 from ..defs import split_t
 from .seg import SegTransConf, get_seg_data_list, get_seg_transform
-from .vl import VLTransform, get_vl_data_list
+from .vl import VLTransConf, VLTransform, get_vl_data_list
 
 @dataclass(kw_only=True)
 class DatasetSpec:
@@ -36,10 +36,10 @@ def _is_power_of_2(x: int):
 @dataclass(kw_only=True)
 class DatasetConf:
     datasets: list[DatasetSpec]
-    max_vision_tokens: int
     base_vit_patch_size_z: int = 16
     vit_patch_size_xy: int = 16
     seg_trans: SegTransConf
+    vl_trans: VLTransConf
 
     def __post_init__(self):
         assert _is_power_of_2(self.vit_patch_size_xy)

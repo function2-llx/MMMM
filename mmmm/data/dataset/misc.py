@@ -18,3 +18,6 @@ def gen_modality_conversation(modality: str, R: np.random.RandomState) -> list[C
             R.choice(RESPONSES).format(modality)
         )
     ]
+
+def toss(R: np.random.RandomState, prob: float):
+    return R.uniform() < prob
