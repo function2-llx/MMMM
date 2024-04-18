@@ -168,7 +168,8 @@ class VLTransform(mt.RandomizableTransform):
             conversation.extend([ConvTurn(qa['question'], qa['answer']) for qa in vqa])
         self.R.shuffle(conversation)
         if modality is not None and toss(self.R, 0.5):
-            conversation.insert(0, gen_modality_conversation(modality, self.R))
+            # prepend the modality conversation
+            conversation = gen_modality_conversation(modality, self.R) + conversation
         vlm_inputs, conversation_text = prepare_vlm_inputs(
             conversation,
             self.tokenizer,
