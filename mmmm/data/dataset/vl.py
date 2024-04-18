@@ -1,20 +1,21 @@
 from __future__ import annotations as _
 
+from dataclasses import dataclass
 import json
-import random
 
-from PIL import Image
-from einops import repeat
+import einops
+import numpy as np
 import torch
+from torchvision.io import ImageReadMode, read_image
 from torchvision.transforms import v2 as tvt
 
-from luolib.types import tuple3_t
-from monai import transforms as mt
-
-from mmmm.models import MMMMTokenizer
 import mmmm.data.dataset._dataset as _dataset
-from ..defs import DataPoint, PROCESSED_VL_DATA_ROOT, split_t
+from mmmm.models import MMMMTokenizer
+from monai import transforms as mt
+from monai.utils import convert_to_tensor
+from ..defs import ConvTurn, DataPoint, PROCESSED_VL_DATA_ROOT, split_t
 from ..utils import prepare_vlm_inputs
+from .misc import gen_modality_conversation, toss
 
 CAPTION_PROMPTS = [
     'Describe the following image in detail.',
@@ -92,59 +93,93 @@ def get_vl_data_list(name: str, split: split_t):
         info = json.load(f)
     return info
 
-class VLTransform(mt.Transform):
+@dataclass
+class VLTransConf:
+    max_smaller_tokens_xy: int
+    max_tokens_z: int
+
+class VLTransform(mt.RandomizableTransform):
     def __init__(
         self,
         conf: _dataset.DatasetConf,
         tokenizer: MMMMTokenizer,
-        inference: bool = False
+        inference: bool = False,
     ):
         super().__init__()
         self.conf = conf
         self.tokenizer = tokenizer
         self.inference = inference
 
+    @property
+    def max_smaller_edge(self) -> int:
+        conf = self.conf
+        return conf.vit_patch_size_xy * conf.vl_trans.max_smaller_tokens_xy
+
     def __call__(self, data: dict) -> DataPoint:
         conf = self.conf
-        image_path = random.choice(data['image'])
+        trans_conf = conf.vl_trans
+        image_idx = self.R.randint(len(data['image']))
+        image_path = data['image'][image_idx]
+        if modalities := data.get('modality'):
+            modality = modalities[image_idx]
+        else:
+            modality = None
         if image_path.endswith('.pt'):
             image = torch.load(image_path)
         else:
-            image = Image.open(image_path)
-            image = tvt.functional.to_tensor(image)
-        if len(image.shape) == 3:
-            if min(image.shape[1:]) > 512:
-                image = tvt.functional.resize(image, 512)
-            image = repeat(image, 'c h w -> c 1 h w')
-            vit_patch_size = (1, conf.vit_patch_size_xy, conf.vit_patch_size_xy)
-        elif len(image.shape) == 4:
-            if min(image.shape[1:]) > 512:
-                slices = []
-                for i in range(image.shape[3]):
-                    slices.append(tvt.functional.resize(image[:, :, :, i], 512))
-                image = torch.stack(slices, dim=3)
-            # TODO: update vit_patch_size_z
-            vit_patch_size = (conf.base_vit_patch_size_z, conf.vit_patch_size_xy, conf.vit_patch_size_xy)
-        
+            image = read_image(image_path, ImageReadMode.RGB)
+            image = einops.rearrange(image, 'c h w -> c 1 h w')
+        image = tvt.functional.to_dtype(image, scale=True)
+        smaller_edge = min(image.shape[2:])
+        if image.shape[1] == 1:
+            if smaller_edge > self.max_smaller_edge:
+                # this might be redundant, but let's be careful
+                image = einops.rearrange(image, 'c 1 h w -> c h w')
+                image = tvt.functional.resize(image, self.max_smaller_edge)
+                image = einops.rearrange(image, 'c h w -> c 1 h w')
+            patch_size = (1, conf.vit_patch_size_xy, conf.vit_patch_size_xy)
+        else:
+            # TODO: adjust patch_size_z according to image
+            patch_size_z = conf.base_vit_patch_size_z
+            max_slices = patch_size_z * trans_conf.max_tokens_z
+            new_shape = [min(image.shape[1], max_slices), *image.shape[2:]]
+            if smaller_edge > self.max_smaller_edge:
+                for i in (1, 2):
+                    new_shape[i] = round(new_shape[i] * self.max_smaller_edge / smaller_edge)
+            if tuple(new_shape) != image.shape[1:]:
+                image = mt.Resize(new_shape)(image)
+            patch_size = (patch_size_z, conf.vit_patch_size_xy, conf.vit_patch_size_xy)
+        image = mt.DivisiblePad(patch_size)(image)
+        image = convert_to_tensor(image)
+        # TODO: intensity normalization
+        referring: str = self.R.choice(COMPLETE_REFERRINGS)
         conversation = []
-        if data.get('caption'):
-            conversation.append((random.choice(CAPTION_PROMPTS), data['caption']))
-        if data.get('findings') and data.get('impression'):
-            referring = random.choice(COMPLETE_REFERRINGS)
-            if data.get('modality'):
-                referring = random.choice(referring, data['modality'] + random.choice(PARTIAL_REFERRINGS))
-            conversation.append((random.choice(REPORT_PROMPTS).format(random.choice(referring)), 'Findings: ' + data['findings'] + ' Impression: ' + data['impression']))
-        if data.get('vqa'):
-            conversation.extend([(qa['question'], qa['answer']) for qa in data['vqa']])
-
-        random.shuffle(conversation)
+        if caption := data.get('caption'):
+            conversation.append(ConvTurn(self.R.choice(CAPTION_PROMPTS), caption))
+        if (findings := data.get('findings')) and (impression := data.get('impression')):
+            # TODO: handle data with findings only
+            conversation.append(
+                ConvTurn(
+                    self.R.choice(REPORT_PROMPTS).format(referring),
+                    f"Findings: {findings}\nImpression: {impression}",
+                ),
+            )
+        if vqa := data.get('vqa'):
+            conversation.extend([ConvTurn(qa['question'], qa['answer']) for qa in vqa])
+        self.R.shuffle(conversation)
+        if modality is not None and toss(self.R, 0.5):
+            # prepend the modality conversation
+            conversation = gen_modality_conversation(modality, self.R) + conversation
         vlm_inputs, conversation_text = prepare_vlm_inputs(
-            conversation, self.tokenizer, self.patch_size, vit_patch_size, self.inference,
+            conversation,
+            self.tokenizer,
+            (np.array(image.shape[1:]) // patch_size).prod().item(),
+            self.inference,
         )
         data: DataPoint = {
             'image': image,
             'grounding_image': None,
-            'patch_size': vit_patch_size,
+            'patch_size': patch_size,
             'vlm_inputs': vlm_inputs,
             'mask': torch.empty(0, *image.shape[1:], dtype=torch.bool),
             'mask_index': torch.empty(0, dtype=torch.bool),

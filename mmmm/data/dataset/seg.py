@@ -17,7 +17,7 @@ from mmmm.models import MMMMTokenizer
 import mmmm.data.dataset._dataset as _dataset
 from ..defs import ConvTurn, DataPoint, PROCESSED_SEG_DATA_ROOT, Sparse, split_t
 from ..utils import prepare_vlm_inputs
-from .modality import gen_modality_conversation
+from .misc import gen_modality_conversation, toss
 
 def get_seg_data_list(name: str, split: split_t):
     if split != 'train':
@@ -35,6 +35,7 @@ def get_seg_data_list(name: str, split: split_t):
 
 @dataclass(kw_only=True)
 class SegTransConf:
+    max_vision_tokens: int
     scale_z: tuple2_t[float]
     scale_z_p: float
     max_tokens_z: int
@@ -55,9 +56,6 @@ def get_seg_transform(
         SamplePatch(conf, tokenizer, inference),
         # InputTransformD(),
     ])
-
-def toss(R: np.random.RandomState, prob: float):
-    return R.uniform() < prob
 
 class SamplePatch(mt.Randomizable):
     def __init__(
@@ -82,7 +80,7 @@ class SamplePatch(mt.Randomizable):
         else:
             # TODO: maybe there's a better approximation for tokens_z
             tokens_z = self.R.randint(1, trans_conf.max_tokens_z + 1)
-        tokens_xy = int((conf.max_vision_tokens / tokens_z) ** 0.5)
+        tokens_xy = int((trans_conf.max_vision_tokens / tokens_z) ** 0.5)
         patch_size_xy = tokens_xy * conf.vit_patch_size_xy
         # 2. sample scale_xy
         if (max_scale_xy := max(sparse.shape[1:]) / patch_size_xy) <= trans_conf.scale_xy[0]:
