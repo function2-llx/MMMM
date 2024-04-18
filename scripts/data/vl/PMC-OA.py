@@ -1,31 +1,49 @@
-import json
-import os
-import shutil
-from tqdm import tqdm
+import orjson
 
+import numpy as np
+from torchvision.io import read_image
+
+from luolib.utils import process_map
 from mmmm.data.defs import ORIGIN_VL_DATA_ROOT, PROCESSED_VL_DATA_ROOT
 
-def process_text(jsonl_file: str, out_file: str):
-    with open(ORIGIN_VL_DATA_ROOT / 'pmc_oa' / jsonl_file, 'r') as f:
-        lines = f.readlines()
-        data = [json.loads(line) for line in lines]
-    
-    data = [
-        {
-            'image': [str(ORIGIN_VL_DATA_ROOT / 'caption_T060_filtered_top4_sep_v0_subfigures' / item['image'])],
-            'caption': item['caption'],
-        }
-        for item in data
-    ]
+check_image: bool = True
 
-    with open(PROCESSED_VL_DATA_ROOT / 'PMC-OA' / out_file, 'w') as f:
-        json.dump(data, f, indent=4, ensure_ascii=False)
+def process_item(json_str: str):
+    item: dict = orjson.loads(json_str)
+    path = ORIGIN_VL_DATA_ROOT / 'pmc_oa/caption_T060_filtered_top4_sep_v0_subfigures' / item['image']
+    if check_image:
+        try:
+            read_image(str(path))
+        except:
+            print(item['image'])
+            return None
+    caption: str = item['caption']
+    caption = caption.strip()
+    if len(caption) < 10:
+        return None
+    if caption[0].islower():
+        caption = caption[0].upper() + caption[1:]
+    if caption[-1] != '.':
+        caption += '.'
+    return {
+        'image': str(path),
+        'caption': caption,
+    }
 
 def process():
     (PROCESSED_VL_DATA_ROOT / 'PMC-OA').mkdir(parents=True, exist_ok=True)
-    process_text('train.jsonl', 'train.json')
-    process_text('valid.jsonl', 'validate.json')
-    process_text('test.jsonl', 'test.json')
+    item_strs = (ORIGIN_VL_DATA_ROOT / 'pmc_oa' / 'pmc_oa.jsonl').read_text().strip().splitlines()
+    data = process_map(process_item, item_strs, max_workers=16, chunksize=16, dynamic_ncols=True)
+    data = [*filter(lambda x: x is not None, data)]
+    np.random.RandomState(16358).shuffle(data)
+    num_val = 500
+    train_data, val_data = data[:-num_val], data[-num_val:]
+    (PROCESSED_VL_DATA_ROOT / 'PMC-OA' / 'train.json').write_bytes(
+        orjson.dumps(train_data, option=orjson.OPT_INDENT_2),
+    )
+    (PROCESSED_VL_DATA_ROOT / 'PMC-OA' / 'validate.json').write_bytes(
+        orjson.dumps(val_data, option=orjson.OPT_INDENT_2),
+    )
 
 if __name__ == '__main__':
     process()
