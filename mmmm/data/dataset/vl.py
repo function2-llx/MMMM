@@ -6,7 +6,7 @@ import json
 import einops
 import numpy as np
 import torch
-from torchvision.io import read_image
+from torchvision.io import ImageReadMode, read_image
 from torchvision.transforms import v2 as tvt
 
 import mmmm.data.dataset._dataset as _dataset
@@ -127,7 +127,7 @@ class VLTransform(mt.RandomizableTransform):
         if image_path.endswith('.pt'):
             image = torch.load(image_path)
         else:
-            image = read_image(image_path)
+            image = read_image(image_path, ImageReadMode.RGB)
             image = einops.rearrange(image, 'c h w -> c 1 h w')
         image = tvt.functional.to_dtype(image, scale=True)
         smaller_edge = min(image.shape[2:])
