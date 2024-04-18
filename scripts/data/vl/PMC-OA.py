@@ -26,7 +26,7 @@ def process_item(json_str: str):
     if caption[-1] != '.':
         caption += '.'
     return {
-        'image': str(path),
+        'image': [str(path)],
         'caption': caption,
     }
 
