@@ -1,12 +1,14 @@
 from datetime import datetime
 import json
 from pathlib import Path
-import random
 
 import cytoolz
 import einops
+import numpy as np
+import orjson
 import torch
 from torchvision.io import read_image
+from tqdm import tqdm
 
 from luolib.utils import file_append, process_map
 
@@ -22,14 +24,16 @@ def convert_path(radfm_path: str) -> Path:
         '/mnt/petrelfs/share_data/zhangxiaoman/DATA/Radio_VQA/processed_file/npys',
         str(PROCESSED_VL_DATA_ROOT / 'Radiopaedia' / 'images'),
     )
-    return Path(f'{path}.pt')
+    for suffix in ['.nii.gz', '.npy']:
+        if path.endswith(suffix):
+            path = path[:-len(suffix)] + '.pt'
+    return Path(path)
 
 def process_text(json_file: str, train_val: bool = False):
     with open(ORIGIN_VL_DATA_ROOT / 'RadFM_data_csv' / 'data_csv' / json_file) as f:
         data = json.load(f)
-        
     processed_data = []
-    for item in data:
+    for item in tqdm(data):
         valid_idx = [
             i for i, path in enumerate(item['image_path'])
             if convert_path(path).exists()
@@ -39,7 +43,7 @@ def process_text(json_file: str, train_val: bool = False):
         if isinstance(item['finding'], str) and item['finding'].strip():
             processed_data.append(
                 {
-                    'image': [convert_path(item['image_path'][i]) for i in valid_idx],
+                    'image': [str(convert_path(item['image_path'][i])) for i in valid_idx],
                     'modality': [item['image_modality'][i] for i in valid_idx],
                     'findings': item['image_caption'],
                     # 'impression': item['impression'],
@@ -48,17 +52,20 @@ def process_text(json_file: str, train_val: bool = False):
             )
 
     if train_val:
-        random.shuffle(processed_data)
-        split = int(len(data) * 0.99)
-        train_data = processed_data[:split]
-        val_data = processed_data[split:]
-        with open(PROCESSED_VL_DATA_ROOT / 'Radiopaedia' / 'train.json', 'w') as f:
-            json.dump(train_data, f, indent=4, ensure_ascii=False)
-        with open(PROCESSED_VL_DATA_ROOT / 'Radiopaedia' / 'validate.json', 'w') as f:
-            json.dump(val_data, f, indent=4, ensure_ascii=False)
+        np.random.RandomState(233).shuffle(processed_data)
+        num_val = 250
+        train_data = processed_data[:-num_val]
+        val_data = processed_data[-num_val:]
+        (PROCESSED_VL_DATA_ROOT / 'Radiopaedia' / 'train.json').write_bytes(
+            orjson.dumps(train_data, option=orjson.OPT_INDENT_2),
+        )
+        (PROCESSED_VL_DATA_ROOT / 'Radiopaedia' / 'validate.json').write_bytes(
+            orjson.dumps(val_data, option=orjson.OPT_INDENT_2)
+        )
     else:
-        with open(PROCESSED_VL_DATA_ROOT / 'Radiopaedia' / 'test.json', 'w') as f:
-            json.dump(processed_data, f, indent=4)
+        (PROCESSED_VL_DATA_ROOT / 'Radiopaedia' / 'test.json').write_bytes(
+            orjson.dumps(processed_data, option=orjson.OPT_INDENT_2)
+        )
 
 overwrite: bool = False
 
@@ -126,9 +133,8 @@ def process_images():
     process_map(process_image, image_dirs, max_workers=8, chunksize=1)
 
 def process():
-    random.seed(42)
     (PROCESSED_VL_DATA_ROOT / 'Radiopaedia').mkdir(parents=True, exist_ok=True)
-    process_images()
+    # process_images()
     process_text('radiology_train.json', train_val=True)
     process_text('radiology_test.json', train_val=False)
 
