@@ -10,7 +10,7 @@ import torch
 from torchvision.io import read_image
 from tqdm import tqdm
 
-from luolib.utils import file_append, process_map
+from luolib.utils import SavedSet, file_append, process_map
 
 from mmmm.data.defs import ORIGIN_VL_DATA_ROOT, PROCESSED_VL_DATA_ROOT, PROCESSED_DATA_ROOT
 
@@ -18,6 +18,9 @@ ORIGIN_RP_DATA_ROOT = ORIGIN_VL_DATA_ROOT / 'RP3D-Image' / 'raw_images'
 now = datetime.now()
 log_path = PROCESSED_DATA_ROOT / '.logs' / 'vl' / now.strftime("%Y-%m-%d") / f'{now.strftime("%H:%M:%S")}.log'
 log_path.parent.mkdir(exist_ok=True, parents=True)
+
+output_root = PROCESSED_VL_DATA_ROOT / 'Radiopaedia'
+bad = SavedSet(output_root / 'bad.txt')
 
 def convert_path(radfm_path: str) -> Path:
     path = radfm_path.replace(
@@ -74,6 +77,8 @@ def info(message: str):
 
 def process_image(image_dir: Path):
     key = str(image_dir.relative_to(ORIGIN_RP_DATA_ROOT))
+    if key in bad:
+        return
     save_path = PROCESSED_VL_DATA_ROOT / 'Radiopaedia' / 'images' / f'{key}.pt'
     if save_path.exists() and not overwrite:
         return
@@ -81,6 +86,7 @@ def process_image(image_dir: Path):
     slice_paths = sorted(image_dir.iterdir(), key=lambda x: int(x.stem))
     if int(slice_paths[0].stem) != 1 or int(slice_paths[-1].stem) != len(slice_paths):
         info(f'inconsistent slice numbers: {key}')
+        bad.save(key)
         return
     has_rgb = False
     for slice_path in slice_paths:
@@ -88,6 +94,7 @@ def process_image(image_dir: Path):
             image_array = read_image(str(slice_path))
         except:
             info(f'image contains bad slice: {key}/{slice_path.name}')
+            bad.save(key)
             break
         assert 1 <= image_array.shape[0] <= 4, slice_path
         if image_array.shape[0] == 2 or image_array.shape[0] == 4:
@@ -98,6 +105,7 @@ def process_image(image_dir: Path):
         image_list.append(image_array)
         if image_array.shape[1:] != image_list[0].shape[1:]:
             info(f'inconsistent slice shapes: {key}')
+            bad.save(key)
             break
     else:
         if has_rgb:
@@ -116,7 +124,6 @@ def list_image_dirs(case_dir: Path):
     )
 
 def process_images():
-    output_root = PROCESSED_VL_DATA_ROOT / 'Radiopaedia'
     (output_root / 'images').mkdir(parents=True, exist_ok=True)
     if (image_dirs_path := output_root / 'image_dirs.txt').exists():
         image_dirs = image_dirs_path.read_text().splitlines()
@@ -130,11 +137,11 @@ def process_images():
         image_dirs = sorted(cytoolz.concat(image_dirs_list))
         image_dirs_path.write_text('\n'.join(map(str, image_dirs)))
 
-    process_map(process_image, image_dirs, max_workers=8, chunksize=1)
+    process_map(process_image, image_dirs, max_workers=16, chunksize=16)
 
 def process():
     (PROCESSED_VL_DATA_ROOT / 'Radiopaedia').mkdir(parents=True, exist_ok=True)
-    # process_images()
+    process_images()
     process_text('radiology_train.json', train_val=True)
     process_text('radiology_test.json', train_val=False)
 

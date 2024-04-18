@@ -12,6 +12,7 @@ from torchvision.transforms import v2 as tvt
 import mmmm.data.dataset._dataset as _dataset
 from mmmm.models import MMMMTokenizer
 from monai import transforms as mt
+from monai.utils import convert_to_tensor
 from ..defs import ConvTurn, DataPoint, PROCESSED_VL_DATA_ROOT, split_t
 from ..utils import prepare_vlm_inputs
 from .misc import gen_modality_conversation, toss
@@ -129,8 +130,9 @@ class VLTransform(mt.RandomizableTransform):
             image = read_image(image_path)
             image = einops.rearrange(image, 'c h w -> c 1 h w')
         image = tvt.functional.to_dtype(image, scale=True)
+        smaller_edge = min(image.shape[2:])
         if image.shape[1] == 1:
-            if min(image.shape[2:]) > conf.vl_trans.max_smaller_tokens_xy * conf.vit_patch_size_xy:
+            if smaller_edge > self.max_smaller_edge:
                 # this might be redundant, but let's be careful
                 image = einops.rearrange(image, 'c 1 h w -> c h w')
                 image = tvt.functional.resize(image, self.max_smaller_edge)
@@ -141,13 +143,14 @@ class VLTransform(mt.RandomizableTransform):
             patch_size_z = conf.base_vit_patch_size_z
             max_slices = patch_size_z * trans_conf.max_tokens_z
             new_shape = [min(image.shape[1], max_slices), *image.shape[2:]]
-            if min(image.shape[2:]) > self.max_smaller_edge:
-                for i in range(1, 3):
-                    new_shape[i] = round(new_shape[i] * self.max_smaller_edge / min(image.shape[2:]))
+            if smaller_edge > self.max_smaller_edge:
+                for i in (1, 2):
+                    new_shape[i] = round(new_shape[i] * self.max_smaller_edge / smaller_edge)
             if tuple(new_shape) != image.shape[1:]:
                 image = mt.Resize(new_shape)(image)
-            patch_size = (conf.base_vit_patch_size_z, conf.vit_patch_size_xy, conf.vit_patch_size_xy)
+            patch_size = (patch_size_z, conf.vit_patch_size_xy, conf.vit_patch_size_xy)
         image = mt.DivisiblePad(patch_size)(image)
+        image = convert_to_tensor(image)
         # TODO: intensity normalization
         referring: str = self.R.choice(COMPLETE_REFERRINGS)
         conversation = []
