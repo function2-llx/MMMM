@@ -166,8 +166,6 @@ class VLTransform(mt.RandomizableTransform):
             )
         if vqa := data.get('vqa'):
             conversation.extend([ConvTurn(qa['question'], qa['answer']) for qa in vqa])
-        if modality is not None and toss(self.R, 0.5):
-            conversation.extend(gen_modality_conversation(modality, self.R))
         self.R.shuffle(conversation)
         if modality is not None and toss(self.R, 0.5):
             conversation.insert(0, gen_modality_conversation(modality, self.R))
