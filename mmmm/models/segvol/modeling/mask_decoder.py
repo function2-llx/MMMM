@@ -185,8 +185,8 @@ class MaskDecoder(nn.Module):
             hyper_in_list.append(self.output_hypernetworks_mlps[i](mask_tokens_out[:, i, :]))
         hyper_in = torch.stack(hyper_in_list, dim=1)
         b, c, h, w, d = upscaled_embedding.shape
-        masks = (hyper_in @ upscaled_embedding.view(b, c, h * w * d)).view(b, -1, h, w, d)
-        # masks = einops.einsum(hyper_in, upscaled_embedding, 'n m c, n c ... -> n m ...')
+        # masks = (hyper_in @ upscaled_embedding.view(b, c, h * w * d)).view(b, -1, h, w, d)
+        masks = einops.einsum(hyper_in, upscaled_embedding, 'n m c, n c ... -> n m ...')
 
         if self.text_sim and text_embedding is not None:
             text_embedding_down = self.txt_align_upscaled_embedding(text_embedding).unsqueeze(dim=1)

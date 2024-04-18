@@ -64,6 +64,7 @@ class SlidingWindow:
 class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
     tokenizer: MMMMTokenizer
     sam_model: Sam
+    mask_loss: DiceFocalLoss | None
 
     @classmethod
     def build_finetune(
@@ -343,48 +344,35 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         image_embedding_list: list[torch.Tensor] = sam.image_encoder(image_list, patch_size_list)
         masks_logits_list = []
         for i, (image, image_embedding, patch_size) in enumerate(zip(image_list, image_embedding_list, patch_size_list)):
-            if seg_hidden_states[i].shape[0] > 0:
-                text_embedding = self.seg_proj(seg_hidden_states[i])
-                sparse_embeddings, dense_embeddings = sam.prompt_encoder(
-                    image_embedding.shape[2:], text_embedding=text_embedding,
-                )
-                sparse_embeddings = sparse_embeddings.to(text_embedding.dtype)
-                masks_logits, _ = sam.mask_decoder(
-                    image_embeddings=image_embedding_list[i],
-                    text_embedding=text_embedding,  # make SegVol happy
-                    image_pe=sam.prompt_encoder.get_dense_pe(image_embedding.shape[2:]),
-                    sparse_prompt_embeddings=sparse_embeddings,
-                    dense_prompt_embeddings=dense_embeddings,
-                    multimask_output=False,
-                    patch_size_z=patch_size[0],
-                )
-                masks_logits = nnf.interpolate(masks_logits, image.shape[1:], mode='trilinear')
-                masks_logits_list.append(masks_logits[:, 0])
-            else:
-                masks_logits_list.append(image.new_empty(0, *image.shape[1:]))
+            text_embedding = self.seg_proj(seg_hidden_states[i])
+            sparse_embeddings, dense_embeddings = sam.prompt_encoder(
+                image_embedding.shape[2:], text_embedding=text_embedding,
+            )
+            sparse_embeddings = sparse_embeddings.to(text_embedding.dtype)
+            masks_logits, _ = sam.mask_decoder(
+                image_embeddings=image_embedding_list[i],
+                text_embedding=text_embedding,  # make SegVol happy
+                image_pe=sam.prompt_encoder.get_dense_pe(image_embedding.shape[2:]),
+                sparse_prompt_embeddings=sparse_embeddings,
+                dense_prompt_embeddings=dense_embeddings,
+                multimask_output=False,
+                patch_size_z=patch_size[0],
+            )
+            masks_logits = nnf.interpolate(masks_logits, image.shape[1:], mode='trilinear')
+            masks_logits_list.append(masks_logits[:, 0])
         return masks_logits_list
 
     def _compute_mask_loss(self, masks_logits: list[torch.Tensor], masks_label: list[torch.BoolTensor]) -> dict[str, torch.Tensor]:
         assert (batch_size := len(masks_label)) == len(masks_logits)
         mask_loss_list: dict[str, list[torch.Tensor]] = {}
-        dice_pos_loss = []
         for i in range(batch_size):
             sample_mask_loss: dict = self.mask_loss(masks_logits[i][None], masks_label[i][None])
-            sample_mask_loss.pop('dice-pos-batch')
-            sample_dice_pos_loss: torch.Tensor = sample_mask_loss.pop('dice-pos')
-            dice_pos_loss.append(sample_dice_pos_loss[sample_dice_pos_loss.isfinite()])
             for k, v in sample_mask_loss.items():
                 mask_loss_list.setdefault(k, []).append(v)
-        mask_loss = {k: torch.cat(v).mean() for k, v in mask_loss_list.items()}
-        # gather dice pos loss across devices
-        dice_pos_loss = torch.cat(dice_pos_loss)
-        weight = dice_pos_loss.numel()
-        loss_weight = torch.tensor(
-            [0 if weight == 0 else dice_pos_loss.mean(), weight], dtype=dice_pos_loss.dtype,
-        )
-        loss_weight = self.all_gather(loss_weight)
-        dice_pos_loss, weight = loss_weight[:, 0], loss_weight[:, 1]
-        mask_loss['dice-pos'] = torch.dot(dice_pos_loss, weight) / weight.sum().clip(min=1e-8)
+        mask_loss = {
+            k: torch.cat(v).nan_to_num().mean()
+            for k, v in mask_loss_list.items() if len(v) > 0
+        }
         return mask_loss
 
     def evaluate(self, input_ids, token_type_ids, global_enc_images, grounding_enc_images, resize_list, orig_sizes, max_tokens_new=32):

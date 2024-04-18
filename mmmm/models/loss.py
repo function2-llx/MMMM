@@ -110,20 +110,11 @@ class DiceFocalLoss(_MONAIDiceFocalLoss):
     def forward(self, input: torch.Tensor, target: torch.Tensor) -> dict[str, torch.Tensor]:
         input = input.float()
         dice_loss = self.dice(input, target)
-        # this won't take long, right?
-        pos_class_mask = einops.reduce(target, 'n c ... -> n c', 'any')
-        # FIXME: not pos_class_mask.any() ??
-        dice_pos_batch_loss = dice_loss[pos_class_mask].mean()
-        dice_pos_loss = dice_loss.new_empty(dice_loss.shape[1])
-        for c in range(input.shape[1]):
-            dice_pos_loss[c] = dice_loss[pos_class_mask[:, c], c].mean()
         dice_loss = einops.reduce(dice_loss, 'n c ... -> c', 'mean')
         focal_loss = einops.reduce(self.focal(input, target), 'n c ... -> c', 'mean')
         total_loss: torch.Tensor = self.lambda_dice * dice_loss + self.lambda_focal * focal_loss
         return {
             'dice': dice_loss,
-            'dice-pos': dice_pos_loss,
-            'dice-pos-batch': dice_pos_batch_loss,
             'focal': focal_loss,
             'total': total_loss,
         }

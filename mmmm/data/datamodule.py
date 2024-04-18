@@ -56,6 +56,9 @@ class MMMMRandomSampler(Sampler):
             sub_idx = torch.randint(len(self.dataset.data_lists[dataset_idx]), size=(1, ), generator=self.G)
             yield dataset_idx.item(), sub_idx.item()
 
+    def __len__(self):
+        return self.num_samples
+
 class MMMMDataModule(ExpDataModuleBase):
     def __init__(
         self,
