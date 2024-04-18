@@ -1,3 +1,5 @@
+from __future__ import annotations as _
+
 from dataclasses import dataclass
 import json
 
