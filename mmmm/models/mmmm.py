@@ -21,9 +21,8 @@ from .tokenizer import MMMMTokenizer
 
 __all__ = [
     'MMMMForCausalLM',
-    'from_pretrained',
+    'build_finetune',
 ]
-
 
 @dataclass
 class VisionArgs:
@@ -43,7 +42,7 @@ class MMMMOutputWithPast:
     attentions: tuple[torch.Tensor, ...] | None = None
 
     masks_logits: list[torch.Tensor]
-    mask_loss: dict[str, torch.Tensor] | None
+    mask_loss: torch.Tensor | None
 
 @dataclass
 class SlidingWindow:
@@ -172,7 +171,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         input_ids: torch.LongTensor,
         lm_targets: torch.LongTensor | None = None,
         **kwargs,
-    ) -> MMMMOutputWithPast:
+    ) -> tuple[MMMMOutputWithPast, dict]:
         """
         TODO:
          - make it compatible with HF interface, e.g., adapt return_dict
@@ -206,8 +205,12 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             for i in range(seg_layer_hidden_states.shape[0])
         ]
         masks_logits = self._generate_and_postprocess_masks(grounding_enc_image, patch_size, seg_hidden_states)
-        mask_loss = None if mask is None else self._compute_mask_loss(masks_logits, mask)
-        return MMMMOutputWithPast(
+        if mask is None:
+            mask_loss = None
+            sam_log_dict = {}
+        else:
+            mask_loss, sam_log_dict = self._compute_mask_loss(masks_logits, mask)
+        output = MMMMOutputWithPast(
             lm_loss=vlm_output.loss,
             lm_logits=vlm_output.logits,
             past_key_values=vlm_output.past_key_values,
@@ -216,6 +219,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             masks_logits=masks_logits,
             mask_loss=mask_loss,
         )
+        return output, sam_log_dict
 
     def prepare_inputs_for_generation(
         self,
@@ -255,7 +259,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
 
     def training_step(self, batch: Batch, *args, **kwargs):
         vlm_inputs = batch['vlm_inputs']
-        output: MMMMOutputWithPast = self.forward_with_sam(
+        output, sam_log_dict = self.forward_with_sam(
             global_enc_image=batch['image'],
             grounding_enc_image=batch['grounding_image'],
             patch_size=batch['patch_size'],
@@ -263,7 +267,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             **vlm_inputs,
             use_cache=False,
         )
-        loss = output.lm_loss * self.lm_loss_weight + output.mask_loss['total'] * self.mask_loss_weight
+        loss = output.lm_loss * self.lm_loss_weight + output.mask_loss * self.mask_loss_weight
         # make some custom log
         lm_targets = vlm_inputs['lm_targets']
         lm_loss_dict = {
@@ -278,9 +282,9 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             {
                 'train/lm_loss': output.lm_loss,
                 **lm_loss_dict,
-                'train/mask_loss': output.mask_loss['total'],
+                'train/mask_loss': output.mask_loss,
                 'train/loss': loss,
-                **{f'train/{k}_loss': v for k, v in output.mask_loss.items() if k != 'total'},
+                **{f'train/{k}_loss': v for k, v in sam_log_dict},
             },
             sync_dist=True,
         )
@@ -362,18 +366,20 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             masks_logits_list.append(masks_logits[:, 0])
         return masks_logits_list
 
-    def _compute_mask_loss(self, masks_logits: list[torch.Tensor], masks_label: list[torch.BoolTensor]) -> dict[str, torch.Tensor]:
+    def _compute_mask_loss(self, masks_logits: list[torch.Tensor], masks_label: list[torch.BoolTensor]):
         assert (batch_size := len(masks_label)) == len(masks_logits)
         mask_loss_list: dict[str, list[torch.Tensor]] = {}
         for i in range(batch_size):
             sample_mask_loss: dict = self.mask_loss(masks_logits[i][None], masks_label[i][None])
             for k, v in sample_mask_loss.items():
                 mask_loss_list.setdefault(k, []).append(v)
-        mask_loss = {
-            k: torch.cat(v).nan_to_num().mean()
-            for k, v in mask_loss_list.items() if len(v) > 0
+        # loss for optimization
+        loss = torch.stack(mask_loss_list['total']).nan_to_num().mean()
+        log_dict = {
+            k: v for k, _list in mask_loss_list.items()
+            if not torch.isnan(v := torch.stack(_list).nanmean())
         }
-        return mask_loss
+        return loss, log_dict
 
     def evaluate(self, input_ids, token_type_ids, global_enc_images, grounding_enc_images, resize_list, orig_sizes, max_tokens_new=32):
         with torch.no_grad():

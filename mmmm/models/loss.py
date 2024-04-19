@@ -1,7 +1,6 @@
 from functools import partial
 import warnings
 
-from einops import einops
 import torch
 
 from monai.losses import DiceFocalLoss as _MONAIDiceFocalLoss, DiceLoss
@@ -109,9 +108,8 @@ class DiceFocalLoss(_MONAIDiceFocalLoss):
 
     def forward(self, input: torch.Tensor, target: torch.Tensor) -> dict[str, torch.Tensor]:
         input = input.float()
-        dice_loss = self.dice(input, target)
-        dice_loss = einops.reduce(dice_loss, 'n c ... -> c', 'mean')
-        focal_loss = einops.reduce(self.focal(input, target), 'n c ... -> c', 'mean')
+        dice_loss = self.dice(input, target).mean()
+        focal_loss = self.focal(input, target).mean()
         total_loss: torch.Tensor = self.lambda_dice * dice_loss + self.lambda_focal * focal_loss
         return {
             'dice': dice_loss,

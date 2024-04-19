@@ -9,6 +9,7 @@ import torch
 from torchvision.io import ImageReadMode, read_image
 from torchvision.transforms import v2 as tvt
 
+from luolib.utils.misc import ensure_rgb
 import mmmm.data.dataset._dataset as _dataset
 from mmmm.models import MMMMTokenizer
 from monai import transforms as mt
@@ -83,6 +84,10 @@ REPORT_PROMPTS = [
     "Give a detailed radiology report for this {}.",
 ]
 
+FINDINGS_PROMPT = [
+    'What are the findings presented in this {}?'
+]
+
 COMPLETE_REFERRINGS = ['image', 'medical image', 'radiograph', 'scan', 'radiology image', 'radiology scan', 'medical scan']
 
 PARTIAL_REFERRINGS = [' image', ' scan', ' radiograph']
@@ -127,7 +132,7 @@ class VLTransform(mt.RandomizableTransform):
         if image_path.endswith('.pt'):
             image = torch.load(image_path)
         else:
-            image = read_image(image_path, ImageReadMode.RGB)
+            image = read_image(image_path)
             image = einops.rearrange(image, 'c h w -> c 1 h w')
         image = tvt.functional.to_dtype(image, scale=True)
         smaller_edge = min(image.shape[2:])
@@ -151,13 +156,20 @@ class VLTransform(mt.RandomizableTransform):
             patch_size = (patch_size_z, conf.vit_patch_size_xy, conf.vit_patch_size_xy)
         image = mt.DivisiblePad(patch_size)(image)
         image = convert_to_tensor(image)
+        image, _ = ensure_rgb(image, contiguous=True)
         # TODO: intensity normalization
         referring: str = self.R.choice(COMPLETE_REFERRINGS)
         conversation = []
         if caption := data.get('caption'):
             conversation.append(ConvTurn(self.R.choice(CAPTION_PROMPTS), caption))
         if (findings := data.get('findings')) and (impression := data.get('impression')):
-            # TODO: handle data with findings only
+            conversation.append(
+                ConvTurn(
+                    self.R.choice(FINDINGS_PROMPT).format(referring),
+                    findings,
+                ),
+            )
+        elif findings := data.get('findings'):
             conversation.append(
                 ConvTurn(
                     self.R.choice(REPORT_PROMPTS).format(referring),
@@ -178,7 +190,7 @@ class VLTransform(mt.RandomizableTransform):
         )
         data: DataPoint = {
             'image': image,
-            'grounding_image': torch.empty(3, *patch_size),
+            'grounding_image': torch.zeros(3, *patch_size),
             'patch_size': patch_size,
             'vlm_inputs': vlm_inputs,
             'mask': torch.empty(0, *patch_size, dtype=torch.bool),
