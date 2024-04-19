@@ -277,6 +277,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
                 'bop': lm_targets == self.tokenizer.bop_token_id,
                 'eop': lm_targets == self.tokenizer.eop_token_id,
             }.items()
+            if token_mask.any()
         }
         self.log_dict(
             {
@@ -286,7 +287,8 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
                 'train/loss': loss,
                 **{f'train/{k}_loss': v for k, v in sam_log_dict},
             },
-            sync_dist=True,
+            # this causes DDP to hang, possibly related: https://github.com/Lightning-AI/pytorch-lightning/issues/19604
+            # sync_dist=True,
         )
         return loss
 
