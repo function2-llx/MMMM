@@ -90,17 +90,10 @@ init_args:
       type: seg
     - name: MIMIC-CXR
       type: vl
-    - name: OpenI
-      type: vl
     - name: PMC-OA
       type: vl
+      weight: 0.1
     - name: Radiopaedia
-      type: vl
-    - name: Slake
-      type: vl
-    - name: VQA-Med
-      type: vl
-    - name: VQA-RAD
       type: vl
     seg_trans:
       max_vision_tokens: 400
