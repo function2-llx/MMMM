@@ -80,7 +80,7 @@ class MMMMTokenizer(LlamaTokenizer):
         self.class_to_idx = {name: i for i, name in enumerate(sorted(names))}
 
     def wrap_name(self, name: str):
-        ret = f'{self.bop_token} {name} {self.eop_token}'
+        ret = f'{self.bop_token} {name}{self.eop_token}'
         if self.use_seg_token:
             if self.share_seg_token:
                 seg_token = self.seg_token
