@@ -16,10 +16,10 @@ trainer:
       save_top_k: -1
       save_last: true
       verbose: true
-#  strategy:
-#    class_path: lightning.pytorch.strategies.DDPStrategy
-#    init_args:
-#      timeout: 0:0:45
+  strategy:
+    class_path: lightning.pytorch.strategies.DDPStrategy
+    init_args:
+      timeout: 0:2:0
 optim:
   sam:
     prefix: sam_model

@@ -1,11 +1,12 @@
 from dataclasses import dataclass
 import os
 from pathlib import Path
-from typing import Literal, Self
+from typing import Any, Literal, Self
 
 from jsonargparse import class_from_function
+from lightning.pytorch.utilities.types import STEP_OUTPUT
 import torch
-from torch import nn
+from torch import Tensor, nn
 from torch.nn import functional as nnf
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
@@ -14,10 +15,10 @@ from luolib.types import param3_t, tuple2_t, tuple3_t
 
 from mmmm.utils import apply_prefix, get_lora_modules_default, get_lora_modules_finetune_all
 from mmmm.data.defs import Batch
+from mmmm.tokenizer import MMMMTokenizer
 from .cogvlm import CogVLMConfig, CogVLMForCausalLM
 from .loss import DiceFocalLoss
 from .segvol import Sam, SamArgs, build_sam_vit_3d
-from .tokenizer import MMMMTokenizer
 
 __all__ = [
     'MMMMForCausalLM',
@@ -136,7 +137,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         self.train()
         # self.model will be adapted by LoRA; FIXME: but what about LoRA?
         self.model.eval()
-        self.gradient_checkpointing_enable({'use_reentrant': False})
+        # self.gradient_checkpointing_enable({'use_reentrant': False})
 
     def _setup_sam_requires_grad(self):
         # make DDP work
@@ -257,7 +258,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         )
         return model_inputs
 
-    def training_step(self, batch: Batch, *args, **kwargs):
+    def training_step(self, batch: Batch, batch_idx: int, *args, **kwargs):
         vlm_inputs = batch['vlm_inputs']
         output, sam_log_dict = self.forward_with_sam(
             global_enc_image=batch['image'],
@@ -290,7 +291,28 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             # this causes DDP to hang, possibly related: https://github.com/Lightning-AI/pytorch-lightning/issues/19604
             # sync_dist=True,
         )
+        from lightning_utilities.core.rank_zero import rank_prefixed_message
+        print(rank_prefixed_message(f'step {batch_idx}, training step end', self.global_rank))
         return loss
+
+    def backward(self, loss: Tensor, *args: Any, **kwargs: Any) -> None:
+        from lightning_utilities.core.rank_zero import rank_prefixed_message
+        print(rank_prefixed_message(f'before backward: loss={loss.item()}', self.global_rank))
+        if self._fabric:
+            self._fabric.backward(loss, *args, **kwargs)
+        else:
+            loss.backward(*args, **kwargs)
+        print(rank_prefixed_message(f'after backward, step {self.trainer.global_step}', self.global_rank))
+        # print(self.model.vision.patch_embedding.proj.weight.grad[0, 0, 0, 0])
+        print(rank_prefixed_message(
+            f'grad {self.model.vision.patch_embedding.proj.weight.grad[0, 0, 0, 0]}', self.global_rank),
+        )
+
+    def on_train_batch_end(self, outputs: STEP_OUTPUT, batch: Any, batch_idx: int) -> None:
+        from lightning_utilities.core.rank_zero import rank_prefixed_message
+        print(rank_prefixed_message(f'train batch end, step {batch_idx}', self.global_rank))
+        print(rank_prefixed_message(f'weight {self.model.vision.patch_embedding.proj.weight[0, 0, 0, 0]}', self.global_rank))
+        super().on_train_batch_end(outputs, batch, batch_idx)
 
     # def sw_predictor(self, patch: torch.Tensor):
     #     output: MMMMOutputWithPast = self(
