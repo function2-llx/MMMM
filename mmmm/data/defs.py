@@ -12,7 +12,6 @@ import nibabel as nib
 import numpy as np
 import numpy.typing as npt
 import orjson
-import pandas as pd
 import torch
 
 from luolib.types import PathLike, tuple3_t
@@ -98,7 +97,7 @@ def convert_to_slicer(data_dir: PathLike, output_dir: PathLike | None = None, mu
     output_dir = data_dir / 'slicer' if output_dir is None else Path(output_dir)
     output_dir.mkdir(exist_ok=True, parents=True)
     img = torch.load(data_dir / 'images.pt')
-    sparse: Sparse = pd.read_pickle(data_dir / 'sparse.pkl')
+    sparse = Sparse.from_json((data_dir / 'sparse.json').read_bytes())
     for i, modality in enumerate(sparse.modalities):
         nib.save(
             nib.Nifti1Image(img[i].float().numpy(), np.diag([*sparse.spacing, 1])),
