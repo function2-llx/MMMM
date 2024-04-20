@@ -21,8 +21,8 @@ class MSDProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor):
 
     def load_images(self, data_point: DataPoint) -> tuple[list[str], MetaTensor, bool]:
         modalities = self.get_modalities()
-        images, _ = self.image_loader(data_point.images['_all'])
-        return modalities, images.to(device=get_cuda_device()), False
+        images = self.image_loader(data_point.images['_all'])
+        return modalities, images.to(device=get_cuda_device())
 
     def get_data_points(self) -> list[DataPoint]:
         ret = []

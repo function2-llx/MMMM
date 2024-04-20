@@ -16,6 +16,7 @@ from torchvision.transforms import v2 as tvt
 from torchvision.transforms.v2 import functional as tvtf
 
 from luolib import transforms as lt
+from luolib.transforms import affine_resize
 from luolib.types import tuple3_t
 from luolib.utils import as_tensor, get_cuda_device, process_map, save_pt_zst
 from monai import transforms as mt
@@ -59,15 +60,13 @@ class MultiClassDataPoint(DataPoint):
 _CLIP_LOWER = norm.cdf(-3)
 _CLIP_UPPER = norm.cdf(3)
 
-def clip_intensity(img: torch.Tensor, is_natural: bool) -> torch.BoolTensor:
+def clip_intensity(img: torch.Tensor) -> torch.BoolTensor:
     """clip the intensity in-place
-    Args:
-        is_natural: whether the modality of the image is natural (RGB or gray scale)
     Returns:
         the crop mask after clipping
     """
     x = img.view(img.shape[0], -1)
-    if is_natural:
+    if img.dtype == torch.uint8:
         minv = img.new_tensor(0.)
     else:
         minv = lt.quantile(x, _CLIP_LOWER, 1, True)
@@ -100,10 +99,9 @@ class Processor(ABC):
     max_workers: int | None = None
     chunksize: int | None = None
     orientation: str | None = None
-    max_smaller_edge: int = 1024
+    max_smaller_edge: int = 512
     min_aniso_ratio: float = 0.5
     mask_batch_size: int = 32
-    do_normalize: bool = False
     max_class_positions: int = 10000
     cuda_cache_th: int = 15
     bbox_ignore_targets: set[str] = set()
@@ -136,30 +134,28 @@ class Processor(ABC):
     def get_data_points(self) -> list[DataPoint]:
         pass
 
-    def image_loader(self, path: Path) -> tuple[MetaTensor, bool]:
-        """
-        Returns:
-            (image data, is natural)
-        """
+    def image_loader(self, path: Path) -> MetaTensor:
         raise NotImplementedError
 
-    def load_images(self, data_point: DataPoint) -> tuple[list[str], MetaTensor, bool]:
+    def load_images(self, data_point: DataPoint) -> tuple[list[str], MetaTensor]:
         modalities = []
         images = []
-        is_natural_list = []
         affine = None
+        has_rgb = False
         for modality, path in data_point.images.items():
+            if has_rgb:
+                raise ValueError('multiple images including RGB is not supported')
             modalities.append(modality)
-            image, is_natural = self.image_loader(path)
+            image = self.image_loader(path)
             if affine is None:
                 affine = image.affine
             else:
                 self._check_affine(affine, image.affine, atol=0)
-            is_natural_list.append(is_natural)
+            # is_natural_list.append(is_natural)
+            if image.shape[0] == 3:
+                has_rgb = True
             images.append(image)
-        if any(is_natural_list):
-            assert len(images) == 1, 'multiple natural images are not supported'
-        return modalities, torch.cat(images).to(device=get_cuda_device()), is_natural_list[0]
+        return modalities, torch.cat(images).to(device=get_cuda_device())
 
     def mask_loader(self, path: Path) -> MetaTensor:
         raise NotImplementedError
@@ -322,7 +318,7 @@ class Processor(ABC):
                 if cuda_cache > self.cuda_cache_th * 1024 ** 3:
                     gc.collect()
                     torch.cuda.empty_cache()
-            modalities, images, is_natural = self.load_images(data_point)
+            modalities, images = self.load_images(data_point)
             masks, targets = self.load_masks(data_point)
             self._check_targets(targets)
             images, masks = self.orient(images, masks)
@@ -335,7 +331,7 @@ class Processor(ABC):
                 **{f'space-o-{i}': s.item() for i, s in enumerate(spacing)}
             }
             # 1. clip intensity, compute crop mask
-            crop_mask = clip_intensity(images, is_natural)
+            crop_mask = clip_intensity(images)
             # 2. crop images and masks
             images, masks = crop(images, masks, crop_mask)
             # 3. compute resize (default: adapt to self.max_smaller_edge and self.min_aniso_ratio)
@@ -346,11 +342,11 @@ class Processor(ABC):
             })
             # 4. apply resize & intensity normalization, save processed results
             # 4.1. normalize and save images
-            images, mean, std = self.normalize_image(images, is_natural, new_shape)
+            images, mean, std = self.normalize_image(images, new_shape)
             save_dir = self.case_data_root / f'.{key}'
             save_dir.mkdir(exist_ok=True, parents=True)
             # 4.2. save image
-            torch.save(as_tensor(images).half().cpu(), save_dir / f'images.pt')
+            torch.save(tvtf.to_dtype(as_tensor(images), torch.uint8, scale=True), save_dir / f'images.pt')
             # 4.3. resize, filter, compress, and save masks & class positions
             masks = self.resize_masks(masks, new_shape)
             pos_target_mask: torch.BoolTensor = einops.reduce(masks > 0, 'c ... -> c', 'any')
@@ -404,47 +400,24 @@ class Processor(ABC):
                 import traceback
                 self.logger.error(traceback.format_exc())
 
-    def normalize_image(self, images: torch.Tensor, is_natural: bool, new_shape: npt.NDArray[np.int32]) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        # 1. translate intensity to [0, ...] for padding during resizing
-        if not is_natural:
-            images = images - einops.reduce(images, 'c ... -> c 1 1 1', 'min')
-        # 2. resize
-        if not np.array_equal(new_shape, images.shape[1:]):
-            if new_shape[0] == images.shape[1] == 1:
-                # use torchvision for 2D images
-                if not np.array_equal(new_shape[1:], images.shape[2:]):
-                    images = tvtf.resize(
-                        images, new_shape[1:].tolist(), tvt.InterpolationMode.BICUBIC, antialias=True,
-                    )
-            else:
-                scale = images.shape[1:] / new_shape
-                anti_aliasing_filter = mt.GaussianSmooth(np.maximum((scale - 1) / 2, 0))
-                filtered = anti_aliasing_filter(images)
-                resizer = mt.Affine(
-                    scale_params=scale.tolist(),
-                    spatial_size=new_shape.tolist(),
-                    mode=GridSampleMode.BICUBIC,
-                    image_only=True,
-                )
-                images = resizer(filtered)
-        # 3. rescale intensity fo [0, 1]
-        images.clamp_(0)
-        maxv = 255 if is_natural else einops.reduce(images, 'c ... -> c 1 1 1', 'max')
-        images = images / maxv
-        # 4. Z-score normalization or by pre-defined statistics
-        if is_natural:
-            # copied from CogVLM, used by CLIP
-            mean = images.new_tensor([0.48145466, 0.4578275, 0.40821073])
-            std = images.new_tensor([0.26862954, 0.26130258, 0.27577711])
+    def normalize_image(self, images: torch.Tensor, new_shape: npt.NDArray[np.int32]) -> tuple3_t[torch.Tensor]:
+        # 1. rescale to [0, 1]
+        if images.dtype == torch.uint8:
+            images = images.float() / 255
         else:
-            mean = images.new_empty((images.shape[0], ))
-            std = images.new_empty((images.shape[0], ))
-            for i in range(images.shape[0]):
-                fg = images[i][images[i] > 0]
-                mean[i] = fg.mean()
-                std[i] = fg.std()
-        if self.do_normalize:
-            images = (images - mean[:, None, None, None]) / std[:, None, None, None]
+            images = images.float()
+            minv, maxv = images.amin((1, 2, 3), keepdim=True), images.amax((1, 2, 3), keepdim=True)
+            images = (images - minv) / (maxv - minv)
+        # 2. resize
+        images = affine_resize(images, new_shape, dtype=torch.float16).float()
+        images.clamp_(0, 1)
+        # 3. calculate mean & std on non-zero values
+        mean = images.new_empty((images.shape[0]))
+        std = images.new_empty((images.shape[0]))
+        for i in range(images.shape[0]):
+            fg = images[i][images[i] > 0]
+            mean[i] = fg.mean()
+            std[i] = fg.std()
         return images, mean, std
 
     def resize_masks(self, masks: torch.BoolTensor, new_shape: npt.NDArray[np.int32]) -> torch.BoolTensor:
@@ -484,15 +457,15 @@ class DefaultImageLoaderMixin(_LoaderBase):
             image = image[0:1]
         return image
 
-    def image_loader(self, path: Path) -> tuple[MetaTensor, bool]:
+    def image_loader(self, path: Path) -> MetaTensor:
         loader = mt.LoadImage(self.image_reader, image_only=True, dtype=self.image_dtype, ensure_channel_first=True)
         image = loader(path)
-        assert image.ndim in [3, 4]
-        is_natural = image.ndim == 3
-        if is_natural:
+        if image.ndim == 3:
             image = self._check_natural_image(image)
             image = self._adapt_to_3d(image)
-        return image, is_natural
+        else:
+            assert image.ndim == 4
+        return image
 
 class NaturalImageLoaderMixin(DefaultImageLoaderMixin):
     image_reader = 'pilreader'
