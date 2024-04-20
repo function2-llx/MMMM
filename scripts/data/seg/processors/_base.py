@@ -101,7 +101,7 @@ class Processor(ABC):
     orientation: str | None = None
     max_smaller_edge: int = 512
     min_aniso_ratio: float = 0.5
-    mask_batch_size: int = 32
+    mask_batch_size: int = 8
     max_class_positions: int = 10000
     cuda_cache_th: int = 15
     bbox_ignore_targets: set[str] = set()
