@@ -1,6 +1,6 @@
 import torch
 
-from mmmm.models import MMMMTokenizer
+from mmmm.tokenizer import MMMMTokenizer
 from mmmm.models.cogvlm import LANGUAGE_TOKEN_TYPE, VISION_TOKEN_TYPE
 from .defs import CE_IGNORE_INDEX, ConvTurn
 

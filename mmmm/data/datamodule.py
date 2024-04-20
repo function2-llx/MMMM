@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader, Sampler
 from luolib.data.utils import list_data_collate
 from luolib.datamodule import ExpDataModuleBase
 
-from mmmm.models import MMMMTokenizer
+from mmmm.tokenizer import MMMMTokenizer
 from .dataset import MMMMDataset, DatasetConf
 
 __all__ = [

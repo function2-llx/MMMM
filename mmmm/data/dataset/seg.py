@@ -13,7 +13,7 @@ from luolib.types import tuple2_t
 from luolib.utils import load_pt_zst
 from monai import transforms as mt
 
-from mmmm.models import MMMMTokenizer
+from mmmm.tokenizer import MMMMTokenizer
 import mmmm.data.dataset._dataset as _dataset
 from ..defs import ConvTurn, DataPoint, PROCESSED_SEG_DATA_ROOT, Sparse, split_t
 from ..utils import prepare_vlm_inputs

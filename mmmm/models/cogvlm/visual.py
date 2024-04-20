@@ -1,11 +1,15 @@
+from __future__ import annotations as _
+
 from argparse import Namespace
+from typing import TYPE_CHECKING
 
 from einops import einops
 import torch
 from torch import nn
 from transformers.activations import ACT2FN
-import xformers.ops as xops
-from xformers.ops.fmha import BlockDiagonalMask
+if TYPE_CHECKING:
+    import xformers.ops as xops
+    from xformers.ops.fmha import BlockDiagonalMask
 
 from luolib.models import spadop
 from luolib.models.param import NoWeightDecayParameter
@@ -69,6 +73,8 @@ class Attention(nn.Module):
         self.output_dropout = torch.nn.Dropout(config.dropout_prob)
 
     def forward(self, x: torch.Tensor, attn_mask: BlockDiagonalMask) -> torch.Tensor:
+        # noinspection PyShadowingNames
+        import xformers.ops as xops
         B, L, _ = x.shape
         qkv = self.query_key_value(x)
         # n l (qkv h d) -> qkv n l h d

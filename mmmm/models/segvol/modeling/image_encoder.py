@@ -1,11 +1,15 @@
+from __future__ import annotations as _
+
 from collections.abc import Sequence
 from functools import partial
+from typing import TYPE_CHECKING
 
 import einops
 import torch
 import torch.nn as nn
-from xformers import ops as xops
-from xformers.ops.fmha import BlockDiagonalMask
+if TYPE_CHECKING:
+    import xformers.ops as xops
+    from xformers.ops.fmha import BlockDiagonalMask
 
 from luolib.models import spadop
 from luolib.models.param import NoWeightDecayParameter
@@ -62,6 +66,7 @@ class PatchEmbeddingBlock(nn.Module):
         return self.proj.in_channels
 
     def forward(self, image_list: list[torch.Tensor], patch_size_list: list[tuple3_t[int]]):
+        from xformers.ops.fmha import BlockDiagonalMask
         x_list, shape_list = [], []
         for image, patch_size in zip(image_list, patch_size_list):
             x = self.proj(image[None], patch_size)
@@ -109,6 +114,8 @@ def _patch_TransformerBlock_forward(self: TransformerBlock, x: torch.Tensor, att
     return x
 
 def _patch_SABlock_forward(self: SABlock, x: torch.Tensor, attn_mask: BlockDiagonalMask):
+    # noinspection PyShadowingNames
+    import xformers.ops as xops
     qkv = self.qkv(x)
     qkv = einops.rearrange(qkv, 'n l (qkv h d) -> qkv n l h d', qkv=3, h=self.num_heads)
     q, k, v = qkv[0], qkv[1], qkv[2]

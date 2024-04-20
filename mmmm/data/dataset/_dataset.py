@@ -6,7 +6,7 @@ from torch.utils.data import Dataset
 
 from monai.transforms import apply_transform
 
-from mmmm.models import MMMMTokenizer
+from mmmm.tokenizer import MMMMTokenizer
 from ..defs import split_t
 from .seg import SegTransConf, get_seg_data_list, get_seg_transform
 from .vl import VLTransConf, VLTransform, get_vl_data_list

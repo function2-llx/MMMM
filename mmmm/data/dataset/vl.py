@@ -6,14 +6,15 @@ import json
 import einops
 import numpy as np
 import torch
-from torchvision.io import ImageReadMode, read_image
+from torchvision.io import read_image
 from torchvision.transforms import v2 as tvt
 
 from luolib.utils.misc import ensure_rgb
-import mmmm.data.dataset._dataset as _dataset
-from mmmm.models import MMMMTokenizer
 from monai import transforms as mt
 from monai.utils import convert_to_tensor
+
+import mmmm.data.dataset._dataset as _dataset
+from mmmm.tokenizer import MMMMTokenizer
 from ..defs import ConvTurn, DataPoint, PROCESSED_VL_DATA_ROOT, split_t
 from ..utils import prepare_vlm_inputs
 from .misc import gen_modality_conversation, toss
