@@ -47,6 +47,7 @@ class PatchEmbedding(nn.Module):
         return super()._load_from_state_dict(state_dict, prefix, *args, **kwargs)
 
     def forward(self, image_list: list[torch.Tensor], patch_size_list: list[tuple3_t[int]]) -> tuple[torch.Tensor, BlockDiagonalMask]:
+        from xformers.ops.fmha import BlockDiagonalMask
         x_list = []
         for image, patch_size in zip(image_list, patch_size_list):
             x = self.proj(image[None], patch_size)
