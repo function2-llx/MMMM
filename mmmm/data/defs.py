@@ -45,7 +45,6 @@ class Sparse(DataClassORJSONMixin):
     modalities: list[str]
     mean: npt.NDArray[np.float32] = _numpy_field(np.float32)
     std: npt.NDArray[np.float32] = _numpy_field(np.float32)
-    normalized: bool
 
     @dataclass
     class Anatomy:

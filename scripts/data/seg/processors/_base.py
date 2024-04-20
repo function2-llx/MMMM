@@ -365,7 +365,6 @@ class Processor(ABC):
                 shape=new_shape,
                 mean=mean.cpu().numpy(),
                 std=std.cpu().numpy(),
-                normalized=self.do_normalize,
                 modalities=modalities,
                 anatomy=Sparse.Anatomy(
                     [*filter(lambda name: self.tax[name].category == 'anatomy', pos_targets)],
@@ -412,8 +411,8 @@ class Processor(ABC):
         images = affine_resize(images, new_shape, dtype=torch.float16).float()
         images.clamp_(0, 1)
         # 3. calculate mean & std on non-zero values
-        mean = images.new_empty((images.shape[0]))
-        std = images.new_empty((images.shape[0]))
+        mean = images.new_empty((images.shape[0], ))
+        std = images.new_empty((images.shape[0], ))
         for i in range(images.shape[0]):
             fg = images[i][images[i] > 0]
             mean[i] = fg.mean()
