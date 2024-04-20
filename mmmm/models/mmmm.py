@@ -111,6 +111,8 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         # make the `from_pretrained` interface consistent
         # since `resize_token_embeddings` will create new modules without preserving original attributes
         self.eval()
+        self.requires_grad_(False)
+        self.model.vision.linear_proj.requires_grad_(True)
         return self
 
     def _init_weights(self, module):
@@ -151,15 +153,19 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             sam.mask_decoder.txt_align_upscaled_embedding.requires_grad_(False)
 
     def get_lora_modules(self, prefix: str):
-        # apply LoRA on VLM, fully finetune others
-        target_modules, modules_to_save = get_lora_modules_default(self.model, apply_prefix(prefix, 'model'))
-        for name, child in self.named_children():
-            if name == 'model':
-                continue
-            c_target_modules, c_modules_to_save = get_lora_modules_finetune_all(child, apply_prefix(prefix, name))
-            target_modules.extend(c_target_modules)
-            modules_to_save.extend(c_modules_to_save)
-        return target_modules, modules_to_save
+        modules_to_save = get_lora_modules_finetune_all(
+            self.model.vision.linear_proj,
+            apply_prefix(prefix, 'model.vision.linear_proj'),
+        )
+        return [], modules_to_save
+        # # apply LoRA on VLM, fully finetune others
+        # target_modules, modules_to_save = get_lora_modules_default(self.model, apply_prefix(prefix, 'model'))
+        # for name, child in self.named_children():
+        #     if name == 'model':
+        #         continue
+        #     c_modules_to_save = get_lora_modules_finetune_all(child, apply_prefix(prefix, name))
+        #     modules_to_save.extend(c_modules_to_save)
+        # return target_modules, modules_to_save
 
     def forward_with_sam(
         self,
@@ -260,40 +266,44 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
 
     def training_step(self, batch: Batch, batch_idx: int, *args, **kwargs):
         vlm_inputs = batch['vlm_inputs']
-        output, sam_log_dict = self.forward_with_sam(
-            global_enc_image=batch['image'],
-            grounding_enc_image=batch['grounding_image'],
-            patch_size=batch['patch_size'],
-            mask=batch['mask'],
-            **vlm_inputs,
-            use_cache=False,
-        )
-        loss = output.lm_loss * self.lm_loss_weight + output.mask_loss * self.mask_loss_weight
-        # make some custom log
-        lm_targets = vlm_inputs['lm_targets']
-        lm_loss_dict = {
-            f'train/token-lm/{name}_loss': nnf.cross_entropy(output.lm_logits[token_mask], lm_targets[token_mask])
-            for name, token_mask in {
-                'seg': self.tokenizer.create_seg_token_mask(lm_targets),
-                'bop': lm_targets == self.tokenizer.bop_token_id,
-                'eop': lm_targets == self.tokenizer.eop_token_id,
-            }.items()
-            if token_mask.any()
-        }
-        self.log_dict(
-            {
-                'train/lm_loss': output.lm_loss,
-                **lm_loss_dict,
-                'train/mask_loss': output.mask_loss,
-                'train/loss': loss,
-                **{f'train/{k}_loss': v for k, v in sam_log_dict},
-            },
-            # this causes DDP to hang, possibly related: https://github.com/Lightning-AI/pytorch-lightning/issues/19604
-            # sync_dist=True,
-        )
-        from lightning_utilities.core.rank_zero import rank_prefixed_message
-        print(rank_prefixed_message(f'step {batch_idx}, training step end', self.global_rank))
+        image = batch['image']
+        features: list[torch.Tensor] = self.model.vision(image, batch['patch_size'])
+        loss = torch.stack([f.mean() for f in features]).mean()
         return loss
+        # output, sam_log_dict = self.forward_with_sam(
+        #     global_enc_image=batch['image'],
+        #     grounding_enc_image=batch['grounding_image'],
+        #     patch_size=batch['patch_size'],
+        #     mask=batch['mask'],
+        #     **vlm_inputs,
+        #     use_cache=False,
+        # )
+        # loss = output.lm_loss * self.lm_loss_weight + output.mask_loss * self.mask_loss_weight
+        # # make some custom log
+        # lm_targets = vlm_inputs['lm_targets']
+        # lm_loss_dict = {
+        #     f'train/token-lm/{name}_loss': nnf.cross_entropy(output.lm_logits[token_mask], lm_targets[token_mask])
+        #     for name, token_mask in {
+        #         'seg': self.tokenizer.create_seg_token_mask(lm_targets),
+        #         'bop': lm_targets == self.tokenizer.bop_token_id,
+        #         'eop': lm_targets == self.tokenizer.eop_token_id,
+        #     }.items()
+        #     if token_mask.any()
+        # }
+        # self.log_dict(
+        #     {
+        #         'train/lm_loss': output.lm_loss,
+        #         **lm_loss_dict,
+        #         'train/mask_loss': output.mask_loss,
+        #         'train/loss': loss,
+        #         **{f'train/{k}_loss': v for k, v in sam_log_dict},
+        #     },
+        #     # this causes DDP to hang, possibly related: https://github.com/Lightning-AI/pytorch-lightning/issues/19604
+        #     # sync_dist=True,
+        # )
+        # from lightning_utilities.core.rank_zero import rank_prefixed_message
+        # print(rank_prefixed_message(f'step {batch_idx}, training step end', self.global_rank))
+        # return loss
 
     def backward(self, loss: Tensor, *args: Any, **kwargs: Any) -> None:
         from lightning_utilities.core.rank_zero import rank_prefixed_message
@@ -305,13 +315,13 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         print(rank_prefixed_message(f'after backward, step {self.trainer.global_step}', self.global_rank))
         # print(self.model.vision.patch_embedding.proj.weight.grad[0, 0, 0, 0])
         print(rank_prefixed_message(
-            f'grad {self.model.vision.patch_embedding.proj.weight.grad[0, 0, 0, 0]}', self.global_rank),
-        )
+            f'grad {self.model.vision.linear_proj.linear_proj.weight.grad[0, :5]}', self.global_rank,
+        ))
 
     def on_train_batch_end(self, outputs: STEP_OUTPUT, batch: Any, batch_idx: int) -> None:
         from lightning_utilities.core.rank_zero import rank_prefixed_message
         print(rank_prefixed_message(f'train batch end, step {batch_idx}', self.global_rank))
-        print(rank_prefixed_message(f'weight {self.model.vision.patch_embedding.proj.weight[0, 0, 0, 0]}', self.global_rank))
+        print(rank_prefixed_message(f'weight {self.model.vision.linear_proj.linear_proj.weight[0, :5]}', self.global_rank))
         super().on_train_batch_end(outputs, batch, batch_idx)
 
     # def sw_predictor(self, patch: torch.Tensor):

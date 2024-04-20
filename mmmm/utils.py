@@ -1,7 +1,7 @@
 from torch import nn
 
-def apply_prefix(prefix: str, name: str):
-    return f'{prefix}{name}' if prefix.endswith('.') or not prefix else f'{prefix}.{name}'
+def apply_prefix(prefix: str, path: str):
+    return f'{prefix}{path}' if prefix.endswith('.') or not prefix else f'{prefix}.{path}'
 
 def _check_leaf_module(module: nn.Module):
     requires_grad = [p.requires_grad for p in module.parameters()]
@@ -34,19 +34,18 @@ def get_lora_modules_default(module: nn.Module, prefix: str = '', recursive: boo
     return target_modules, modules_to_save
 
 def get_lora_modules_finetune_all(module: nn.Module, prefix: str):
-    target_modules, modules_to_save = [], []
+    modules_to_save = []
 
-    # noinspection PyShadowingNames
-    def dfs(m: nn.Module, prefix: str):
+    def dfs(m: nn.Module, p: str):
         if len(named_children := list(m.named_children())) == 0:
             if _check_leaf_module(m):
-                modules_to_save.append(prefix)
+                modules_to_save.append(p)
         else:
             for name, child in named_children:
-                dfs(child, apply_prefix(prefix, name))
+                dfs(child, apply_prefix(p, name))
 
     dfs(module, prefix)
-    return target_modules, modules_to_save
+    return modules_to_save
 
 class ParameterWrapper(nn.Module):
     """peft does not support parameter in `modules_to_save`
