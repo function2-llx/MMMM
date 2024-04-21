@@ -39,7 +39,7 @@ class CLI(LightningCLI):
         config = self.active_config_init
         lora_config: LoraConfig = config.lora
         lora_config.target_modules, lora_config.modules_to_save = get_lora_modules_default(model)
-        # model.set_peft_model(get_peft_model(model, lora_config))
+        model.set_peft_model(get_peft_model(model, lora_config))
 
 def main():
     CLI(
