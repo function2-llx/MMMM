@@ -2,17 +2,15 @@
 import warnings
 from typing import TYPE_CHECKING, Optional, Tuple, List, Union, Literal, Dict, Any
 
-import einops
 import math
 import torch
 from torch import nn
 from torch.nn import functional as F
 from torchvision import transforms
-
 from transformers import PreTrainedModel, PreTrainedTokenizer
-from transformers.utils.logging import get_logger
 from transformers.activations import ACT2FN
 from transformers.modeling_outputs import BaseModelOutputWithPast, CausalLMOutputWithPast
+from transformers.utils.logging import get_logger
 
 from luolib.models.param import NoWeightDecayParameter
 from luolib.models.utils import forward_gc

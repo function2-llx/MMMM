@@ -1,7 +1,12 @@
+from functools import partial
+
+import cytoolz
 from torch import nn
 
-def apply_prefix(prefix: str, name: str):
-    return f'{prefix}{name}' if prefix.endswith('.') or not prefix else f'{prefix}.{name}'
+from luolib.types import tuple2_t
+
+def apply_prefix(prefix: str, path: str):
+    return f'{prefix}{path}' if prefix.endswith('.') or not prefix else f'{prefix}.{path}'
 
 def _check_leaf_module(module: nn.Module):
     requires_grad = [p.requires_grad for p in module.parameters()]
@@ -11,14 +16,18 @@ def _check_leaf_module(module: nn.Module):
     else:
         return False
 
-def get_lora_modules_default(module: nn.Module, prefix: str = '', recursive: bool = True):
+def get_lora_modules_default(module: nn.Module, prefix: str = '', recursive: bool = True) -> tuple2_t[list[str]]:
     target_modules, modules_to_save = [], []
 
     # noinspection PyShadowingNames
     def dfs(m: nn.Module, prefix: str):
         if recursive and hasattr(m, 'get_lora_modules'):
             # if the module has defined the `get_lora_modules` method, use it
-            m_target_modules, m_modules_to_save = m.get_lora_modules(prefix=prefix)
+            m_target_modules, m_modules_to_save = m.get_lora_modules(prefix='')
+            filter_func = cytoolz.compose(_check_leaf_module, m.get_submodule)
+            map_func = partial(apply_prefix, prefix)
+            m_target_modules = [*map(map_func, filter(filter_func, m_target_modules))]
+            m_modules_to_save = [*map(map_func, filter(filter_func, m_modules_to_save))]
             target_modules.extend(m_target_modules)
             modules_to_save.extend(m_modules_to_save)
         elif isinstance(m, (nn.Linear, nn.Embedding)):
@@ -33,20 +42,19 @@ def get_lora_modules_default(module: nn.Module, prefix: str = '', recursive: boo
     dfs(module, prefix)
     return target_modules, modules_to_save
 
-def get_lora_modules_finetune_all(module: nn.Module, prefix: str):
-    target_modules, modules_to_save = [], []
+def get_lora_modules_finetune_all(module: nn.Module, prefix: str) -> list[str]:
+    modules_to_save = []
 
-    # noinspection PyShadowingNames
-    def dfs(m: nn.Module, prefix: str):
+    def dfs(m: nn.Module, p: str):
         if len(named_children := list(m.named_children())) == 0:
             if _check_leaf_module(m):
-                modules_to_save.append(prefix)
+                modules_to_save.append(p)
         else:
             for name, child in named_children:
-                dfs(child, apply_prefix(prefix, name))
+                dfs(child, apply_prefix(p, name))
 
     dfs(module, prefix)
-    return target_modules, modules_to_save
+    return modules_to_save
 
 class ParameterWrapper(nn.Module):
     """peft does not support parameter in `modules_to_save`

@@ -53,10 +53,9 @@ class MMMMDataset(Dataset):
             dataset.get_data_list(split)
             for dataset in conf.datasets
         ]
-        self.transforms = {
-            'seg': get_seg_transform(conf, tokenizer, False),
-            'vl': VLTransform(conf, tokenizer, False),
-        }
+        # NOTE: use attributes instead of storing in a dict to make MONAI's set_rnd work
+        self.seg_transform = get_seg_transform(conf, tokenizer, False)
+        self.vl_transform = VLTransform(conf, tokenizer, False)
 
     @property
     def dataset_weights(self):
@@ -72,4 +71,4 @@ class MMMMDataset(Dataset):
         dataset = self.conf.datasets[dataset_idx]
         data_list = self.data_lists[dataset_idx]
         data = data_list[sub_idx]
-        return apply_transform(self.transforms[dataset.type], data)
+        return apply_transform(getattr(self, f'{dataset.type}_transform'), data)

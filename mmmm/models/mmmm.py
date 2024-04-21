@@ -12,12 +12,12 @@ from transformers.modeling_outputs import CausalLMOutputWithPast
 from luolib.lightning import LightningModule
 from luolib.types import param3_t, tuple2_t, tuple3_t
 
-from mmmm.utils import apply_prefix, get_lora_modules_default, get_lora_modules_finetune_all
 from mmmm.data.defs import Batch
+from mmmm.tokenizer import MMMMTokenizer
+from mmmm.utils import apply_prefix, get_lora_modules_default, get_lora_modules_finetune_all
 from .cogvlm import CogVLMConfig, CogVLMForCausalLM
 from .loss import DiceFocalLoss
 from .segvol import Sam, SamArgs, build_sam_vit_3d
-from .tokenizer import MMMMTokenizer
 
 __all__ = [
     'MMMMForCausalLM',
@@ -155,8 +155,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         for name, child in self.named_children():
             if name == 'model':
                 continue
-            c_target_modules, c_modules_to_save = get_lora_modules_finetune_all(child, apply_prefix(prefix, name))
-            target_modules.extend(c_target_modules)
+            c_modules_to_save = get_lora_modules_finetune_all(child, apply_prefix(prefix, name))
             modules_to_save.extend(c_modules_to_save)
         return target_modules, modules_to_save
 
@@ -257,7 +256,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         )
         return model_inputs
 
-    def training_step(self, batch: Batch, *args, **kwargs):
+    def training_step(self, batch: Batch, batch_idx: int, *args, **kwargs):
         vlm_inputs = batch['vlm_inputs']
         output, sam_log_dict = self.forward_with_sam(
             global_enc_image=batch['image'],
@@ -287,8 +286,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
                 'train/loss': loss,
                 **{f'train/{k}_loss': v for k, v in sam_log_dict},
             },
-            # this causes DDP to hang, possibly related: https://github.com/Lightning-AI/pytorch-lightning/issues/19604
-            # sync_dist=True,
+            sync_dist=True,
         )
         return loss
 

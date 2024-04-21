@@ -6,7 +6,6 @@ from ._base import DataPoint, DefaultMaskLoaderMixin, MultiLabelMultiFileDataPoi
 class BUSIProcessor(NaturalImageLoaderMixin, DefaultMaskLoaderMixin, Processor):
     name = 'BUSI'
     mask_dtype = torch.bool
-    assert_gray_scale = True
 
     def load_masks(self, data_point: DataPoint) -> tuple[torch.BoolTensor, list[str]]:
         masks, targets = super().load_masks(data_point)
