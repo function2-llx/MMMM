@@ -3,10 +3,11 @@ from typing import Iterator
 from lightning.fabric.utilities.distributed import DistributedSamplerWrapper
 import torch
 from torch.nn.utils.rnn import pad_sequence
-from torch.utils.data import DataLoader, Sampler
+from torch.utils.data import Sampler
 
 from luolib.data.utils import list_data_collate
 from luolib.datamodule import ExpDataModuleBase
+from monai.data import DataLoader
 
 from mmmm.tokenizer import MMMMTokenizer
 from .dataset import MMMMDataset, DatasetConf

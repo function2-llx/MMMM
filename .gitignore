@@ -166,3 +166,4 @@ cython_debug/
 /nnUNet-data
 
 pyrightconfig.json
+/debug_lib.py
