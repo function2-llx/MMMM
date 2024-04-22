@@ -266,7 +266,7 @@ class SamplePatch(mt.Randomizable):
         if grounding:
             mask_label = self._create_mask_label(annotation.mask, mask_classes, patch, patch_masks)
         else:
-            mask_label = torch.empty(0, *patch.shape, dtype=torch.bool)
+            mask_label = torch.empty(0, *patch_size, dtype=torch.bool)
         data_point: DataPoint = {
             'image': patch,
             # TODO: apply transform on grounding image
