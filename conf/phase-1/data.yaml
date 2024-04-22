@@ -106,7 +106,7 @@ init_args:
       scale_xy: [0.5, 3]
       scale_xy_p: 0.75
       num_pos: 24
-      num_neg: 2
+      num_neg: 6
     vl_trans:
       max_smaller_tokens_xy: 16
       max_tokens_z: 4
