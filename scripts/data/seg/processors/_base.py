@@ -346,7 +346,10 @@ class Processor(ABC):
             save_dir = self.case_data_root / f'.{key}'
             save_dir.mkdir(exist_ok=True, parents=True)
             # 4.2. save image
-            torch.save(tvtf.to_dtype(as_tensor(images).cpu(), torch.uint8, scale=True), save_dir / f'images.pt')
+            save_pt_zst(
+                tvtf.to_dtype(as_tensor(images).cpu(), torch.uint8, scale=True),
+                save_dir / f'images.pt.zst',
+            )
             # 4.3. resize, filter, compress, and save masks & class positions
             masks = self.resize_masks(masks, new_shape)
             pos_target_mask: torch.BoolTensor = einops.reduce(masks > 0, 'c ... -> c', 'any')

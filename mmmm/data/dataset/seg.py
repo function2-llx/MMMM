@@ -152,7 +152,7 @@ class SamplePatch(mt.Randomizable):
         assert np.array_equiv(_rem, 0)
         effective_patch_size = np.minimum(np.ceil(patch_size * scale).astype(np.int64), sparse.shape)
         # 2. sample patch position
-        if self.R.uniform() < trans_conf.force_fg_ratio:
+        if len(annotation.mask) > 0 and self.R.uniform() < trans_conf.force_fg_ratio:
             # foreground oversampling
             # TODO: handle data with bbox only
             c = self.R.randint(len(annotation.mask))
@@ -163,7 +163,7 @@ class SamplePatch(mt.Randomizable):
             maybe_patch_center = class_positions[position_idx].numpy()
             patch_start = self.get_patch_start(maybe_patch_center, effective_patch_size, sparse.shape)
         else:
-            patch_start = self.R.randint(sparse.shape - effective_patch_size)
+            patch_start = self.R.randint(sparse.shape - effective_patch_size + 1)
         patch_slice = [
             slice(start, start + size)
             for start, size in zip(patch_start, effective_patch_size)
@@ -179,8 +179,11 @@ class SamplePatch(mt.Randomizable):
             modality_slice = slice(modality_idx, modality_idx + 1)
         images: torch.HalfTensor = torch.load(str(data_dir / 'images.pt'), mmap=True)
         patch = images[modality_slice, *patch_slice]
-        masks: torch.BoolTensor = load_pt_zst(data_dir / 'masks.pt.zst')
-        patch_masks = masks[:, *patch_slice]
+        if len(annotation.mask) > 0:
+            masks: torch.BoolTensor = load_pt_zst(data_dir / 'masks.pt.zst')
+            patch_masks = masks[:, *patch_slice]
+        else:
+            patch_masks = torch.empty(0, *patch_size)
         # TODO: crop bbox
         # 4. determine positive & negative classes within the cropped patch
         patch_mask_sizes: list[int] = einops.reduce(patch_masks, 'c ... -> c', 'sum').tolist()
