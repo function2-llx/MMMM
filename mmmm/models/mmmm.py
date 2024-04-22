@@ -1,17 +1,17 @@
 from dataclasses import dataclass
 import os
 from pathlib import Path
-from typing import Any, Literal, Self
+from typing import Literal, Self
 
 from jsonargparse import class_from_function
 import torch
-from torch import Tensor, nn
+from torch import nn
 from torch.nn import functional as nnf
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
-from debug_lib import info
 from luolib.lightning import LightningModule
 from luolib.types import param3_t, tuple2_t, tuple3_t
+
 from mmmm.data.defs import Batch
 from mmmm.tokenizer import MMMMTokenizer
 from mmmm.utils import apply_prefix, get_lora_modules_default, get_lora_modules_finetune_all
@@ -110,14 +110,12 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         # make the `from_pretrained` interface consistent
         # since `resize_token_embeddings` will create new modules without preserving original attributes
         # self.sam_model.requires_grad_(False)
-        self.requires_grad_(False)
-        self.lm_head.requires_grad_(True)
         self.model.tokenizer = tokenizer
         self.eval()
         return self
 
     def _init_weights(self, module):
-        """Let's happily do nothing"""
+        """Let's happily do nothing (necessary to make SAM pre-trained weights survive)"""
 
     def __init__(self, vlm_config: CogVLMConfig, *, vision_override: VisionArgs, **kwargs):
         # adapt vision config
@@ -264,7 +262,6 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
 
     def training_step(self, batch: Batch, batch_idx: int, *args, **kwargs):
         vlm_inputs = batch['vlm_inputs']
-        # print(rank_prefixed_message(f'lm weight: {self.lm_head.weight[:5, :5]}', self.global_rank))
         output, sam_log_dict = self.forward_with_sam(
             global_enc_image=batch['image'],
             grounding_enc_image=batch['grounding_image'],
@@ -274,8 +271,6 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             use_cache=False,
         )
         loss = output.lm_loss * self.lm_loss_weight + output.mask_loss * self.mask_loss_weight
-        info(f'lm loss: {output.lm_loss}')
-        info(f'mask loss: {output.mask_loss}')
         # make some custom log
         lm_targets = vlm_inputs['lm_targets']
         lm_loss_dict = {
@@ -295,13 +290,10 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
                 'train/loss': loss,
                 **{f'train/{k}_loss': v for k, v in sam_log_dict.items()},
             },
+            # the logging keys are inconsistent, setting sync_dist=True will make DDP hang
             # sync_dist=True,
         )
         return loss
-
-    def backward(self, loss: Tensor, *args: Any, **kwargs: Any) -> None:
-        super().backward(loss, *args, **kwargs)
-        info(f'lm weight grad: {self.lm_head.weight.grad.mean(dim=-1)[:20]}')
 
     # def sw_predictor(self, patch: torch.Tensor):
     #     output: MMMMOutputWithPast = self(

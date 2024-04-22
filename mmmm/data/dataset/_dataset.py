@@ -4,7 +4,6 @@ from typing import Literal
 import torch
 from torch.utils.data import Dataset
 
-from debug_lib import info
 from monai.transforms import apply_transform
 
 from mmmm.tokenizer import MMMMTokenizer
@@ -71,7 +70,6 @@ class MMMMDataset(Dataset):
 
     def __getitem__(self, index: tuple[int, int]):
         dataset_idx, sub_idx = index
-        info(f'data index: {index}')
         dataset = self.conf.datasets[dataset_idx]
         data_list = self.data_lists[dataset_idx]
         data = data_list[sub_idx]
