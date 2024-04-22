@@ -45,7 +45,8 @@ class SegTransConf:
     log_vit_patch_size_z_std = 0.25  # 2-sigma, 95.45%
     num_pos: int  # I've encountered cases setting this to larger than 48 causing NCCL timeout
     num_neg: int
-    force_fg_ratio: float
+    pos_th_abs: int = 1000
+    pos_th_rel: float = 0.5
 
 def get_seg_transform(
     conf: _dataset.DatasetConf,
@@ -137,7 +138,8 @@ class SamplePatch(mt.Randomizable):
 
     def _is_positive(self, patch_mask_size: int, mask_size: int):
         """check should a mask be considered positive in a patch"""
-        return 2 * patch_mask_size >= mask_size
+        conf = self.conf.seg_trans
+        return patch_mask_size >= mask_size * conf.pos_th_rel or patch_mask_size >= conf.pos_th_abs
 
     def __call__(self, data: dict) -> DataPoint:
         data = dict(data)
@@ -152,17 +154,18 @@ class SamplePatch(mt.Randomizable):
         assert np.array_equiv(_rem, 0)
         effective_patch_size = np.minimum(np.ceil(patch_size * scale).astype(np.int64), sparse.shape)
         # 2. sample patch position
-        if len(annotation.mask) > 0 and self.R.uniform() < trans_conf.force_fg_ratio:
-            # foreground oversampling
+        if len(annotation.mask) > 0:
+            # foreground oversampling. not using a force fg ratio sinc it may result in zero classes
             # TODO: handle data with bbox only
-            c = self.R.randint(len(annotation.mask))
+            fg_c = self.R.randint(len(annotation.mask))
             # use str for mmap, will be fixed in PyTorch 2.3: https://github.com/pytorch/pytorch/pull/116104
             class_positions: torch.Tensor = torch.load(str(data_dir / 'class_positions.pt'), mmap=True)
             class_offsets: torch.Tensor = torch.load(data_dir / 'class_offsets.pt')
-            position_idx = self.R.randint(class_offsets[c], class_offsets[c + 1])
+            position_idx = self.R.randint(class_offsets[fg_c], class_offsets[fg_c + 1])
             maybe_patch_center = class_positions[position_idx].numpy()
             patch_start = self.get_patch_start(maybe_patch_center, effective_patch_size, sparse.shape)
         else:
+            fg_c = None
             patch_start = self.R.randint(sparse.shape - effective_patch_size + 1)
         patch_slice = [
             slice(start, start + size)
@@ -192,8 +195,7 @@ class SamplePatch(mt.Randomizable):
         anatomy_pos, anatomy_neg = [], list(sparse.anatomy.neg)
         anomaly_pos, anomaly_neg = [], list(sparse.anomaly.neg)
         for c, (name, mask_size) in enumerate(annotation.mask):
-            patch_mask_size = patch_mask_sizes[c]
-            if self._is_positive(patch_mask_size, mask_size):
+            if c == fg_c or self._is_positive(patch_mask_size := patch_mask_sizes[c], mask_size):
                 if name in sparse.anatomy.pos:
                     anatomy_pos.append(name)
                 else:
@@ -239,6 +241,7 @@ class SamplePatch(mt.Randomizable):
         conversation_anomaly, mask_classes_anomaly = gen_anomaly_conversation(
             anomaly_pos, anomaly_neg, sparse.anomaly.complete, self.tokenizer, self.R,
         )
+        # assert len(anatomy_pos) > 0 or len(anatomy_neg) > 0 or len(anomaly_pos) > 0 or len(anomaly_neg) > 0
         conversation.extend(conversation_anomaly)
         mask_classes.extend(mask_classes_anomaly)
         vlm_inputs, conversation_text = prepare_vlm_inputs(
