@@ -4,6 +4,7 @@ from typing import Literal
 import torch
 from torch.utils.data import Dataset
 
+from debug_lib import info
 from monai.transforms import apply_transform
 
 from mmmm.tokenizer import MMMMTokenizer
@@ -59,15 +60,18 @@ class MMMMDataset(Dataset):
 
     @property
     def dataset_weights(self):
-        weights = torch.tensor([
-            dataset.weight * len(data_list)
-            for dataset, data_list in zip(self.conf.datasets, self.data_lists)
-        ])
-        weights /= weights.max()
+        weights = torch.tensor(
+            [
+                dataset.weight * len(data_list)
+                for dataset, data_list in zip(self.conf.datasets, self.data_lists)
+            ],
+            dtype=torch.float64,
+        )
         return weights
 
     def __getitem__(self, index: tuple[int, int]):
         dataset_idx, sub_idx = index
+        info(f'data index: {index}')
         dataset = self.conf.datasets[dataset_idx]
         data_list = self.data_lists[dataset_idx]
         data = data_list[sub_idx]

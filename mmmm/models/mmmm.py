@@ -1,17 +1,17 @@
 from dataclasses import dataclass
 import os
 from pathlib import Path
-from typing import Literal, Self
+from typing import Any, Literal, Self
 
 from jsonargparse import class_from_function
 import torch
-from torch import nn
+from torch import Tensor, nn
 from torch.nn import functional as nnf
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
+from debug_lib import info
 from luolib.lightning import LightningModule
 from luolib.types import param3_t, tuple2_t, tuple3_t
-
 from mmmm.data.defs import Batch
 from mmmm.tokenizer import MMMMTokenizer
 from mmmm.utils import apply_prefix, get_lora_modules_default, get_lora_modules_finetune_all
@@ -100,24 +100,24 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         self.mask_loss_weight = mask_loss_weight
         self.mask_loss = mask_loss
         self.seg_proj = nn.Sequential(
-            nn.Linear(self.hidden_size, self.hidden_size),
+            nn.Linear(self.config.hidden_size, self.config.hidden_size),
             nn.ReLU(inplace=True),
-            nn.Linear(self.hidden_size, self.sam_model.prompt_dim),
+            nn.Linear(self.config.hidden_size, self.sam_model.prompt_dim),
         )
         self.val_sw = val_sw
         self.seg_hidden_layer = seg_hidden_layer
         self.model.config.lora_lang = lora_lang
         # make the `from_pretrained` interface consistent
         # since `resize_token_embeddings` will create new modules without preserving original attributes
+        # self.sam_model.requires_grad_(False)
+        self.requires_grad_(False)
+        self.lm_head.requires_grad_(True)
+        self.model.tokenizer = tokenizer
         self.eval()
         return self
 
     def _init_weights(self, module):
         """Let's happily do nothing"""
-
-    @property
-    def hidden_size(self):
-        return self.model.embed_tokens.embedding_dim
 
     def __init__(self, vlm_config: CogVLMConfig, *, vision_override: VisionArgs, **kwargs):
         # adapt vision config
@@ -203,6 +203,12 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             seg_layer_hidden_states[i, seg_token_mask[i]]
             for i in range(seg_layer_hidden_states.shape[0])
         ]
+        # for i in range(seg_layer_hidden_states.shape[0]):
+        #     if seg_token_mask[i].any():
+        #         seg_hidden_states.append(seg_layer_hidden_states[i, seg_token_mask[i]])
+        #     else:
+        #         # create a dummy to make DDP works
+        #         seg_hidden_states.append(seg_layer_hidden_states[i, 0:1])
         masks_logits = self._generate_and_postprocess_masks(grounding_enc_image, patch_size, seg_hidden_states)
         if mask is None:
             mask_loss = None
@@ -258,6 +264,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
 
     def training_step(self, batch: Batch, batch_idx: int, *args, **kwargs):
         vlm_inputs = batch['vlm_inputs']
+        # print(rank_prefixed_message(f'lm weight: {self.lm_head.weight[:5, :5]}', self.global_rank))
         output, sam_log_dict = self.forward_with_sam(
             global_enc_image=batch['image'],
             grounding_enc_image=batch['grounding_image'],
@@ -267,6 +274,8 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             use_cache=False,
         )
         loss = output.lm_loss * self.lm_loss_weight + output.mask_loss * self.mask_loss_weight
+        info(f'lm loss: {output.lm_loss}')
+        info(f'mask loss: {output.mask_loss}')
         # make some custom log
         lm_targets = vlm_inputs['lm_targets']
         lm_loss_dict = {
@@ -284,11 +293,15 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
                 **lm_loss_dict,
                 'train/mask_loss': output.mask_loss,
                 'train/loss': loss,
-                **{f'train/{k}_loss': v for k, v in sam_log_dict},
+                **{f'train/{k}_loss': v for k, v in sam_log_dict.items()},
             },
-            sync_dist=True,
+            # sync_dist=True,
         )
         return loss
+
+    def backward(self, loss: Tensor, *args: Any, **kwargs: Any) -> None:
+        super().backward(loss, *args, **kwargs)
+        info(f'lm weight grad: {self.lm_head.weight.grad.mean(dim=-1)[:20]}')
 
     # def sw_predictor(self, patch: torch.Tensor):
     #     output: MMMMOutputWithPast = self(

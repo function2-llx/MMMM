@@ -5,6 +5,7 @@ import torch
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import Sampler
 
+from debug_lib import DEBUG_INDEX
 from luolib.data.utils import list_data_collate
 from luolib.datamodule import ExpDataModuleBase
 from monai.data import DataLoader
@@ -51,11 +52,15 @@ class MMMMRandomSampler(Sampler):
         self.G.manual_seed(seed)
 
     def __iter__(self) -> Iterator[tuple[int, int]]:
+        ret = []
         for dataset_idx in torch.multinomial(
             self.dataset_weights, self.num_samples, True, generator=self.G,
         ):
             sub_idx = torch.randint(len(self.dataset.data_lists[dataset_idx]), size=(1, ), generator=self.G)
-            yield dataset_idx.item(), sub_idx.item()
+            ret.append((dataset_idx.item(), sub_idx.item()))
+            # yield dataset_idx.item(), sub_idx.item()
+        for i in range(len(ret)):
+            yield ret[i ^ DEBUG_INDEX]
 
     def __len__(self):
         return self.num_samples

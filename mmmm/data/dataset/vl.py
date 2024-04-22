@@ -194,7 +194,7 @@ class VLTransform(mt.RandomizableTransform):
             'grounding_image': torch.zeros(3, *patch_size),
             'patch_size': patch_size,
             'vlm_inputs': vlm_inputs,
-            'mask': torch.empty(0, *patch_size, dtype=torch.bool),
+            'mask': torch.zeros(0, *patch_size, dtype=torch.bool),
             'mask_index': torch.empty(0, dtype=torch.bool),
             'bbox': torch.empty(0, 2, 3),
             'bbox_index': torch.zeros(0, dtype=torch.bool),

@@ -12,6 +12,7 @@ from transformers.activations import ACT2FN
 from transformers.modeling_outputs import BaseModelOutputWithPast, CausalLMOutputWithPast
 from transformers.utils.logging import get_logger
 
+from debug_lib import info
 from luolib.models.param import NoWeightDecayParameter
 from luolib.models.utils import forward_gc
 from luolib.types import tuple3_t
@@ -563,7 +564,12 @@ class CogVLMModel(CogVLMPreTrainedModel):
         for idx, decoder_layer in enumerate(self.layers):
             if output_hidden_states:
                 all_hidden_states += (hidden_states,)
-
+            summary_len = 20
+            hidden_states_summary = hidden_states.new_empty(hidden_states.shape[0], summary_len)
+            for i in range(hidden_states.shape[0]):
+                effective_hidden_states = hidden_states[i, input_ids[i] != self.tokenizer.pad_token_id]
+                hidden_states_summary[i] = effective_hidden_states[-summary_len:].mean(dim=-1)
+            info(f'layer {idx}: {hidden_states_summary}')
             past_key_value = past_key_values[idx] if past_key_values is not None else None
             layer_outputs = forward_gc(
                 decoder_layer,
