@@ -47,6 +47,7 @@ class SegTransConf:
     num_neg: int
     pos_th_abs: int = 1000
     pos_th_rel: float = 0.5
+    grounding_prob: float = 0.99
 
 def get_seg_transform(
     conf: _dataset.DatasetConf,
@@ -192,8 +193,9 @@ class SamplePatch(mt.Randomizable):
         patch_mask_sizes: list[int] = einops.reduce(patch_masks, 'c ... -> c', 'sum').tolist()
         if len(dict(annotation.mask)) != len(annotation.mask):
             raise NotImplementedError
-        anatomy_pos, anatomy_neg = [], list(sparse.anatomy.neg)
-        anomaly_pos, anomaly_neg = [], list(sparse.anomaly.neg)
+        # NOTE: the order of the set is random
+        anatomy_pos, anatomy_neg = [], sorted(sparse.anatomy.neg)
+        anomaly_pos, anomaly_neg = [], sorted(sparse.anomaly.neg)
         for c, (name, mask_size) in enumerate(annotation.mask):
             if c == fg_c or self._is_positive(patch_mask_size := patch_mask_sizes[c], mask_size):
                 if name in sparse.anatomy.pos:
@@ -233,31 +235,45 @@ class SamplePatch(mt.Randomizable):
         # 6. generate conversation
         conversation = gen_modality_conversation(modality, self.R)
         mask_classes = []
+        grounding = toss(self.R, trans_conf.grounding_prob)
         conversation_anatomy, mask_classes_anatomy = gen_anatomy_conversation(
-            anatomy_pos, anatomy_neg, self.tokenizer, self.R,
+            anatomy_pos, anatomy_neg, grounding, self.tokenizer, self.R,
         )
         conversation.extend(conversation_anatomy)
         mask_classes.extend(mask_classes_anatomy)
         conversation_anomaly, mask_classes_anomaly = gen_anomaly_conversation(
-            anomaly_pos, anomaly_neg, sparse.anomaly.complete, self.tokenizer, self.R,
+            anomaly_pos,
+            anomaly_neg,
+            sparse.anomaly.complete,
+            grounding,
+            self.tokenizer,
+            self.R,
         )
         # assert len(anatomy_pos) > 0 or len(anatomy_neg) > 0 or len(anomaly_pos) > 0 or len(anomaly_neg) > 0
         conversation.extend(conversation_anomaly)
         mask_classes.extend(mask_classes_anomaly)
         vlm_inputs, conversation_text = prepare_vlm_inputs(
-            conversation, self.tokenizer, patch_tokens.prod(), self.inference,
+            conversation,
+            self.tokenizer,
+            patch_tokens.prod(),
+            self.inference,
+            grounding,
         )
         # TODO: handle normalization
         if patch.shape[0] == 1:
             # ensure RGB
             patch = einops.repeat(patch, '1 ... -> c ...', c=3).contiguous()
+        if grounding:
+            mask_label = self._create_mask_label(annotation.mask, mask_classes, patch, patch_masks)
+        else:
+            mask_label = torch.empty(0, *patch.shape, dtype=torch.bool)
         data_point: DataPoint = {
             'image': patch,
             # TODO: apply transform on grounding image
             'grounding_image': patch,
             'patch_size': tuple(vit_patch_size.tolist()),
             'vlm_inputs': vlm_inputs,
-            'mask': self._create_mask_label(annotation.mask, mask_classes, patch, patch_masks),
+            'mask': mask_label,
             'mask_index': torch.ones(len(mask_classes), dtype=torch.bool),
             'bbox': torch.empty(0, 2, 3),
             'bbox_index': torch.zeros(0, dtype=torch.bool),
@@ -296,20 +312,23 @@ class SamplePatch(mt.Randomizable):
 def gen_anatomy_conversation(
     pos_classes: list[str],
     neg_classes: list[str],
+    grounding: bool,
     tokenizer: MMMMTokenizer,
     R: np.random.RandomState,
-    p_use_neg_mask: float = 1.,
 ) -> tuple[list[ConvTurn], list[str]]:
     """
     Returns:
       - conversation
       - class names, following the order occurring in the conversation
     """
-    def _convert_list(names: Iterable[str], mask: bool):
-        # FIXME: do not use special tokens explicitly in text
+    def _convert_list(names: Iterable[str], mask: bool, neg: bool = False):
         if mask:
-            names = map(tokenizer.wrap_name, names)
-        return ', '.join(names)
+            wrapper = tokenizer.wrap_name_neg if neg else tokenizer.wrap_name
+            names = map(wrapper, names)
+            sep = ','
+        else:
+            sep = ', '
+        return sep.join(names)
 
     if len(pos_classes) == 0 and len(neg_classes) == 0:
         return [], []
@@ -318,7 +337,6 @@ def gen_anatomy_conversation(
     R.shuffle(pos_classes)
     neg_classes = list(neg_classes)
     R.shuffle(neg_classes)
-
     # merge positive and negative classes with random order without shuffling
     pos_class_mask = torch.zeros(len(pos_classes) + len(neg_classes), dtype=torch.bool)
     pos_class_mask[R.choice(pos_class_mask.shape[0], len(pos_classes), replace=False)] = True
@@ -327,36 +345,27 @@ def gen_anatomy_conversation(
         next(pos_it) if m else next(neg_it)
         for m in pos_class_mask
     ]
-
     assert len(classes) > 0
-    neg_mask = R.uniform() < p_use_neg_mask
-    if neg_mask:
-        prompt = f'Output the segmentation masks for the following objects: {_convert_list(classes, False)}.'
-    else:
-        prompt = f'Find the following objects, and output segmentation masks for the found objects: {_convert_list(classes, False)}. '
+    prompt = f'Find the following objects in the image: {_convert_list(classes, mask=False)}. '
     if len(pos_classes) > 0:
         if len(neg_classes) > 0:
-            response = f'The following objects are found: {_convert_list(pos_classes, True)}. ' + \
-                       f'The following objects are not found: {_convert_list(neg_classes, neg_mask)}. '
-            mask_classes = pos_classes + (neg_classes if neg_mask else [])
+            response = f'The following objects are found: {_convert_list(pos_classes, mask=grounding)}. ' + \
+                       f'The following objects are not found: {_convert_list(neg_classes, mask=grounding, neg=True)}. '
+            mask_classes = pos_classes + neg_classes
         else:
-            response = f'All of the requested objects are found: {_convert_list(classes, True)}. '
+            response = f'All of the requested objects are found: {_convert_list(classes, mask=grounding)}.'
             mask_classes = classes
     else:
-        if neg_mask:
-            response = f'None of the requested objects are found: {_convert_list(classes, True)}. '
-            mask_classes = classes
-        else:
-            response = 'None of the requested objects are found. '
-            mask_classes = []
+        response = f'None of the requested objects are found: {_convert_list(classes, mask=grounding, neg=True)}.'
+        mask_classes = classes
     return [ConvTurn(prompt, response)], mask_classes
 
 def gen_anomaly_conversation(
     pos_classes: list[str],
     neg_classes: list[str],
     _complete: bool,
+    grounding: bool,
     tokenizer: MMMMTokenizer,
     R: np.random.RandomState | int,
-    p_use_neg_mask: float = 1.,
 ):
-    return gen_anatomy_conversation(pos_classes, neg_classes, tokenizer, R, p_use_neg_mask)
+    return gen_anatomy_conversation(pos_classes, neg_classes, grounding, tokenizer, R)

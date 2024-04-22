@@ -5,21 +5,41 @@ import torch
 from transformers import LlamaTokenizer
 
 class MMMMTokenizer(LlamaTokenizer):
+    sys_token = '<sys>'
+    sys_token_id: int
+    usr_token = '<usr>'
+    usr_token_id: int
+    # enable grounding
+    grd_token = '<grd>'
+    grd_token_id: int
+    # disable grounding
+    ngrd_token = '<ngrd>'
+    ngrd_token_id: int
+    # begin of phrase
+    bop_token = '<p>'
+    bop_token_id: int
+    eop_token = '</p>'
+    eop_token_id: int
+    # begin of negative phrase, not actually used by model
+    bonp_token = '<np>'
+    bonp_token_id: int
+    eonp_token = '</np>'
+    eonp_token_id: int
+
     def __init__(self, *args, use_seg_token: bool, share_seg_token: bool, **kwargs):
         super().__init__(*args, **kwargs)
         self.base_vocab_size = self.vocab_size
-        # TODO: can we simplify these boilerplate codes while keeping code completion?
-        self.bop_token = '<p>'
-        self.eop_token = '</p>'
-        self.usr_token = '<USR>'
-        self.sys_token = '<SYS>'
-        self.add_tokens(
-            [self.bop_token, self.eop_token, self.usr_token, self.sys_token],
-            True,
-        )
-        self.bop_token_id, self.eop_token_id, self.usr_token_id, self.sys_token_id = self.convert_tokens_to_ids([
-            self.bop_token, self.eop_token, self.usr_token, self.sys_token,
-        ])
+
+        special_token_names = [*map(
+            lambda name: f'{name}_token',
+            ['sys', 'usr', 'grd', 'ngrd', 'bop', 'eop', 'bonp', 'eonp'],
+        )]
+        special_tokens = [*map(self.__getattribute__, special_token_names)]
+        self.add_tokens(special_tokens, special_tokens=True)
+        special_token_ids = self.convert_tokens_to_ids(special_tokens)
+        for token_name, special_token_id in zip(special_token_names, special_token_ids):
+            setattr(self, f'{token_name}_id', special_token_id)
+
         self.use_seg_token = use_seg_token
         self.share_seg_token = share_seg_token
         if use_seg_token:
@@ -79,8 +99,12 @@ class MMMMTokenizer(LlamaTokenizer):
         """This method is useful only when not self.share_seg_token"""
         self.class_to_idx = {name: i for i, name in enumerate(sorted(names))}
 
-    def wrap_name(self, name: str):
-        ret = f'{self.bop_token} {name}{self.eop_token}'
+    def wrap_name(self, name: str, neg: bool = False):
+        if neg:
+            bop_token, eop_token = self.bonp_token, self.eonp_token
+        else:
+            bop_token, eop_token = self.bop_token, self.eop_token
+        ret = f'{bop_token} {name}{eop_token}'
         if self.use_seg_token:
             if self.share_seg_token:
                 seg_token = self.seg_token
@@ -88,5 +112,8 @@ class MMMMTokenizer(LlamaTokenizer):
                 seg_token = self.seg_tokens[self.class_to_idx[name]]
             ret = f'{ret} {seg_token}'
         return ret
+
+    def wrap_name_neg(self, name: str):
+        return self.wrap_name(name, neg=True)
 
 build = class_from_function(MMMMTokenizer.build, MMMMTokenizer)

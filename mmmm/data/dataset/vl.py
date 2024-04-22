@@ -188,6 +188,7 @@ class VLTransform(mt.RandomizableTransform):
             self.tokenizer,
             (np.array(image.shape[1:]) // patch_size).prod().item(),
             self.inference,
+            grounding=False,
         )
         data: DataPoint = {
             'image': image,
