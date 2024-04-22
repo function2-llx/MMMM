@@ -79,7 +79,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         mask_loss: DiceFocalLoss | None = None,
         val_sw: SlidingWindow | None = None,
         seg_hidden_layer: Literal[0, -1] = -1,
-        lora_lang: bool = False,
+        lora_lang: bool = True,
     ):
         """make jsonargparse happy
         This works thanks to that AST does not support this (according to the debug information)
