@@ -2,100 +2,102 @@ class_path: mmmm.data.MMMMDataModule
 init_args:
   dataset:
     datasets:
-#    - name: ACDC
-#      type: seg
-#    - name: AMOS22
-#      type: seg
-#    - name: ATLAS
-#      type: seg
-#    - name: ATM22
-#      type: seg
-#    - name: autoPET-III
-#      type: seg
-#    - name: BraTS2023-GLI
-#      type: seg
-#    - name: BraTS2023-MEN
-#      type: seg
-#    - name: BraTS2023-MET
-#      type: seg
-#    - name: BraTS2023-PED
-#      type: seg
-#    - name: BraTS2023-SSA
-#      type: seg
-#    - name: BTCV-Abdomen
-#      type: seg
-#    - name: BTCV-Cervix
-#      type: seg
-#    - name: BUSI
-#      type: seg
-#    - name: CHAOS
-#      type: seg
-#    - name: CT-ORG
-#      type: seg
-#    - name: CTPelvic1K
-#      type: seg
-#    - name: CTSpine1K
-#      type: seg
-#    - name: HaN-Seg
-#      type: seg
-#    - name: ISLES22
-#      type: seg
-#    - name: LiTS
-#      type: seg
-#    - name: LNQ2023
-#      type: seg
-#    - name: MRSpineSeg
-#      type: seg
-#    - name: MSD-Task02_Heart
-#      type: seg
-#    - name: MSD-Task03_Liver
-#      type: seg
-#    - name: MSD-Task04_Hippocampus
-#      type: seg
-#    - name: MSD-Task05_Prostate
-#      type: seg
-#    - name: MSD-Task06_Lung
-#      type: seg
-#    - name: MSD-Task07_Pancreas
-#      type: seg
-#    - name: MSD-Task08_HepaticVessel
-#      type: seg
-#    - name: MSD-Task09_Spleen
-#      type: seg
-#    - name: MSD-Task10_Colon
-#      type: seg
-#    - name: PARSE2022
-#      type: seg
-#    - name: PENGWIN-T1
-#      type: seg
-#    - name: PENGWIN-T2
-#      type: seg
-#    - name: PI-CAI
-#      type: seg
-#    - name: Prostate158
-#      type: seg
-#    - name: RibFrac
-#      type: seg
-#    - name: SEG.A.2023
-#      type: seg
-#    - name: SegRap2023
-#      type: seg
-#    - name: SegTHOR
-#      type: seg
+    - name: ACDC
+      type: seg
+    - name: AMOS22
+      type: seg
+    - name: ATLAS
+      type: seg
+    - name: ATM22
+      type: seg
+    - name: autoPET-III
+      type: seg
+    - name: BraTS2023-GLI
+      type: seg
+    - name: BraTS2023-MEN
+      type: seg
+    - name: BraTS2023-MET
+      type: seg
+    - name: BraTS2023-PED
+      type: seg
+    - name: BraTS2023-SSA
+      type: seg
+    - name: BTCV-Abdomen
+      type: seg
+    - name: BTCV-Cervix
+      type: seg
+    - name: BUSI
+      type: seg
+    - name: CHAOS
+      type: seg
+    - name: CT-ORG
+      type: seg
+    - name: CTPelvic1K
+      type: seg
+    - name: CTSpine1K
+      type: seg
+    - name: HaN-Seg
+      type: seg
+    - name: ISLES22
+      type: seg
+    - name: LiTS
+      type: seg
+    - name: LNQ2023
+      type: seg
+    - name: MRSpineSeg
+      type: seg
+    - name: MSD-Task02_Heart
+      type: seg
+    - name: MSD-Task03_Liver
+      type: seg
+    - name: MSD-Task04_Hippocampus
+      type: seg
+    - name: MSD-Task05_Prostate
+      type: seg
+    - name: MSD-Task06_Lung
+      type: seg
+    - name: MSD-Task07_Pancreas
+      type: seg
+    - name: MSD-Task08_HepaticVessel
+      type: seg
+    - name: MSD-Task09_Spleen
+      type: seg
+    - name: MSD-Task10_Colon
+      type: seg
+    - name: PARSE2022
+      type: seg
+    - name: PENGWIN-T1
+      type: seg
+    - name: PENGWIN-T2
+      type: seg
+      weight: 0.04
+    - name: PI-CAI
+      type: seg
+    - name: Prostate158
+      type: seg
+    - name: RibFrac
+      type: seg
+    - name: SEG.A.2023
+      type: seg
+    - name: SegRap2023
+      type: seg
+    - name: SegTHOR
+      type: seg
     - name: TotalSegmentator
       type: seg
-      weight: 100
-#    - name: VerSe
-#      type: seg
-#    - name: WORD
-#      type: seg
+    - name: VerSe
+      type: seg
+    - name: WORD
+      type: seg
     - name: MIMIC-CXR
       type: vl
-#    - name: PMC-OA
-#      type: vl
-#      weight: 0.1
-#    - name: Radiopaedia
-#      type: vl
+      weight: 0.03
+    - name: Radiopaedia
+      type: vl
+      weight: 0.03
+    - name: PMC-OA
+      type: vl
+      weight: 0.002
     seg_trans:
       max_vision_tokens: 400
       scale_z: [0.5, 2]
