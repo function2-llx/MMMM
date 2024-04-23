@@ -79,7 +79,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         mask_loss: DiceFocalLoss | None = None,
         val_sw: SlidingWindow | None = None,
         seg_hidden_layer: Literal[0, -1] = -1,
-        lora_lang: bool = False,
+        lora_lang: bool = True,
     ):
         """make jsonargparse happy
         This works thanks to that AST does not support this (according to the debug information)
@@ -100,24 +100,22 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         self.mask_loss_weight = mask_loss_weight
         self.mask_loss = mask_loss
         self.seg_proj = nn.Sequential(
-            nn.Linear(self.hidden_size, self.hidden_size),
+            nn.Linear(self.config.hidden_size, self.config.hidden_size),
             nn.ReLU(inplace=True),
-            nn.Linear(self.hidden_size, self.sam_model.prompt_dim),
+            nn.Linear(self.config.hidden_size, self.sam_model.prompt_dim),
         )
         self.val_sw = val_sw
         self.seg_hidden_layer = seg_hidden_layer
         self.model.config.lora_lang = lora_lang
         # make the `from_pretrained` interface consistent
         # since `resize_token_embeddings` will create new modules without preserving original attributes
+        # self.sam_model.requires_grad_(False)
+        self.model.tokenizer = tokenizer
         self.eval()
         return self
 
     def _init_weights(self, module):
-        """Let's happily do nothing"""
-
-    @property
-    def hidden_size(self):
-        return self.model.embed_tokens.embedding_dim
+        """Let's happily do nothing (necessary to make SAM pre-trained weights survive)"""
 
     def __init__(self, vlm_config: CogVLMConfig, *, vision_override: VisionArgs, **kwargs):
         # adapt vision config
@@ -203,6 +201,12 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             seg_layer_hidden_states[i, seg_token_mask[i]]
             for i in range(seg_layer_hidden_states.shape[0])
         ]
+        # for i in range(seg_layer_hidden_states.shape[0]):
+        #     if seg_token_mask[i].any():
+        #         seg_hidden_states.append(seg_layer_hidden_states[i, seg_token_mask[i]])
+        #     else:
+        #         # create a dummy to make DDP works
+        #         seg_hidden_states.append(seg_layer_hidden_states[i, 0:1])
         masks_logits = self._generate_and_postprocess_masks(grounding_enc_image, patch_size, seg_hidden_states)
         if mask is None:
             mask_loss = None
@@ -284,9 +288,10 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
                 **lm_loss_dict,
                 'train/mask_loss': output.mask_loss,
                 'train/loss': loss,
-                **{f'train/{k}_loss': v for k, v in sam_log_dict},
+                **{f'train/{k}_loss': v for k, v in sam_log_dict.items()},
             },
-            sync_dist=True,
+            # the logging keys are inconsistent, setting sync_dist=True will make DDP hang
+            # sync_dist=True,
         )
         return loss
 

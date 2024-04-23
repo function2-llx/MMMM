@@ -70,6 +70,7 @@ init_args:
       type: seg
     - name: PENGWIN-T2
       type: seg
+      weight: 0.04
     - name: PI-CAI
       type: seg
     - name: Prostate158
@@ -90,11 +91,14 @@ init_args:
       type: seg
     - name: MIMIC-CXR
       type: vl
-    - name: PMC-OA
-      type: vl
-      weight: 0.1
+      weight: 0.03
     - name: Radiopaedia
       type: vl
+      weight: 0.03
+    - name: PMC-OA
+      type: vl
+      weight: 0.002
+    max_seq_len: 1500
     seg_trans:
       max_vision_tokens: 400
       scale_z: [0.5, 2]
@@ -103,8 +107,7 @@ init_args:
       scale_xy: [0.5, 3]
       scale_xy_p: 0.75
       num_pos: 24
-      num_neg: 2
-      force_fg_ratio: 0.9
+      num_neg: 6
     vl_trans:
       max_smaller_tokens_xy: 16
       max_tokens_z: 4
