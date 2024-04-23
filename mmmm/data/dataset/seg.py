@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import torch
 from torch.types import Device
+import torchvision.transforms.v2.functional as tvtf
 
 from luolib.types import tuple2_t
 from luolib.utils import load_pt_zst
@@ -17,7 +18,7 @@ from mmmm.tokenizer import MMMMTokenizer
 import mmmm.data.dataset._dataset as _dataset
 from ..defs import ConvTurn, DataPoint, PROCESSED_SEG_DATA_ROOT, Sparse, split_t
 from ..utils import prepare_vlm_inputs
-from .misc import gen_modality_conversation, toss
+from .misc import gen_modality_conversation, intensity_norm, toss
 
 def get_seg_data_list(name: str, split: split_t):
     if split != 'train':
@@ -83,7 +84,8 @@ class SamplePatch(mt.Randomizable):
             # TODO: maybe there's a better approximation for tokens_z
             tokens_z = self.R.randint(1, trans_conf.max_tokens_z + 1)
         tokens_xy = int((trans_conf.max_vision_tokens / tokens_z) ** 0.5)
-        patch_size_xy = tokens_xy * conf.vit_patch_size_xy
+        pooling_size_xy = 2 if conf.pooling else 1
+        patch_size_xy = tokens_xy * conf.vit_patch_size_xy * pooling_size_xy
         # 2. sample scale_xy
         if (max_scale_xy := max(sparse.shape[1:]) / patch_size_xy) <= trans_conf.scale_xy[0]:
             # the original image is too small, just resize to patch size
@@ -115,6 +117,7 @@ class SamplePatch(mt.Randomizable):
         # 4. determine vit_patch_size_z
         if sparse.shape[0] == 1:
             vit_patch_size_z = 1
+            pooling_size_z = 1
         else:
             spacing_xy = min(sparse.spacing[1:]) * scale_xy
             spacing_z = sparse.spacing[0] * scale_z
@@ -181,8 +184,8 @@ class SamplePatch(mt.Randomizable):
             modality_idx = self.R.randint(len(sparse.modalities))
             modality = sparse.modalities[modality_idx]
             modality_slice = slice(modality_idx, modality_idx + 1)
-        images: torch.HalfTensor = torch.load(str(data_dir / 'images.pt'), mmap=True)
-        patch = images[modality_slice, *patch_slice]
+        images: torch.ByteTensor = torch.load(str(data_dir / 'images.pt'), mmap=True)
+        patch = tvtf.to_dtype(images[modality_slice, *patch_slice], scale=True)
         if len(annotation.mask) > 0:
             masks: torch.BoolTensor = load_pt_zst(data_dir / 'masks.pt.zst')
             patch_masks = masks[:, *patch_slice]
@@ -255,14 +258,15 @@ class SamplePatch(mt.Randomizable):
         vlm_inputs, conversation_text = prepare_vlm_inputs(
             conversation,
             self.tokenizer,
-            patch_tokens.prod(),
-            self.inference,
-            grounding,
+            patch_tokens.prod().item(),
+            inference=self.inference,
+            grounding=grounding,
+            max_seq_len=conf.max_seq_len,
         )
-        # TODO: handle normalization
         if patch.shape[0] == 1:
             # ensure RGB
             patch = einops.repeat(patch, '1 ... -> c ...', c=3).contiguous()
+        patch = intensity_norm(patch)
         if grounding:
             mask_label = self._create_mask_label(annotation.mask, mask_classes, patch, patch_masks)
         else:

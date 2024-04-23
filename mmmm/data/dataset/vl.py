@@ -17,7 +17,7 @@ import mmmm.data.dataset._dataset as _dataset
 from mmmm.tokenizer import MMMMTokenizer
 from ..defs import ConvTurn, DataPoint, PROCESSED_VL_DATA_ROOT, split_t
 from ..utils import prepare_vlm_inputs
-from .misc import gen_modality_conversation, toss
+from .misc import gen_modality_conversation, intensity_norm, toss
 
 CAPTION_PROMPTS = [
     'Describe the following image in detail.',
@@ -158,7 +158,7 @@ class VLTransform(mt.RandomizableTransform):
         image = mt.DivisiblePad(patch_size)(image)
         image = convert_to_tensor(image)
         image, _ = ensure_rgb(image, contiguous=True)
-        # TODO: intensity normalization
+        image = intensity_norm(image)
         referring: str = self.R.choice(COMPLETE_REFERRINGS)
         conversation = []
         if caption := data.get('caption'):
@@ -187,8 +187,9 @@ class VLTransform(mt.RandomizableTransform):
             conversation,
             self.tokenizer,
             (np.array(image.shape[1:]) // patch_size).prod().item(),
-            self.inference,
+            inference=self.inference,
             grounding=False,
+            max_seq_len=conf.max_seq_len,
         )
         data: DataPoint = {
             'image': image,

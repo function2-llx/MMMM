@@ -27,8 +27,10 @@ def prepare_vlm_inputs(
     conversation: list[ConvTurn],
     tokenizer: MMMMTokenizer,
     num_image_tokens: int,
+    *,
     inference: bool,
     grounding: bool,
+    max_seq_len: int | None = None,
 ):
     """
     Args:
@@ -116,4 +118,7 @@ def prepare_vlm_inputs(
     }
     if not inference:
         inputs['lm_targets'] = lm_targets
+    if max_seq_len is not None:
+        for k, v in inputs.items():
+            inputs[k] = v[:max_seq_len]
     return inputs, text

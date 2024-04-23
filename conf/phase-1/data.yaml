@@ -98,6 +98,7 @@ init_args:
     - name: PMC-OA
       type: vl
       weight: 0.002
+    max_seq_len: 1500
     seg_trans:
       max_vision_tokens: 400
       scale_z: [0.5, 2]

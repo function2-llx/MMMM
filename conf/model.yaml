@@ -4,18 +4,18 @@ model:
     pretrained_model_name_or_path: THUDM/cogvlm-chat-hf
     vision_override:
       patch_size: 16
-      pos_embed_shape: [6, 35, 35]
+      pos_embed_shape: [4, 20, 20]
       pt_pos_embed_shape: [35, 35]
     lora_lang: true
     sam:
       patch_size: 16
-      pos_embed_shape: [6, 35, 35]
+      pos_embed_shape: [4, 20, 20]
       pt_in_channels: 1
       pt_patch_size: [4, 16, 16]
       pt_pos_embed_shape: [8, 16, 16]
       checkpoint: pre-trained/SegVol_v1.pth
 lora:
-  r: 32
+  r: 16
   lora_alpha: 8
   lora_dropout: 0.1
   use_rslora: true

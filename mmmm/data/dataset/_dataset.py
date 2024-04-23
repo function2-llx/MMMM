@@ -38,8 +38,18 @@ class DatasetConf:
     datasets: list[DatasetSpec]
     base_vit_patch_size_z: int = 16
     vit_patch_size_xy: int = 16
+    pooling: bool = False
     seg_trans: SegTransConf
     vl_trans: VLTransConf
+    max_seq_len: int | None = None
+
+    @property
+    def base_stride_z(self):
+        return self.base_vit_patch_size_z << self.pooling
+
+    @property
+    def stride_xy(self):
+        return self.vit_patch_size_xy << self.pooling
 
     def __post_init__(self):
         assert _is_power_of_2(self.vit_patch_size_xy)
