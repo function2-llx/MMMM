@@ -4,14 +4,16 @@ from dataclasses import dataclass
 import json
 
 import einops
+import math
 import numpy as np
 import torch
 from torchvision.io import read_image
 from torchvision.transforms import v2 as tvt
 
+from luolib.types import tuple2_t
 from luolib.utils.misc import ensure_rgb
 from monai import transforms as mt
-from monai.utils import convert_to_tensor
+from monai.utils import InterpolateMode, convert_to_tensor
 
 import mmmm.data.dataset._dataset as _dataset
 from mmmm.tokenizer import MMMMTokenizer
@@ -101,8 +103,31 @@ def get_vl_data_list(name: str, split: split_t):
 
 @dataclass
 class VLTransConf:
-    max_smaller_tokens_xy: int
+    max_tokens: int
     max_tokens_z: int
+    log2_patch_size_z_std: float = 0.5
+
+@np.vectorize
+def _solve(a: float, M: int):
+    """find max integer t s.t. t⌈at⌉ ≤ M"""
+    aM = a * M
+    n = math.ceil(math.sqrt(aM))
+    if aM > (n - 1) * n:
+        t = math.floor(M / n)
+    else:
+        t = math.floor((n - 1) / a)
+    return t
+
+def _get_resize(size: tuple2_t[int], stride: int, max_tokens: int) -> tuple2_t[int]:
+    size = np.array(size)
+    gcd = np.gcd(size, stride)
+    size_p = size // gcd
+    stride //= gcd
+    ps = stride * np.flip(size_p)
+    t = _solve(ps / np.flip(ps), max_tokens)
+    scale = (t * stride / size_p).max()
+    resize = (size * scale).round().astype(np.int64)
+    return tuple(resize.tolist())
 
 class VLTransform(mt.RandomizableTransform):
     def __init__(
@@ -115,11 +140,6 @@ class VLTransform(mt.RandomizableTransform):
         self.conf = conf
         self.tokenizer = tokenizer
         self.inference = inference
-
-    @property
-    def max_smaller_edge(self) -> int:
-        conf = self.conf
-        return conf.vit_patch_size_xy * conf.vl_trans.max_smaller_tokens_xy
 
     def __call__(self, data: dict) -> DataPoint:
         conf = self.conf
@@ -136,26 +156,35 @@ class VLTransform(mt.RandomizableTransform):
             image = read_image(image_path)
             image = einops.rearrange(image, 'c h w -> c 1 h w')
         image = tvt.functional.to_dtype(image, scale=True)
-        smaller_edge = min(image.shape[2:])
-        if image.shape[1] == 1:
-            if smaller_edge > self.max_smaller_edge:
-                # this might be redundant, but let's be careful
-                image = einops.rearrange(image, 'c 1 h w -> c h w')
-                image = tvt.functional.resize(image, self.max_smaller_edge)
-                image = einops.rearrange(image, 'c h w -> c 1 h w')
-            patch_size = (1, conf.vit_patch_size_xy, conf.vit_patch_size_xy)
+        if (size_z := image.shape[1]) <= trans_conf.max_tokens_z:
+            patch_size_z = pool_size_z = stride_z = 1
+            tokens_z = size_z
         else:
-            # TODO: adjust patch_size_z according to image
-            patch_size_z = conf.base_vit_patch_size_z
-            max_slices = patch_size_z * trans_conf.max_tokens_z
-            new_shape = [min(image.shape[1], max_slices), *image.shape[2:]]
-            if smaller_edge > self.max_smaller_edge:
-                for i in (1, 2):
-                    new_shape[i] = round(new_shape[i] * self.max_smaller_edge / smaller_edge)
-            if tuple(new_shape) != image.shape[1:]:
-                image = mt.Resize(new_shape)(image)
-            patch_size = (patch_size_z, conf.vit_patch_size_xy, conf.vit_patch_size_xy)
-        image = mt.DivisiblePad(patch_size)(image)
+            pool_size_z = conf.base_pool_size_z
+            log2_patch_size_z = self.R.normal(
+                np.log2(size_z / (pool_size_z * trans_conf.max_tokens_z)),
+                trans_conf.log2_patch_size_z_std,
+            )
+            log2_patch_size_z = np.clip(
+                np.rint(log2_patch_size_z), 0, conf.base_vit_patch_size_z.bit_length() - 1,
+            )
+            patch_size_z = 1 << int(log2_patch_size_z)
+            stride_z = patch_size_z * pool_size_z
+            tokens_z = min(math.ceil(size_z / stride_z), trans_conf.max_tokens_z)
+        patch_size = (patch_size_z, conf.vit_patch_size_xy, conf.vit_patch_size_xy)
+        stride = (stride_z, conf.stride_xy, conf.stride_xy)
+        resize_shape = (
+            min(size_z, tokens_z * stride_z),  # do not resize z if unnecessary
+            *_get_resize(
+                image.shape[2:],
+                conf.stride_xy,
+                trans_conf.max_tokens // tokens_z,
+            ),
+        )
+        if resize_shape != image.shape[1:]:
+            resize = mt.Resize(resize_shape, mode=InterpolateMode.TRILINEAR, anti_aliasing=True)
+            image = resize(image)
+        image = mt.DivisiblePad(stride)(image)
         image = convert_to_tensor(image)
         image, _ = ensure_rgb(image, contiguous=True)
         image = intensity_norm(image)
@@ -166,15 +195,15 @@ class VLTransform(mt.RandomizableTransform):
         if (findings := data.get('findings')) and (impression := data.get('impression')):
             conversation.append(
                 ConvTurn(
-                    self.R.choice(FINDINGS_PROMPT).format(referring),
-                    findings,
+                    self.R.choice(REPORT_PROMPTS).format(referring),
+                    f"Findings: {findings}\nImpression: {impression}",
                 ),
             )
         elif findings := data.get('findings'):
             conversation.append(
                 ConvTurn(
-                    self.R.choice(REPORT_PROMPTS).format(referring),
-                    f"Findings: {findings}\nImpression: {impression}",
+                    self.R.choice(FINDINGS_PROMPT).format(referring),
+                    findings,
                 ),
             )
         if vqa := data.get('vqa'):
@@ -186,7 +215,7 @@ class VLTransform(mt.RandomizableTransform):
         vlm_inputs, conversation_text = prepare_vlm_inputs(
             conversation,
             self.tokenizer,
-            (np.array(image.shape[1:]) // patch_size).prod().item(),
+            (np.array(image.shape[1:]) // stride).prod().item(),
             inference=self.inference,
             grounding=False,
             max_seq_len=conf.max_seq_len,
@@ -195,6 +224,7 @@ class VLTransform(mt.RandomizableTransform):
             'image': image,
             'grounding_image': torch.zeros(3, *patch_size),
             'patch_size': patch_size,
+            'pool_size': (pool_size_z, conf.pool_size_xy, conf.pool_size_xy),
             'vlm_inputs': vlm_inputs,
             'mask': torch.zeros(0, *patch_size, dtype=torch.bool),
             'mask_index': torch.empty(0, dtype=torch.bool),

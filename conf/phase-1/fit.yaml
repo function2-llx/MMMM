@@ -12,7 +12,8 @@ trainer:
     class_path: lightning.pytorch.strategies.DDPStrategy
     init_args:
       broadcast_buffers: false
-      static_graph: true
+#     `static_graph` seems to make DDP with gradient accumulation crash
+#      static_graph: true
       gradient_as_bucket_view: true
   callbacks:
   - class_path: luolib.lightning.callbacks.ModelCheckpoint

@@ -20,7 +20,7 @@ from .defs import CE_IGNORE_INDEX, DataPoint
 
 def _collate_fn(batch: list[DataPoint]):
     # maybe TODO: can we follow the type annotation of Batch?
-    list_keys = ['image', 'grounding_image', 'patch_size', 'mask', 'mask_index', 'bbox', 'bbox_index']
+    list_keys = ['image', 'grounding_image', 'patch_size', 'pool_size', 'mask', 'mask_index', 'bbox', 'bbox_index']
     list_data = {key: [] for key in list_keys}
     batch_vlm_inputs: list[dict] = []
     for x in batch:

@@ -6,12 +6,14 @@ from typing import TYPE_CHECKING
 from einops import einops
 import torch
 from torch import nn
+import torch.nn.functional as nnf
 from transformers.activations import ACT2FN
 if TYPE_CHECKING:
     import xformers.ops as xops
     from xformers.ops.fmha import BlockDiagonalMask
 
 from luolib.models import spadop
+from luolib.utils import flatten, spatialize
 from luolib.models.param import NoWeightDecayParameter
 from luolib.models.utils import forward_gc
 from luolib.types import tuple2_t, tuple3_t
@@ -49,8 +51,10 @@ class PatchEmbedding(nn.Module):
     def forward(self, image_list: list[torch.Tensor], patch_size_list: list[tuple3_t[int]]) -> tuple[torch.Tensor, BlockDiagonalMask]:
         from xformers.ops.fmha import BlockDiagonalMask
         x_list = []
+        shape_list = []
         for image, patch_size in zip(image_list, patch_size_list):
             x = self.proj(image[None], patch_size)
+            shape_list.append(x.shape[2:])
             pos_embed = spadop.resample(self.position_embedding.weight, x.shape[2:])
             x = torch.cat(
                 [
@@ -61,7 +65,7 @@ class PatchEmbedding(nn.Module):
             )
             x_list.append(x)
         attn_mask, x = BlockDiagonalMask.from_tensor_list(x_list)
-        return x, attn_mask
+        return x, attn_mask, shape_list
 
 class Attention(nn.Module):
     def __init__(self, config):
@@ -171,19 +175,24 @@ class EVA2CLIPModel(nn.Module):
         vision_config = Namespace(**config.vision_config)
         self.patch_embedding = PatchEmbedding(vision_config)
         self.transformer = Transformer(vision_config)
+        # FIXME: you call this linear?
         self.linear_proj = GLU(config, in_features=vision_config.hidden_size)
         self.boi = NoWeightDecayParameter(torch.zeros(1, 1, config.hidden_size))
         self.eoi = NoWeightDecayParameter(torch.zeros(1, 1, config.hidden_size))
 
-    def forward(self, image: list[torch.Tensor], patch_size: list[tuple3_t[int]]) -> list[torch.Tensor]:
+    def forward(self, image: list[torch.Tensor], patch_size: list[tuple3_t[int]], pool_size_list: list[tuple3_t[int]]) -> list[torch.Tensor]:
         attn_mask: BlockDiagonalMask
-        x, attn_mask = self.patch_embedding(image, patch_size)
+        x, attn_mask, shape_list = self.patch_embedding(image, patch_size)
         x = self.transformer(x, attn_mask)
         # proj as a whole for efficiency, while computation for [CLS] has no effect
         x = self.linear_proj(x)
         x_list = list(attn_mask.split(x))
-        for i, x in enumerate(x_list):
+        for i, (x, shape, pool_size) in enumerate(zip(x_list, shape_list, pool_size_list)):
             x = x[:, 1:]
+            if any(s > 1 for s in pool_size):
+                x = spatialize(x, shape)
+                x = nnf.max_pool3d(x, pool_size)
+                x = flatten(x)
             boi = self.boi.expand(x.shape[0], -1, -1)
             eoi = self.eoi.expand(x.shape[0], -1, -1)
             x = torch.cat((boi, x, eoi), dim=1)

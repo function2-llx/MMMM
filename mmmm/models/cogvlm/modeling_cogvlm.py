@@ -439,6 +439,7 @@ class CogVLMModel(CogVLMPreTrainedModel):
         *,
         image: list[torch.Tensor] | None = None,
         patch_size: list[tuple3_t[int]] | None = None,
+        pool_size: list[tuple3_t[int]],
         token_type_ids: Optional[torch.LongTensor] = None,
         image_features_mask: list[torch.BoolTensor] | None = None,
         attention_mask: Optional[torch.Tensor] = None,
@@ -461,7 +462,7 @@ class CogVLMModel(CogVLMPreTrainedModel):
                 assert image_features_mask is not None
                 assert len(input_ids) == len(image), f"batch size mismatch: {len(input_ids)} {len(image)}"
                 inputs_embeds = self.embed_tokens(input_ids)
-                image_features_list: list[torch.Tensor] = self.vision(image, patch_size)
+                image_features_list: list[torch.Tensor] = self.vision(image, patch_size, pool_size)
                 for i, (image_features, mask) in enumerate(zip(image_features_list, image_features_mask)):
                     inputs_embeds[i, mask] = image_features[0]
             else:  # single-modality
@@ -686,6 +687,7 @@ class CogVLMForCausalLM(CogVLMPreTrainedModel):
         image_features_mask: torch.BoolTensor | None = None,
         image: list[torch.Tensor] = None,
         patch_size: list[tuple3_t[int]] = None,
+        pool_size: list[tuple3_t[int]],
         token_type_ids: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
@@ -708,6 +710,7 @@ class CogVLMForCausalLM(CogVLMPreTrainedModel):
             input_ids,
             image=image,
             patch_size=patch_size,
+            pool_size=pool_size,
             image_features_mask=image_features_mask,
             token_type_ids=token_type_ids,
             attention_mask=attention_mask,

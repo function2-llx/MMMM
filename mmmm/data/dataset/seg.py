@@ -43,7 +43,7 @@ class SegTransConf:
     scale_xy: tuple2_t[float]
     scale_xy_p: float
     aniso_ratio_range: tuple2_t[float] = (0.5, 2.)
-    log_vit_patch_size_z_std = 0.25  # 2-sigma, 95.45%
+    log2_vit_patch_size_z_std = 0.5  # 2-sigma, 95.45%
     num_pos: int  # I've encountered cases setting this to larger than 48 causing NCCL timeout
     num_neg: int
     pos_th_abs: int = 1000
@@ -74,7 +74,7 @@ class SamplePatch(mt.Randomizable):
         self.device = device
         self.inference = inference
 
-    def gen_patch_info(self, sparse):
+    def gen_patch_info(self, sparse: Sparse):
         conf = self.conf
         trans_conf = conf.seg_trans
         # 1. sample tokens_z, tokens_xy, thus obtain patch_size_xy
@@ -84,8 +84,7 @@ class SamplePatch(mt.Randomizable):
             # TODO: maybe there's a better approximation for tokens_z
             tokens_z = self.R.randint(1, trans_conf.max_tokens_z + 1)
         tokens_xy = int((trans_conf.max_vision_tokens / tokens_z) ** 0.5)
-        pooling_size_xy = 2 if conf.pooling else 1
-        patch_size_xy = tokens_xy * conf.vit_patch_size_xy * pooling_size_xy
+        patch_size_xy = tokens_xy * conf.stride_xy
         # 2. sample scale_xy
         if (max_scale_xy := max(sparse.shape[1:]) / patch_size_xy) <= trans_conf.scale_xy[0]:
             # the original image is too small, just resize to patch size
@@ -116,23 +115,25 @@ class SamplePatch(mt.Randomizable):
             scale_z = 1.
         # 4. determine vit_patch_size_z
         if sparse.shape[0] == 1:
+            pool_size_z = 1
             vit_patch_size_z = 1
-            pooling_size_z = 1
         else:
+            pool_size_z = conf.base_pool_size_z
             spacing_xy = min(sparse.spacing[1:]) * scale_xy
             spacing_z = sparse.spacing[0] * scale_z
-            log_vit_patch_size_z = self.R.normal(
+            log2_vit_patch_size_z = self.R.normal(
                 np.log2(conf.base_vit_patch_size_z * spacing_xy / spacing_z),
-                trans_conf.log_vit_patch_size_z_std,
+                trans_conf.log2_vit_patch_size_z_std,
             )
-            log_vit_patch_size_z = np.clip(
-                np.rint(log_vit_patch_size_z), 0, conf.base_vit_patch_size_z.bit_length() - 1,
+            log2_vit_patch_size_z = np.clip(
+                np.rint(log2_vit_patch_size_z), 0, conf.base_vit_patch_size_z.bit_length() - 1,
             )
-            vit_patch_size_z = 1 << int(log_vit_patch_size_z)
+            vit_patch_size_z = 1 << int(log2_vit_patch_size_z)
         vit_patch_size = np.array((vit_patch_size_z, conf.vit_patch_size_xy, conf.vit_patch_size_xy))
         scale = np.array((scale_z, scale_xy, scale_xy))
-        patch_size = np.array((tokens_z * vit_patch_size_z, patch_size_xy, patch_size_xy))
-        return patch_size, scale, vit_patch_size
+        patch_size = np.array((tokens_z * vit_patch_size_z * pool_size_z, patch_size_xy, patch_size_xy))
+        pool_size = np.array((pool_size_z, conf.pool_size_xy, conf.pool_size_xy))
+        return patch_size, scale, vit_patch_size, pool_size
 
     def get_patch_start(self, maybe_patch_center: np.ndarray, effective_patch_size: np.ndarray, shape: np.ndarray):
         # TODO: add randomization
@@ -153,8 +154,9 @@ class SamplePatch(mt.Randomizable):
         sparse = Sparse.from_json((data_dir / 'sparse.json').read_bytes())
         annotation = sparse.annotation
         # 1. generate patch information
-        patch_size, scale, vit_patch_size = self.gen_patch_info(sparse)
-        patch_tokens, _rem = np.divmod(patch_size, vit_patch_size)
+        patch_size, scale, vit_patch_size, pool_size = self.gen_patch_info(sparse)
+        stride = vit_patch_size * pool_size
+        patch_tokens, _rem = np.divmod(patch_size, stride)
         assert np.array_equiv(_rem, 0)
         effective_patch_size = np.minimum(np.ceil(patch_size * scale).astype(np.int64), sparse.shape)
         # 2. sample patch position
@@ -276,6 +278,7 @@ class SamplePatch(mt.Randomizable):
             # TODO: apply transform on grounding image
             'grounding_image': patch,
             'patch_size': tuple(vit_patch_size.tolist()),
+            'pool_size': tuple(pool_size.tolist()),
             'vlm_inputs': vlm_inputs,
             'mask': mask_label,
             'mask_index': torch.ones(len(mask_classes), dtype=torch.bool),
