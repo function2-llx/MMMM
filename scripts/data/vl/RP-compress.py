@@ -1,4 +1,5 @@
 from copy import copy
+import gc
 
 import math
 from pathlib import Path
@@ -15,34 +16,43 @@ RP_dir = Path('data/processed/vision-language/Radiopaedia')
 RP_image_dir = RP_dir / 'images'
 save_dir = Path('data/processed/vl-compressed/Radiopaedia')
 image_save_dir = save_dir / 'images'
+cuda_cache_th = 10
 
 def process_study(study: dict):
-    study = copy(study)
-    for i, image_path in enumerate(study['image']):
-        image_path = Path(image_path)
-        save_path = image_save_dir / image_path.relative_to(RP_image_dir).with_suffix('.pt.zst')
-        study['image'][i] = str(save_path)
-        if save_path.exists():
-            continue
-        save_path.parent.mkdir(exist_ok=True, parents=True)
-        image = torch.load(str(image_path), mmap=True)
-        max_tokens_z = min(4, image.shape[1])
-        max_smaller_edge = int((256 / max_tokens_z) ** 0.5) * 32
-        resize_shape = [min(max_tokens_z * 32, image.shape[1]), *image.shape[2:]]
-        if (_base := min(resize_shape[1:])) > max_smaller_edge:
-            for j in (1, 2):
-                resize_shape[j] = math.ceil(resize_shape[j] * max_smaller_edge / _base)
-        if (resize_shape := tuple(resize_shape)) != image.shape[1:]:
-            image = image.to(device=get_cuda_device())
-            image = to_dtype(image, scale=True)
-            resize = mt.Resize(resize_shape, mode=InterpolateMode.TRILINEAR, anti_aliasing=True)
-            image = resize(image)
-            image = to_dtype(image.as_tensor(), dtype=torch.uint8, scale=True)
-            image = image.cpu()
-        tmp_save_path = save_path.with_name(f'.{save_path.name}')
-        save_pt_zst(image, tmp_save_path)
-        tmp_save_path.rename(save_path)
-    return study
+    try:
+        study = copy(study)
+        device = get_cuda_device()
+        for i, image_path in enumerate(study['image']):
+            cuda_cache = torch.cuda.memory_reserved(device) - torch.cuda.memory_allocated(device)
+            if cuda_cache > cuda_cache_th * 1024 ** 3:
+                gc.collect()
+                torch.cuda.empty_cache()
+            image_path = Path(image_path)
+            save_path = image_save_dir / image_path.relative_to(RP_image_dir).with_suffix('.pt.zst')
+            study['image'][i] = str(save_path)
+            if save_path.exists():
+                continue
+            save_path.parent.mkdir(exist_ok=True, parents=True)
+            image = torch.load(str(image_path), mmap=True)
+            max_tokens_z = min(4, image.shape[1])
+            max_smaller_edge = int((256 / max_tokens_z) ** 0.5) * 32
+            resize_shape = [min(max_tokens_z * 32, image.shape[1]), *image.shape[2:]]
+            if (_base := min(resize_shape[1:])) > max_smaller_edge:
+                for j in (1, 2):
+                    resize_shape[j] = math.ceil(resize_shape[j] * max_smaller_edge / _base)
+            if (resize_shape := tuple(resize_shape)) != image.shape[1:]:
+                image = image.to(device=device)
+                image = to_dtype(image, scale=True)
+                resize = mt.Resize(resize_shape, mode=InterpolateMode.TRILINEAR, anti_aliasing=True)
+                image = resize(image)
+                image = to_dtype(image.as_tensor(), dtype=torch.uint8, scale=True)
+                image = image.cpu()
+            tmp_save_path = save_path.with_name(f'.{save_path.name}')
+            save_pt_zst(image, tmp_save_path)
+            tmp_save_path.rename(save_path)
+        return study
+    except:
+        return None
 
 def process_split(split: str):
     data_list = orjson.loads((RP_dir / f'{split}.json').read_bytes())
