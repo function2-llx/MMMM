@@ -39,7 +39,9 @@ def process_study(study: dict):
             image = resize(image)
             image = to_dtype(image.as_tensor(), dtype=torch.uint8, scale=True)
             image = image.cpu()
-        save_pt_zst(image, save_path)
+        tmp_save_path = save_path.with_name(f'.{save_path.name}')
+        save_pt_zst(image, tmp_save_path)
+        tmp_save_path.rename(save_path)
     return study
 
 def process_split(split: str):
