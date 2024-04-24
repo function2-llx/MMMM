@@ -184,8 +184,6 @@ class EVA2CLIPModel(nn.Module):
         attn_mask: BlockDiagonalMask
         x, attn_mask, shape_list = self.patch_embedding(image, patch_size)
         x = self.transformer(x, attn_mask)
-        # proj as a whole for efficiency, while computation for [CLS] has no effect
-        x = self.linear_proj(x)
         x_list = list(attn_mask.split(x))
         for i, (x, shape, pool_size) in enumerate(zip(x_list, shape_list, pool_size_list)):
             x = x[:, 1:]
@@ -193,6 +191,7 @@ class EVA2CLIPModel(nn.Module):
                 x = spatialize(x, shape)
                 x = nnf.max_pool3d(x, pool_size)
                 x = flatten(x)
+            x = self.linear_proj(x)
             boi = self.boi.expand(x.shape[0], -1, -1)
             eoi = self.eoi.expand(x.shape[0], -1, -1)
             x = torch.cat((boi, x, eoi), dim=1)
