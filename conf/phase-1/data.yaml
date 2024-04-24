@@ -98,9 +98,11 @@ init_args:
     - name: PMC-OA
       type: vl
       weight: 0.002
-    max_seq_len: 1500
+    max_seq_len: 1024
+    pool_size_xy: 2
+    base_pool_size_z: 2
     seg_trans:
-      max_vision_tokens: 400
+      max_vision_tokens: 256
       scale_z: [0.5, 2]
       scale_z_p: 0.2
       max_tokens_z: 4
@@ -109,7 +111,7 @@ init_args:
       num_pos: 24
       num_neg: 6
     vl_trans:
-      max_smaller_tokens_xy: 16
+      max_tokens: 256
       max_tokens_z: 4
   dataloader:
     train_batch_size: 4

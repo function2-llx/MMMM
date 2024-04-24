@@ -125,6 +125,7 @@ class DataPoint(TypedDict):
     image: torch.Tensor
     grounding_image: torch.Tensor | None
     patch_size: tuple3_t[int]
+    pool_size: tuple3_t[int]
     vlm_inputs: dict[str, torch.Tensor]
     mask: torch.BoolTensor
     mask_index: torch.BoolTensor
@@ -135,6 +136,7 @@ class Batch(TypedDict):
     image: list[torch.Tensor]
     grounding_image: list[torch.Tensor | None]
     patch_size: list[tuple3_t[int]]
+    pool_size: list[tuple3_t[int]]
     vlm_inputs: dict[str, torch.Tensor]
     mask: list[torch.BoolTensor]
     mask_index: list[torch.BoolTensor]

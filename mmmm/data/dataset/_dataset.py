@@ -38,22 +38,25 @@ class DatasetConf:
     datasets: list[DatasetSpec]
     base_vit_patch_size_z: int = 16
     vit_patch_size_xy: int = 16
-    pooling: bool = False
+    pool_size_xy: int = 1
+    base_pool_size_z: int = 1
     seg_trans: SegTransConf
     vl_trans: VLTransConf
     max_seq_len: int | None = None
 
     @property
     def base_stride_z(self):
-        return self.base_vit_patch_size_z << self.pooling
+        return self.base_vit_patch_size_z * self.base_pool_size_z
 
     @property
     def stride_xy(self):
-        return self.vit_patch_size_xy << self.pooling
+        return self.vit_patch_size_xy * self.pool_size_xy
 
     def __post_init__(self):
         assert _is_power_of_2(self.vit_patch_size_xy)
         assert _is_power_of_2(self.base_vit_patch_size_z)
+        assert _is_power_of_2(self.pool_size_xy)
+        assert _is_power_of_2(self.base_pool_size_z)
 
 class MMMMDataset(Dataset):
     def __init__(self, conf: DatasetConf, split: split_t, tokenizer: MMMMTokenizer):
