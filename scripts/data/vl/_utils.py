@@ -10,8 +10,10 @@ from monai.transforms import generate_spatial_bounding_box
 from monai.utils import InterpolateMode
 import monai.transforms as mt
 
-def crop_resize(image: torch.Tensor):
+def crop_resize(image: torch.Tensor) -> torch.Tensor | None:
     crop_mask = (image > 0).all(0, keepdim=True)
+    if not crop_mask.any():
+        return None
     start, end = generate_spatial_bounding_box(crop_mask)
     image = image[:, *starmap(slice, zip(start, end))]
     max_tokens_z = min(4, image.shape[1])

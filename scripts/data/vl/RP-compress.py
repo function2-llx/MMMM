@@ -1,5 +1,6 @@
 from copy import copy
 from pathlib import Path
+import traceback
 
 import orjson
 import torch
@@ -17,20 +18,26 @@ cuda_cache_th = 10
 def process_study(study: dict):
     try:
         study = copy(study)
+        image_list = []
+        modality_list = []
         for i, image_path in enumerate(study['image']):
             check_cuda_cache(cuda_cache_th)
             image_path = Path(image_path)
             save_path = image_save_dir / image_path.relative_to(RP_image_dir).with_suffix('.pt.zst')
-            study['image'][i] = str(save_path)
-            if save_path.exists():
-                continue
-            save_path.parent.mkdir(exist_ok=True, parents=True)
-            image = torch.load(image_path, map_location=get_cuda_device())
-            image = crop_resize(image)
-            save_pt_zst(image.cpu(), save_path, atomic=True)
+            if not save_path.exists():
+                save_path.parent.mkdir(exist_ok=True, parents=True)
+                image = torch.load(image_path, map_location=get_cuda_device())
+                image = crop_resize(image)
+                if image is None:
+                    continue
+                save_pt_zst(image.cpu(), save_path, atomic=True)
+            image_list.append(str(save_path))
+            modality_list.append(study['modality'][i])
+        study['image'] = image_list
+        study['modality'] = modality_list
         return study
-    except Exception as e:
-        print(e)
+    except Exception:
+        print(traceback.format_exc())
         return None
 
 def process_split(split: str):
