@@ -35,7 +35,7 @@ def process_study(study: dict):
 
 def process_split(split: str):
     data_list = orjson.loads((RP_dir / f'{split}.json').read_bytes())
-    results = process_map(process_study, data_list, max_workers=0, chunksize=8, ncols=80)
+    results = process_map(process_study, data_list, max_workers=8, chunksize=8, ncols=80)
     Path(save_dir / f'{split}.json').write_bytes(orjson.dumps(results, option=orjson.OPT_INDENT_2))
 
 def main():
