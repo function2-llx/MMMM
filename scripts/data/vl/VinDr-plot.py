@@ -1,3 +1,4 @@
+from collections import Counter
 from pathlib import Path
 
 from matplotlib.patches import Rectangle
@@ -14,10 +15,19 @@ data_dir = Path('data/origin/vision-language/VinDr-CXR')
 df = pd.read_csv(data_dir / f'annotations/annotations_{split}.csv')
 loader = mt.LoadImage(reader='itkreader')
 
-targets: dict[str, list] = {}
+counters = {}
+for t in df.itertuples():
+    image_id = t.image_id
+    if (cnt := counters.get(image_id)) is None:
+        cnt = counters[image_id] = Counter()
+    cnt[t.class_name] += 1
+pd.DataFrame.from_dict(counters, orient='index').to_csv('vindir-cxr-test-stat.csv')
+exit(0)
+
+image_targets: dict[str, list] = {}
 for t in df.itertuples():
     if t.class_name != 'No finding':
-        targets.setdefault(t.image_id, []).append(t)
+        image_targets.setdefault(t.image_id, []).append(t)
 
 def plot(image_id: str):
     x: torch.Tensor = loader(data_dir / f'{split}/{image_id}.dicom')[..., 0]
@@ -28,7 +38,7 @@ def plot(image_id: str):
     ax: plt.Axes
     ax.imshow(x, cmap='gray')
     ax.set_axis_off()
-    for t in targets[image_id]:
+    for t in image_targets[image_id]:
         if t.class_name == 'No findings':
             continue
         ax.add_patch(
@@ -49,8 +59,8 @@ def plot(image_id: str):
 def main():
     set_track_meta(False)
     process_map(
-        plot, list(targets.keys()),
-        max_workers=0, chunksize=8, ncols=80,
+        plot, list(image_targets.keys()),
+        max_workers=8, chunksize=8, ncols=80,
     )
 
 if __name__ == '__main__':
