@@ -38,3 +38,4 @@ dependencies:
 # comment out since we do not need bitsandbytes currently, and it can cause trouble: https://github.com/huggingface/peft/issues/1665
 #  - bitsandbytes  # bitsandbytes plays strangely with conda, it still depends on cudatoolkit=11.8
   - xformers -i https://download.pytorch.org/whl/cu121
+#  - pylidc  # for LIDC data
