@@ -34,3 +34,4 @@ from .TotalSegmentator import TotalSegmentatorProcessor
 from .VerSe import VerSeProcessor
 from .WORD import WORDProcessor
 from .autoPET_III import AutoPETIIIProcessor
+from .LIDC_IDRI import LIDC_IDRIProcessor
