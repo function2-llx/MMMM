@@ -1,4 +1,3 @@
-import evaluate
 import json
 from jsonargparse import CLI
 import pandas as pd
@@ -10,7 +9,7 @@ from tqdm import tqdm
 from transformers import LlamaTokenizer
 
 from mmmm.data.defs import PROCESSED_VL_DATA_ROOT
-from utils import setup_seed, radfm_collate_fn, NLPMetrics
+from utils import setup_seed, setup_radfm, radfm_collate_fn, NLPMetrics
 
 
 class VQATestDataset(Dataset):
@@ -50,16 +49,8 @@ class VQAEvaluator:
         setup_seed(seed)
 
     def radfm(self):
-        sys.path.append('third-party/RadFM/Quick_demo/Model')
-        from RadFM.multimodality_model import MultiLLaMAForCausalLM
+        model, tokenizer = setup_radfm(self.checkpoint, self.tokenizer)
 
-        model = MultiLLaMAForCausalLM(
-            lang_model_path=self.tokenizer,
-        )
-        checkpoint = torch.load(self.checkpoint, map_location='cpu')
-        model.load_state_dict(checkpoint)
-        model = model.to('cuda')
-        model.eval()
         dataset = VQATestDataset(self.dataset)
         dataloader = DataLoader(
             dataset,
@@ -69,15 +60,6 @@ class VQAEvaluator:
             collate_fn=radfm_collate_fn,
         )
         results = []
-        tokenizer = LlamaTokenizer.from_pretrained(self.tokenizer)
-        special_tokens = {
-            'additional_special_tokens': [f'<image{i}>' for i in range(32)]
-            + ['<image>', '</image>']
-        }
-        tokenizer.add_special_tokens(special_tokens)
-        tokenizer.pad_token_id = 0
-        tokenizer.bos_token_id = 1
-        tokenizer.eos_token_id = 2
 
         for sample in tqdm(dataloader):
             language = tokenizer(

@@ -2,8 +2,10 @@ import evaluate
 import numpy as np
 from PIL import Image
 import random
+import sys
 import torch
 from torchvision import transforms
+from transformers import LlamaTokenizer
 
 
 def setup_seed(seed):
@@ -14,6 +16,31 @@ def setup_seed(seed):
     torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+
+def setup_radfm(checkpoint: str, tokenizer: str):
+    sys.path.append('third-party/RadFM/Quick_demo/Model')
+    from RadFM.multimodality_model import MultiLLaMAForCausalLM
+
+    model = MultiLLaMAForCausalLM(
+        lang_model_path=tokenizer,
+    )
+    checkpoint = torch.load(checkpoint, map_location='cpu')
+    model.load_state_dict(checkpoint)
+    model = model.to('cuda')
+    model.eval()
+
+    tokenizer = LlamaTokenizer.from_pretrained(tokenizer)
+    special_tokens = {
+        'additional_special_tokens': [f'<image{i}>' for i in range(32)]
+        + ['<image>', '</image>']
+    }
+    tokenizer.add_special_tokens(special_tokens)
+    tokenizer.pad_token_id = 0
+    tokenizer.bos_token_id = 1
+    tokenizer.eos_token_id = 2
+
+    return model, tokenizer
+
 
 def radfm_collate_fn(batch: list[dict]):
     assert len(batch) == 1
