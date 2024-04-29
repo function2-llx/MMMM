@@ -1,4 +1,4 @@
-from __future__ import annotations
+from __future__ import annotations as _
 
 from dataclasses import dataclass, field
 from functools import partial
@@ -35,9 +35,7 @@ class Sparse(DataClassORJSONMixin):
     Attributes:
         modalities: all images of different modalities must be co-registered
         mean: mean intensity for each modality
-        normalized: whether the images are normalized during pre-processing
-        anatomy: information for generating general conversation related to anatomy targets
-        anomaly: information for generating general conversation related to anomaly targets
+        complete_anomaly: indicating that `pos` covers all anomalies in the image
     """
     spacing: npt.NDArray[np.float64] = _numpy_field(np.float64)
     shape: npt.NDArray[np.int16] = _numpy_field(np.int16)
@@ -45,47 +43,38 @@ class Sparse(DataClassORJSONMixin):
     mean: npt.NDArray[np.float32] = _numpy_field(np.float32)
     std: npt.NDArray[np.float32] = _numpy_field(np.float32)
 
-    @dataclass
-    class Anatomy:
-        """
-        Attributes:
-            pos: anatomical structures that are assured to be observable in the image
-            neg: anatomical structures that are assured to be unobservable in the image
-        """
-        pos: set[str]
-        neg: set[str]
-    anatomy: Anatomy
-
-    @dataclass
-    class Anomaly:
-        """
-        Attributes:
-            pos: anomalies that are assured to be observable in the image; multiple instances is not supported yet
-            neg: anomalies that are assured to be unobservable in the image
-            complete: indicating that `pos` covers all anomalies in the image
-        """
-        pos: set[str]
-        neg: set[str]
-        complete: bool
-    anomaly: Anomaly
-
-    @dataclass
-    class BBox:
-        center: npt.NDArray[np.float64] = _numpy_field(np.float64)
-        size: npt.NDArray[np.float64] = _numpy_field(np.float64)
-
-    @dataclass
+    @dataclass(kw_only=True)
     class Annotation:
         """
+        indistinguishable instances of the same class
         Attributes:
-            mask: list of (name, mask size), where the order corresponds to the channel dimension of the mask
-                file, and names may repeat for multiple anomalies with the same name
-            bbox: list of (target name, 3D bounding box coordinates), coordinates range: [0, shape - 1]
+            name: class name
+            num: number of instances (== len(boxes) == len(masks), if available)
+            merged: whether different instances are merged, bbox makes little sense in this case and is set to None
+            boxes: use MONAI's StandardMode (CornerCornerModeTypeA)
+            masks: mask index of each instance corresponding to the mask file; if None, no mask for the instance available
         """
-        mask: list[tuple[str, int]]
-        bbox: list[tuple[str, Sparse.BBox]]
-    annotation: Annotation
+        name: str
+        num: int
+        boxes: npt.NDArray[np.float64] | None = field(
+            metadata={
+                'serialize': pass_through,
+                'deserialize': lambda boxes: None if boxes is None else np.array(boxes, dtype=np.float64),
+            },
+        )
+        merged: bool
 
+        @dataclass
+        class MaskInfo:
+            index: int
+            size: int = 0
+        masks: list[MaskInfo] | None
+
+    pos_anatomy: list[Annotation]
+    neg_anatomy: set[str]
+    pos_anomaly: list[Annotation]
+    neg_anomaly: set[str]
+    complete_anomaly: bool
     extra: Any = None
 
     class Config(BaseConfig):
