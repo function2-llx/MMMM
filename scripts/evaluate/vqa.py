@@ -10,7 +10,7 @@ from tqdm import tqdm
 from transformers import LlamaTokenizer
 
 from mmmm.data.defs import PROCESSED_VL_DATA_ROOT
-from _utils import setup_seed, radfm_collate_fn
+from utils import setup_seed, radfm_collate_fn, MMMMMetrics
 
 
 class VQATestDataset(Dataset):
@@ -36,7 +36,7 @@ class VQAEvaluator:
         checkpoint: str,
         tokenizer: str,
         dataset: str,
-        seed: int = 42,
+        seed: int = 233,
         num_workers: int = 8,
         output_dir: str = 'results/',
     ):
@@ -46,6 +46,7 @@ class VQAEvaluator:
         self.num_workers = num_workers
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.metrics = MMMMMetrics()
         setup_seed(seed)
 
     def radfm(self):
@@ -78,12 +79,6 @@ class VQAEvaluator:
         tokenizer.bos_token_id = 1
         tokenizer.eos_token_id = 2
 
-        bleu = evaluate.load('bleu')
-        rouge = evaluate.load('rouge')
-        meteor = evaluate.load('meteor')
-        bertscore = evaluate.load('bertscore')
-        exact_match = evaluate.load('exact_match')
-
         for sample in tqdm(dataloader):
             language = tokenizer(
                 sample['question'],
@@ -96,19 +91,12 @@ class VQAEvaluator:
             prediction = tokenizer.decode(
                 model.generate(language, vision)[0], skip_special_tokens=True
             )
-            bleu.add(predictions=prediction.lower(), references=[sample['answer'].lower()])
-            rouge.add(predictions=prediction, references=sample['answer'])
-            meteor.add(predictions=prediction, references=sample['answer'])
-            bertscore.add(
-                predictions=prediction,
-                references=sample['answer'],
-            )
-            exact_match.add(predictions=prediction, references=sample['answer'])
             results.append(
                 {
                     'question': sample['question'],
                     'answer': sample['answer'],
                     'prediction': prediction,
+                    **self.metrics.compute(prediction, sample['answer'])
                 },
             )
 
@@ -122,11 +110,11 @@ class VQAEvaluator:
         )
         with open(self.output_dir / f'{self.dataset}_radfm_zeroshot.json', 'w') as f:
             json.dump({
-                'bleu': bleu.compute(max_order=1)['bleu'],
-                'rouge': rouge.compute()['rouge1'],
-                'meteor': meteor.compute()['meteor'],
-                'bertscore': sum(bertscore.compute(model_type='microsoft/deberta-xlarge-mnli')['f1']) / len(dataloader),
-                'exact_match': exact_match.compute()['exact_match'],
+                'bleu': results['bleu'].mean(),
+                'rouge': results['rouge'].mean(),
+                'meteor': results['meteor'].mean(),
+                'bertscore': results['bertscore'].mean(),
+                'exact_match': results['exact_match'].mean(),
             }, f)
 
 
