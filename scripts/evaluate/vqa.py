@@ -10,7 +10,7 @@ from tqdm import tqdm
 from transformers import LlamaTokenizer
 
 from mmmm.data.defs import PROCESSED_VL_DATA_ROOT
-from utils import setup_seed, radfm_collate_fn, MMMMMetrics
+from utils import setup_seed, radfm_collate_fn, NLPMetrics
 
 
 class VQATestDataset(Dataset):
@@ -46,7 +46,7 @@ class VQAEvaluator:
         self.num_workers = num_workers
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.metrics = MMMMMetrics()
+        self.metrics = NLPMetrics()
         setup_seed(seed)
 
     def radfm(self):
@@ -115,7 +115,7 @@ class VQAEvaluator:
                 'meteor': results['meteor'].mean(),
                 'bertscore': results['bertscore'].mean(),
                 'exact_match': results['exact_match'].mean(),
-            }, f)
+            }, f, indent=4)
 
 
 if __name__ == '__main__':

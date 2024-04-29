@@ -69,7 +69,7 @@ def radfm_collate_fn(batch: list[dict]):
         'answer': batch[0]['answer'],
     }
 
-class MMMMMetrics:
+class NLPMetrics:
     def __init__(self):
         self.bleu = evaluate.load('bleu')
         self.rouge = evaluate.load('rouge')
@@ -78,12 +78,10 @@ class MMMMMetrics:
         self.exact_match = evaluate.load('exact_match')
 
     def compute(self, prediction, reference):
-        prediction = prediction.lower()
-        reference = reference.lower()
         return {
-            'bleu': self.bleu.compute(predictions=[prediction], references=[[reference]], max_order=1)['bleu'] if prediction.strip() else 0.0,
-            'rouge': self.rouge.compute(predictions=[prediction], references=[reference])['rouge1'],
-            'meteor': self.meteor.compute(predictions=[prediction], references=[reference])['meteor'],
+            'bleu': self.bleu.compute(predictions=[prediction.lower()], references=[[reference.lower()]], max_order=1)['bleu'] if prediction.strip() else 0.0,
+            'rouge': self.rouge.compute(predictions=[prediction.lower()], references=[reference.lower()])['rouge1'],
+            'meteor': self.meteor.compute(predictions=[prediction.lower()], references=[reference.lower()])['meteor'],
             'bertscore': self.bertscore.compute(predictions=[prediction], references=[reference], model_type='microsoft/deberta-xlarge-mnli')['f1'][0],
-            'exact_match': self.exact_match.compute(predictions=[prediction], references=[reference])['exact_match'],
+            'exact_match': self.exact_match.compute(predictions=[prediction.lower()], references=[reference.lower()])['exact_match'],
         }
