@@ -1,5 +1,7 @@
+from einops import repeat
 import evaluate
 import numpy as np
+import pandas as pd
 from PIL import Image
 import random
 import sys
@@ -12,27 +14,28 @@ def setup_seed(seed):
     np.random.seed(seed)
     random.seed(seed)
     torch.manual_seed(seed)
-    torch.use_deterministic_algorithms(True) # export CUBLAS_WORKSPACE_CONFIG=:16:8
+    torch.use_deterministic_algorithms(True)  # export CUBLAS_WORKSPACE_CONFIG=:16:8
     torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
+
 def setup_radfm(checkpoint: str, tokenizer: str):
-    sys.path.append('third-party/RadFM/Quick_demo/Model')
+    sys.path.append("third-party/RadFM/Quick_demo/Model")
     from RadFM.multimodality_model import MultiLLaMAForCausalLM
 
     model = MultiLLaMAForCausalLM(
         lang_model_path=tokenizer,
     )
-    checkpoint = torch.load(checkpoint, map_location='cpu')
+    checkpoint = torch.load(checkpoint, map_location="cpu")
     model.load_state_dict(checkpoint)
-    model = model.to('cuda')
+    model = model.to("cuda")
     model.eval()
 
     tokenizer = LlamaTokenizer.from_pretrained(tokenizer)
     special_tokens = {
-        'additional_special_tokens': [f'<image{i}>' for i in range(32)]
-        + ['<image>', '</image>']
+        "additional_special_tokens": [f"<image{i}>" for i in range(32)]
+        + ["<image>", "</image>"]
     }
     tokenizer.add_special_tokens(special_tokens)
     tokenizer.pad_token_id = 0
@@ -44,8 +47,8 @@ def setup_radfm(checkpoint: str, tokenizer: str):
 
 def radfm_collate_fn(batch: list[dict]):
     assert len(batch) == 1
-    if batch[0]['image'].endswith('.pt'):
-        image = torch.load(batch[0]['image'])
+    if batch[0]["image"].endswith(".pt"):
+        image = torch.load(batch[0]["image"])
         image = (image - image.min()) / (image.max() - image.min())
     else:
         transform = transforms.Compose(
@@ -58,7 +61,7 @@ def radfm_collate_fn(batch: list[dict]):
                 transforms.ToTensor(),
             ]
         )
-        image = transform(Image.open(batch[0]['image']).convert('RGB'))
+        image = transform(Image.open(batch[0]["image"]).convert("RGB"))
     target_d, max_d = 4, 4
     if len(image.shape) == 4:
         max_d = max(image.shape[3], max_d)
@@ -67,14 +70,14 @@ def radfm_collate_fn(batch: list[dict]):
             target_d = temp_d
     if len(image.shape) == 3:
         image = torch.nn.functional.interpolate(
-            image.unsqueeze(0).unsqueeze(-1), size=(512, 512, target_d)
+            repeat(image, "c h w -> 1 c h w 1"), size=(512, 512, target_d)
         ).unsqueeze(0)
     else:
         image = torch.nn.functional.interpolate(
-            image.unsqueeze(0), size=(512, 512, target_d)
+            repeat(image, "c h w d -> 1 c h w d"), size=(512, 512, target_d)
         ).unsqueeze(0)
-    question_list = [False for _ in range(len(str(batch[0]['question'])))]
-    question = ''
+    question_list = [False for _ in range(len(str(batch[0]["question"])))]
+    question = ""
     if random.random() < 0.5:
         position = 0
     else:
@@ -83,32 +86,112 @@ def radfm_collate_fn(batch: list[dict]):
     for i in range(len(question_list)):
         if question_list[i]:
             question += (
-                '<image>'
-                + ''.join([f'<image{i}>' for i in range(32)])
-                + '</image>'
-                + batch[0]['question'][i]
+                "<image>"
+                + "".join([f"<image{i}>" for i in range(32)])
+                + "</image>"
+                + batch[0]["question"][i]
             )
         else:
-            question += batch[0]['question'][i]
+            question += batch[0]["question"][i]
     return {
-        'image': image,
-        'question': question,
-        'answer': batch[0]['answer'],
+        "image": image,
+        "question": question,
+        "answer": batch[0]["answer"],
     }
+
+
+def setup_medflamingo(checkpoint: str, tokenizer: str):
+    from accelerate import Accelerator
+    from huggingface_hub import hf_hub_download
+    from open_flamingo import create_model_and_transforms
+
+    model, image_processor, tokenizer = create_model_and_transforms(
+        clip_vision_encoder_path="ViT-L-14",
+        clip_vision_encoder_pretrained="openai",
+        lang_encoder_path=checkpoint,
+        tokenizer_path=tokenizer,
+        cross_attn_every_n_layers=4,
+    )
+    medflamingo = hf_hub_download("med-flamingo/med-flamingo", "model.pt")
+    model.load_state_dict(torch.load(medflamingo, map_location="cpu"), strict=False)
+
+    processor = FlamingoProcessor(tokenizer, image_processor)
+
+    accelerator = Accelerator()
+    model = accelerator.prepare(model)
+    model.eval()
+
+    return model, processor
+
+
+def medflamingo_collate_fn(batch: list[dict]):
+    assert len(batch) == 1
+    image = Image.open(batch[0]["image"]).convert("RGB")
+
+    return {
+        "image": image,
+        "question": '<image>Question:' + batch[0]["question"] + ' Answer:',
+        "answer": batch[0]["answer"],
+    }
+
+
+class FlamingoProcessor:
+    """
+    Processor class for Flamingo.
+    """
+
+    def __init__(self, tokenizer, vision_processor):
+        """
+        OF does not use same vision processor, image_processor only transforms single image
+        """
+        self.tokenizer = tokenizer
+        self.vision_processor = vision_processor
+
+    def encode_text(self, prompt):
+        self.tokenizer.padding_side = "left"
+        # For generation padding tokens should be on the left
+        return self.tokenizer(
+            [prompt],
+            return_tensors="pt",
+        )
+
+    def preprocess_images(self, images: list):
+        vision_x = [self.vision_processor(im).unsqueeze(0) for im in images]
+        vision_x = torch.cat(vision_x, dim=0)
+        return vision_x
+
 
 class NLPMetrics:
     def __init__(self):
-        self.bleu = evaluate.load('bleu')
-        self.rouge = evaluate.load('rouge')
-        self.meteor = evaluate.load('meteor')
-        self.bertscore = evaluate.load('bertscore')
-        self.exact_match = evaluate.load('exact_match')
+        self.bleu = evaluate.load("bleu")
+        self.rouge = evaluate.load("rouge")
+        self.meteor = evaluate.load("meteor")
+        self.bertscore = evaluate.load("bertscore")
+        self.exact_match = evaluate.load("exact_match")
 
-    def compute(self, prediction, reference):
+    def compute(self, prediction: str, reference: str):
         return {
-            'bleu': self.bleu.compute(predictions=[prediction.lower()], references=[[reference.lower()]], max_order=1)['bleu'] if prediction.strip() else 0.0,
-            'rouge': self.rouge.compute(predictions=[prediction.lower()], references=[reference.lower()])['rouge1'],
-            'meteor': self.meteor.compute(predictions=[prediction.lower()], references=[reference.lower()])['meteor'],
-            'bertscore': self.bertscore.compute(predictions=[prediction], references=[reference], model_type='microsoft/deberta-xlarge-mnli')['f1'][0],
-            'exact_match': self.exact_match.compute(predictions=[prediction.lower()], references=[reference.lower()])['exact_match'],
+            "bleu": (
+                self.bleu.compute(
+                    predictions=[prediction.lower()],
+                    references=[[reference.lower()]],
+                    max_order=1,
+                )["bleu"]
+                if prediction.strip()
+                else 0.0
+            ),
+            "rouge": self.rouge.compute(
+                predictions=[prediction.lower()], references=[reference.lower()]
+            )["rouge1"],
+            "meteor": self.meteor.compute(
+                predictions=[prediction.lower()], references=[reference.lower()]
+            )["meteor"],
+            "bertscore": self.bertscore.compute(
+                predictions=[prediction],
+                references=[reference],
+                model_type="microsoft/deberta-xlarge-mnli",
+            )["f1"][0],
+            "exact_match": self.exact_match.compute(
+                predictions=[prediction.lower()], references=[reference.lower()]
+            )["exact_match"],
         }
