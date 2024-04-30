@@ -28,12 +28,13 @@ def process_text(json_file: str):
             img = item['img_name']
             vqa = []
             modality = item['modality']
-        vqa.append(
-            {
-                'question': item['question'],
-                'answer': item['answer'],
-            }
-        )
+        if item['q_lang'] == 'en':
+            vqa.append(
+                {
+                    'question': item['question'],
+                    'answer': item['answer'],
+                }
+            )
         
     with open(PROCESSED_VL_DATA_ROOT / 'Slake' / json_file, 'w') as f:
         json.dump(processed_data, f, indent=4, ensure_ascii=False)
