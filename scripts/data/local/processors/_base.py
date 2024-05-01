@@ -171,7 +171,7 @@ class Processor(ABC):
         assert torch.allclose(affine1, affine2, atol=atol)
 
     def create_seg_annotations(self, targets: list[str], masks: MetaTensor) -> tuple[list[str], set[str], MetaTensor | None, None]:
-        pos_mask = einops.reduce(masks, 'c ... -> c', 'any').cpu()
+        pos_mask = einops.reduce(masks, 'c ... -> c', 'any').cpu().numpy()
         targets = np.array(targets)
         pos_targets = targets[pos_mask].tolist()
         neg_targets = set(targets[~pos_mask].tolist())
@@ -317,7 +317,7 @@ class Processor(ABC):
 
     def _convert_annotations(
         self, targets: list[str], masks: torch.BoolTensor | None, boxes: torch.ShortTensor | None,
-    ) -> tuple[list[Sparse.Annotation], torch.ShortTensor]:
+    ) -> tuple[list[Sparse.Annotation], torch.ShortTensor | None]:
         ret = []
         class_positions = None if masks is None and boxes is None else []
         if masks is not None:
@@ -360,7 +360,9 @@ class Processor(ABC):
                     ],
                 ),
             )
-        return ret, torch.cat(class_positions)
+        if class_positions is not None:
+            class_positions = torch.cat(class_positions)
+        return ret, class_positions
 
     def process_data_point(self, data_point: DataPoint, empty_cache: bool, raise_error: bool):
         """
@@ -431,8 +433,9 @@ class Processor(ABC):
                 boxes[:, :3] = boxes_f[:, :3].floor()
                 boxes[:, 3:] = boxes_f[:, 3:].ceil()
             annotations, class_positions = self._convert_annotations(targets, masks, boxes)
-            # the size of clas_positions is small, and we can use mmap, thus not compressed
-            torch.save(class_positions.cpu(), save_dir / 'class_positions.pt')
+            if class_positions is not None:
+                # the size of clas_positions is small, and we can use mmap, thus not compressed
+                torch.save(class_positions.cpu(), save_dir / 'class_positions.pt')
             annotations = cytoolz.groupby(lambda annotation: self._get_category(annotation.name), annotations)
             neg_targets = cytoolz.groupby(lambda name: self._get_category(name), neg_targets)
             # 4.4 handle and save sparse information

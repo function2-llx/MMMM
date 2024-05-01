@@ -1,10 +1,19 @@
+from pathlib import Path
+
+import einops
 import torch
 
+from monai.data import MetaTensor
 from ._base import DataPoint, DefaultMaskLoaderMixin, MultiLabelMultiFileDataPoint, NaturalImageLoaderMixin, Processor
 
 class BUSIProcessor(NaturalImageLoaderMixin, DefaultMaskLoaderMixin, Processor):
     name = 'BUSI'
     mask_dtype = torch.bool
+
+    def mask_loader(self, path: Path) -> MetaTensor:
+        mask = super().mask_loader(path)
+        mask = einops.reduce(mask, 'c ... -> 1 ...', 'any')
+        return mask
 
     def get_data_points(self) -> list[DataPoint]:
         ret = []
