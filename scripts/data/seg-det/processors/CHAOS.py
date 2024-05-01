@@ -17,6 +17,12 @@ class CHAOSProcessor(DefaultImageLoaderMixin, Processor):
         252: 'spleen',
     }
 
+    def load_masks(self, data_point: MultiClassDataPoint, images: MetaTensor):
+        targets, masks = super().load_masks(data_point, images)
+        # the affine is ensured in `self.mask_loader`
+        masks.affine = images.affine
+        return targets, masks
+
     def mask_loader(self, mask_dir: Path):
         loader = mt.LoadImage(dtype=np.uint8)
         mask = einops.rearrange(
@@ -24,10 +30,6 @@ class CHAOSProcessor(DefaultImageLoaderMixin, Processor):
             'd h w -> 1 h w d',
         )
         return mask.flip(dims=(1, 2))
-
-    def orient(self, images: MetaTensor, masks: MetaTensor) -> tuple[MetaTensor, MetaTensor]:
-        masks.affine = images.affine
-        return super().orient(images, masks)
 
     def _prepare(self, key: str, modality: str, image_dir: Path, mask_dir: Path) -> MultiClassDataPoint:
         return MultiClassDataPoint(

@@ -5,7 +5,7 @@ from ._base import DefaultMaskLoaderMixin, DefaultImageLoaderMixin, MultiLabelMu
 class RibFracProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor):
     name = 'RibFrac'
     orientation = 'SRA'
-    bbox_ignore_targets = {'rib fracture'}
+    merged_targets = {'rib fracture'}
 
     def _ensure_binary_mask(self, mask: torch.Tensor):
         mask[mask != 0] = 1

@@ -1,6 +1,9 @@
 import torch
 
-from ._base import DataPoint, DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor, MultiClassDataPoint
+from ._base import (
+    DataPoint, DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor, MultiClassDataPoint,
+    SegDataPoint,
+)
 
 class BraTS2023SegmentationProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor):
     orientation = 'SRA'
@@ -9,8 +12,8 @@ class BraTS2023SegmentationProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderM
     def output_name(self):
         return f"BraTS2023-{self.name.split('-')[-1]}"
 
-    def load_masks(self, data_point: DataPoint) -> tuple[torch.BoolTensor, list[str]]:
-        masks, targets = super().load_masks(data_point)
+    def load_masks(self, data_point: SegDataPoint, *args, **kwargs):
+        masks, targets = super().load_masks(data_point, *args, **kwargs)
         mask_map = {target: mask for mask, target in zip(masks, targets)}
         masks = torch.stack([
             mask_map['necrotic tumor core'],
@@ -18,7 +21,7 @@ class BraTS2023SegmentationProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderM
             mask_map['necrotic tumor core'] | mask_map['enhancing tumor'],
         ])
         targets = ['necrotic tumor core', 'peritumoral edema', 'glioma']
-        return masks, targets
+        return targets, masks
 
     def get_data_points(self) -> list[DataPoint]:
         modality_map = {

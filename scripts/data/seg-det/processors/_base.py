@@ -1,10 +1,12 @@
 from abc import ABC, abstractmethod
+from collections.abc import Iterable
 from dataclasses import dataclass
 import gc
 import itertools as it
 from logging import Logger
 from pathlib import Path
 
+import cytoolz
 import einops
 import numpy as np
 from numpy import typing as npt
@@ -12,19 +14,21 @@ import pandas as pd
 from scipy.stats import norm
 import torch
 from torch.nn import functional as nnf
-from torchvision.transforms import v2 as tvt
 from torchvision.transforms.v2 import functional as tvtf
 
 from luolib import transforms as lt
 from luolib.transforms import affine_resize
 from luolib.types import tuple3_t
-from luolib.utils import as_tensor, get_cuda_device, process_map, save_pt_zst
+from luolib.utils import as_tensor, fall_back_none, get_cuda_device, process_map, save_pt_zst
 from monai import transforms as mt
-from monai.data import MetaTensor
-from monai.utils import GridSampleMode
+from monai.apps.detection.transforms.box_ops import apply_affine_to_boxes
+from monai.data import MetaTensor, convert_box_to_standard_mode
+from monai.data.box_utils import CornerCornerModeTypeB, box_centers, clip_boxes_to_image
+from monai.transforms import generate_spatial_bounding_box
 
 from mmmm.data import load_target_tax
-from mmmm.data.defs import ORIGIN_SEG_DATA_ROOT, PROCESSED_SEG_DATA_ROOT, Sparse
+from mmmm.data.defs import ORIGIN_SEG_DATA_ROOT, PROCESSED_SEG_DATA_ROOT
+from mmmm.data.sparse import Sparse
 
 @dataclass(kw_only=True)
 class DataPoint:
@@ -39,13 +43,17 @@ class DataPoint:
     complete_anomaly: bool = False
     extra: ... = None
 
+@dataclass(kw_only=True)
+class SegDataPoint(DataPoint):
+    pass
+
 """
 1. multi-label, multi-file (single-channel, binary values)
 2. multi-class, single-file (single-channel, multiple values)
 """
 
 @dataclass(kw_only=True)
-class MultiLabelMultiFileDataPoint(DataPoint):
+class MultiLabelMultiFileDataPoint(SegDataPoint):
     """
     Attributes:
         masks: list of (target name, path to the segmentation mask)
@@ -53,37 +61,27 @@ class MultiLabelMultiFileDataPoint(DataPoint):
     masks: list[tuple[str, Path]]
 
 @dataclass(kw_only=True)
-class MultiClassDataPoint(DataPoint):
+class MultiClassDataPoint(SegDataPoint):
     label: Path
     class_mapping: dict[int, str]
 
 _CLIP_LOWER = norm.cdf(-3)
 _CLIP_UPPER = norm.cdf(3)
 
-def clip_intensity(img: torch.Tensor) -> torch.BoolTensor:
+def clip_intensity(image: torch.Tensor) -> mt.SpatialCrop:
     """clip the intensity in-place
     Returns:
-        the crop mask after clipping
+        the cropper
     """
-    x = img.view(img.shape[0], -1)
-    if img.dtype == torch.uint8:
-        minv = img.new_tensor(0.)
+    x = image.view(image.shape[0], -1)
+    if image.dtype == torch.uint8:
+        minv = image.new_tensor(0.)
     else:
         minv = lt.quantile(x, _CLIP_LOWER, 1, True)
         maxv = lt.quantile(x, _CLIP_UPPER, 1, True)
         x.clamp_(minv, maxv)
-    crop_mask = img.new_zeros((1, *img.shape[1:]), dtype=torch.bool)
-    torch.any(x > minv, dim=0, keepdim=True, out=crop_mask.view(1, -1))
-    return crop_mask
-
-def crop(images: torch.Tensor, masks: torch.BoolTensor, crop_mask: torch.BoolTensor) -> tuple[MetaTensor, torch.BoolTensor]:
-    data = {
-        'images': images,
-        'masks': masks,
-        'crop_mask': crop_mask,
-    }
-    data = mt.CropForegroundD(['images', 'masks'], 'crop_mask', start_coord_key=None, end_coord_key=None)(data)
-    return data['images'], data['masks']
+    roi_start, roi_end = generate_spatial_bounding_box(image > minv)
+    return mt.SpatialCrop(roi_start=roi_start, roi_end=roi_end)
 
 class Processor(ABC):
     """
@@ -92,8 +90,8 @@ class Processor(ABC):
         name: name of the dataset to be processed by the processor
         orientation: if orientation is None, will determine it from the spacing
         min_aniso_ratio: minimum value for spacing_z / spacing_xy
-        do_normalize: whether to normalize the image during pre-processing; otherwise, during training
         cuda_cache_th: cuda cache usage threshold to empty cache (in GiB)
+        merged_targets: classes that merge multiple instances into a single mask, and will be excluded from bbox calculation from the mask
     """
     name: str
     max_workers: int | None = None
@@ -104,7 +102,8 @@ class Processor(ABC):
     mask_batch_size: int = 8
     max_class_positions: int = 10000
     cuda_cache_th: int = 15
-    bbox_ignore_targets: set[str] = set()
+    merged_targets: set[str] = set()
+    affine_atol: float = 1e-4
 
     def __init__(self, logger: Logger, *, max_workers: int, chunksize: int, override: bool):
         self.tax = load_target_tax()
@@ -113,6 +112,9 @@ class Processor(ABC):
             self.max_workers = max_workers
         if self.chunksize is None or override:
             self.chunksize = chunksize
+
+    def _get_category(self, name):
+        return self.tax[name].category
 
     @property
     def dataset_root(self):
@@ -164,16 +166,23 @@ class Processor(ABC):
         assert ((mask == 0) | (mask == 1)).all()
         return mask.bool()
 
-    def _check_affine(self, affine1: torch.Tensor, affine2: torch.Tensor, atol: float = 1e-2):
+    def _check_affine(self, affine1: torch.Tensor, affine2: torch.Tensor, atol: float | None = None):
+        atol = fall_back_none(atol, self.affine_atol)
         assert torch.allclose(affine1, affine2, atol=atol)
 
-    def load_masks(self, data_point: DataPoint) -> tuple[MetaTensor, list[str]]:
-        """
-        NOTE: metadata for mask should be preserved to match with the image
-        Returns:
-            - a tensor of segmentation masks (dtype = torch.bool)
-            - target names corresponding to the channel dimension
-        """
+    def create_seg_annotations(self, targets: list[str], masks: MetaTensor) -> tuple[list[str], set[str], MetaTensor | None, None]:
+        pos_mask = einops.reduce(masks, 'c ... -> c', 'any').cpu()
+        targets = np.array(targets)
+        pos_targets = targets[pos_mask].tolist()
+        neg_targets = set(targets[~pos_mask].tolist())
+        assert len(set(pos_targets) & neg_targets) == 0
+        if pos_mask.any():
+            masks = masks[pos_mask]
+        else:
+            masks = None
+        return pos_targets, neg_targets, masks, None
+
+    def load_masks(self, data_point: SegDataPoint, images: MetaTensor) -> tuple[list[str], MetaTensor]:
         device = get_cuda_device()
         if isinstance(data_point, MultiLabelMultiFileDataPoint):
             targets, mask_paths = zip(*data_point.masks)
@@ -191,16 +200,40 @@ class Processor(ABC):
             masks = self._ensure_binary_mask(masks)
         elif isinstance(data_point, MultiClassDataPoint):
             class_mapping = data_point.class_mapping
+            targets = list(class_mapping.values())
             label: MetaTensor = self.mask_loader(data_point.label).to(dtype=torch.int16, device=device)
             assert label.shape[0] == 1
             class_ids = torch.tensor([c for c in class_mapping], dtype=torch.int16, device=device)
             for _ in range(label.ndim - 1):
                 class_ids = class_ids[..., None]  # make broadcastable
-            targets = list(class_mapping.values())
             masks = label == class_ids
         else:
             raise NotImplementedError
-        return masks, targets
+        return targets, masks
+
+    def load_annotations(
+        self, data_point: DataPoint, images: MetaTensor,
+    ) -> tuple[list[str], set[str], MetaTensor | None, torch.ShortTensor | None]:
+        """
+        NOTE: metadata for mask should be preserved to match with the image
+        Args:
+            images: the loaded images, can be useful when some metadata (e.g., affine, shape) is needed
+        Returns:
+            - list of positive targets
+            - set of negative targets
+            - segmentation masks (dtype = torch.bool).
+              should follow the order of positive targets.
+              return meta tensor for affine checking.
+              None when unavailable.
+            - bounding box in StandardMode (CornerCornerModeTypeA).
+              should follow the order of positive targets.
+              None when unavailable.
+        """
+        if isinstance(data_point, SegDataPoint):
+            targets, masks = self.load_masks(data_point, images)
+            return self.create_seg_annotations(targets, masks)
+        else:
+            raise NotImplementedError
 
     def _collect_info(self, data_point: DataPoint):
         if (path := self.case_data_root / data_point.key / 'info.pkl').exists():
@@ -240,13 +273,12 @@ class Processor(ABC):
         codes = ['RAS', 'ASR', 'SRA']
         diff = np.empty(len(codes))
         shape_diff = np.empty(len(codes), dtype=np.int32)
-        dummy = MetaTensor(torch.empty(1, *images.shape[1:], device=images.device), images.affine)
+        dummy = MetaTensor(torch.empty(0, *images.shape[1:], device=images.device), images.affine)
         for i, code in enumerate(codes):
             orientation = mt.Orientation(code)
             dummy_t: MetaTensor = orientation(dummy)
             diff[i] = abs(dummy_t.pixdim[1] - dummy_t.pixdim[2])
             shape_diff[i] = abs(dummy_t.shape[2] - dummy_t.shape[3])
-
         if diff.max() - diff.min() > 1e-3 * diff.min():
             orientation = codes[diff.argmin()]
         elif shape_diff.min() == 0 and shape_diff.max() != 0:
@@ -256,12 +288,6 @@ class Processor(ABC):
             # fall back to SRA
             orientation = 'SRA'
         return orientation
-
-    def orient(self, images: MetaTensor, masks: MetaTensor) -> tuple[MetaTensor, MetaTensor]:
-        orientation = self.get_orientation(images)
-        trans = mt.Orientation(orientation)
-        images, masks = map(lambda x: trans(x).contiguous(), [images, masks])
-        return images, masks
 
     def compute_resize(self, spacing: torch.DoubleTensor, shape: tuple3_t[int]) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.int16]]:
         if self.max_smaller_edge < (smaller_edge := min(shape[1:])):
@@ -276,34 +302,65 @@ class Processor(ABC):
         new_shape = (np.array(shape) / scale).round().astype(np.int16)
         return new_spacing, new_shape
 
-    def _check_targets(self, targets: list[str]):
-        unknown_targets = [name for name in targets if name not in self.tax]
+    def _check_targets(self, targets: Iterable[str]):
+        unknown_targets = [*filter(lambda name: name not in self.tax, targets)]
         if len(unknown_targets) > 0:
             print('unknown targets:', unknown_targets)
             raise ValueError
 
-    def _generate_bbox_from_mask(self, masks: torch.BoolTensor) -> list[Sparse.BBox]:
-        if masks.shape[0] == 0:
-            return []
+    @staticmethod
+    def _generate_bbox_from_mask(masks: torch.BoolTensor) -> torch.ShortTensor:
         bbox_t = mt.BoundingRect()
-        bbox = bbox_t(masks)
-        bbox = bbox.reshape((-1, 3, 2)) / np.array(masks.shape[1:])[:, None]
-        center = bbox.mean(axis=2)
-        shape = bbox[..., 1] - bbox[..., 0]
-        return [Sparse.BBox(c, s) for c, s in zip(center, shape)]
+        boxes = bbox_t(masks).astype(np.int16)
+        boxes = convert_box_to_standard_mode(boxes, CornerCornerModeTypeB)
+        return torch.from_numpy(boxes)
 
-    def _compute_class_positions(self, masks: torch.BoolTensor) -> tuple[torch.ShortTensor, torch.LongTensor]:
+    def _convert_annotations(
+        self, targets: list[str], masks: torch.BoolTensor | None, boxes: torch.ShortTensor | None,
+    ) -> tuple[list[Sparse.Annotation], torch.ShortTensor]:
         ret = []
-        offsets = torch.empty(masks.shape[0] + 1, dtype=torch.long, device=masks.device)
-        offsets[0] = 0
-        for i, mask in enumerate(masks):
-            positions = mask.nonzero().short()
-            if positions.shape[0] > self.max_class_positions:
-                # deterministic? random!
-                positions = positions[torch.randint(positions.shape[0], (self.max_class_positions,), device=mask.device)]
-            offsets[i + 1] = offsets[i] + positions.shape[0]
-            ret.append(positions)
-        return torch.cat(ret), offsets
+        class_positions = None if masks is None and boxes is None else []
+        if masks is not None:
+            mask_sizes: list[int] = einops.reduce(masks, 'c ... -> c', 'sum').tolist()
+            assert boxes is None
+            boxes = Processor._generate_bbox_from_mask(masks)
+        offset = 0
+        for target, group in cytoolz.groupby(lambda x: x[1], enumerate(targets)).items():
+            indexes: list[int] = [i for i, _ in group]
+            merged = target in self.merged_targets
+            num = len(group)
+            if merged:
+                assert num == 1
+            class_boxes = None if boxes is None else torch.stack([boxes[i] for i in indexes])
+            if masks is not None:
+                merged_mask = einops.reduce(masks[indexes], 'n ... -> ...', 'any')
+                positions = merged_mask.nonzero().short()
+            elif class_boxes is not None:
+                positions = box_centers(class_boxes).round().short()
+            if class_positions is not None:
+                if positions.shape[0] > self.max_class_positions:
+                    positions = positions[
+                        # deterministic? random!
+                        torch.randint(positions.shape[0], (self.max_class_positions,), device=positions.device),
+                    ]
+                class_positions.append(positions)
+                position_offset = (offset, (offset := offset + positions.shape[0]))
+            else:
+                position_offset = None
+            ret.append(
+                Sparse.Annotation(
+                    name=target,
+                    num=num,
+                    merged=merged,
+                    position_offset=position_offset,
+                    boxes=None if boxes is None or merged else torch.stack([boxes[i] for i in indexes]).numpy(),
+                    masks=None if masks is None else [
+                        Sparse.Annotation.MaskInfo(i, mask_sizes[i])
+                        for i in indexes
+                    ],
+                ),
+            )
+        return ret, torch.cat(class_positions)
 
     def process_data_point(self, data_point: DataPoint, empty_cache: bool, raise_error: bool):
         """
@@ -315,25 +372,34 @@ class Processor(ABC):
             if empty_cache:
                 device = get_cuda_device()
                 cuda_cache = torch.cuda.memory_reserved(device) - torch.cuda.memory_allocated(device)
-                if cuda_cache > self.cuda_cache_th * 1024 ** 3:
+                if cuda_cache > self.cuda_cache_th << 30:
                     gc.collect()
                     torch.cuda.empty_cache()
             modalities, images = self.load_images(data_point)
-            masks, targets = self.load_masks(data_point)
+            targets, neg_targets, masks, boxes = self.load_annotations(data_point, images)
+            if len(self.merged_targets) > 0:
+                assert boxes is None, 'only masks can be merged'
             self._check_targets(targets)
-            images, masks = self.orient(images, masks)
-            assert images.shape[1:] == masks.shape[1:]
-            self._check_affine(images.affine, masks.affine)
+            self._check_targets(neg_targets)
+            # 1. orientation
+            orient = mt.Orientation(self.get_orientation(images))
+            images: MetaTensor = orient(images).contiguous()  # type: ignore
+            if masks is not None:
+                masks: MetaTensor = orient(masks).contiguous()  # type: ignore
+                assert images.shape[1:] == masks.shape[1:]
+                self._check_affine(images.affine, masks.affine)
+            elif boxes is not None:
+                # clear affine and start to accumulate for boxes transform
+                images.affine = torch.eye(4)
             spacing: torch.DoubleTensor = images.pixdim
             info = {
                 'key': key,
                 **{f'shape-o-{i}': s for i, s in enumerate(images.shape[1:])},
                 **{f'space-o-{i}': s.item() for i, s in enumerate(spacing)}
             }
-            # 1. clip intensity, compute crop mask
-            crop_mask = clip_intensity(images)
-            # 2. crop images and masks
-            images, masks = crop(images, masks, crop_mask)
+            # 2. clip intensity, and crop the images & masks
+            cropper = clip_intensity(images)
+            images: MetaTensor = cropper(images)  # type: ignore
             # 3. compute resize (default: adapt to self.max_smaller_edge and self.min_aniso_ratio)
             new_spacing, new_shape = self.compute_resize(spacing, images.shape[1:])
             info.update({
@@ -351,17 +417,24 @@ class Processor(ABC):
                 save_dir / f'images.pt.zst',
             )
             # 4.3. resize, filter, compress, and save masks & class positions
-            masks = self.resize_masks(masks, new_shape)
-            pos_target_mask: torch.BoolTensor = einops.reduce(masks > 0, 'c ... -> c', 'any')
-            # filter positive masks
-            masks = masks[pos_target_mask]
-            pos_targets = [name for i, name in enumerate(targets) if pos_target_mask[i]]
-            neg_targets = [name for i, name in enumerate(targets) if not pos_target_mask[i]]
-            if masks.shape[0] > 0:
+            if masks is not None:
+                masks = cropper(masks)  # type: ignore
+                masks = self.resize_masks(masks, new_shape)
+                assert einops.reduce(masks, 'c ... -> c', 'any').all()
                 save_pt_zst(as_tensor(masks).cpu(), save_dir / 'masks.pt.zst')
-                class_positions, class_offsets = self._compute_class_positions(masks)
-                torch.save(class_positions.cpu(), save_dir / 'class_positions.pt')
-                torch.save(class_offsets.cpu(), save_dir / 'class_offsets.pt')
+            elif boxes is not None:
+                # apply the accumulated transform to boxes
+                boxes_f = apply_affine_to_boxes(boxes, images.affine.inverse())
+                boxes_f, keep = clip_boxes_to_image(boxes_f, new_shape)
+                assert keep.all()
+                boxes = torch.empty_like(boxes_f, dtype=torch.int16)
+                boxes[:, :3] = boxes_f[:, :3].floor()
+                boxes[:, 3:] = boxes_f[:, 3:].ceil()
+            annotations, class_positions = self._convert_annotations(targets, masks, boxes)
+            # the size of clas_positions is small, and we can use mmap, thus not compressed
+            torch.save(class_positions.cpu(), save_dir / 'class_positions.pt')
+            annotations = cytoolz.groupby(lambda annotation: self._get_category(annotation.name), annotations)
+            neg_targets = cytoolz.groupby(lambda name: self._get_category(name), neg_targets)
             # 4.4 handle and save sparse information
             sparse = Sparse(
                 spacing=new_spacing,
@@ -369,23 +442,9 @@ class Processor(ABC):
                 mean=mean.cpu().numpy(),
                 std=std.cpu().numpy(),
                 modalities=modalities,
-                anatomy=Sparse.Anatomy(
-                    [*filter(lambda name: self.tax[name].category == 'anatomy', pos_targets)],
-                    [*filter(lambda name: self.tax[name].category == 'anatomy', neg_targets)],
-                ),
-                anomaly=Sparse.Anomaly(
-                    [*filter(lambda name: self.tax[name].category == 'anomaly', pos_targets)],
-                    [*filter(lambda name: self.tax[name].category == 'anomaly', neg_targets)],
-                    data_point.complete_anomaly,
-                ),
-                annotation=Sparse.Annotation(
-                    [(name, masks[i].sum().item()) for i, name in enumerate(pos_targets)],
-                    [
-                        (pos_targets[i], bbox)
-                        for i, bbox in enumerate(self._generate_bbox_from_mask(masks))
-                        if pos_targets[i] not in self.bbox_ignore_targets
-                    ],
-                ),
+                annotations=annotations,
+                neg_targets={category: set(targets) for category, targets in neg_targets.items()},
+                complete_anomaly=data_point.complete_anomaly,
                 extra=data_point.extra,
             )
             (save_dir / 'sparse.json').write_text(sparse.to_json())
@@ -402,7 +461,7 @@ class Processor(ABC):
                 import traceback
                 self.logger.error(traceback.format_exc())
 
-    def normalize_image(self, images: torch.Tensor, new_shape: npt.NDArray[np.int32]) -> tuple3_t[torch.Tensor]:
+    def normalize_image(self, images: MetaTensor, new_shape: npt.NDArray[np.int32]) -> tuple[MetaTensor, torch.Tensor, torch.Tensor]:
         # 1. rescale to [0, 1]
         if images.dtype == torch.uint8:
             images = images.float() / 255

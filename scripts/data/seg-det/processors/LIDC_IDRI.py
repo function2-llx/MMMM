@@ -9,7 +9,7 @@ import torch
 from luolib.utils import get_cuda_device
 from monai.data import MetaTensor
 
-from mmmm.data.defs import Sparse
+from mmmm.data.sparse import Sparse
 
 from ._base import DataPoint as _DataPoint, DefaultImageLoaderMixin, Processor
 
@@ -36,9 +36,7 @@ class LIDC_IDRIProcessor(DefaultImageLoaderMixin, Processor):
         modality = 'contrast-enhanced CT' if scan.contrast_used else 'CT'
         return [modality], image
 
-    def load_annotations(
-        self, data_point: LIDR_IDRIDataPoint, images: MetaTensor,
-    ) -> tuple[list[Sparse.Annotation], set[str], torch.Tensor, MetaTensor | None]:
+    def load_masks(self, data_point: LIDR_IDRIDataPoint, images: MetaTensor):
         scan = data_point.scan
         nodules = scan.cluster_annotations()
         masks = np.zeros((len(nodules), *images.shape[1:]), dtype=np.bool_)
@@ -46,8 +44,7 @@ class LIDC_IDRIProcessor(DefaultImageLoaderMixin, Processor):
             mask, mask_bbox = consensus(nodule, ret_masks=False)
             masks[i, *mask_bbox] = mask
         masks = MetaTensor(torch.as_tensor(masks, device=get_cuda_device()), images.affine)
-        annotations, masks, neg_targets = self._convert_masks_to_annotations(['nodule'] * masks.shape[0], masks)
-        return annotations, neg_targets, images.affine, masks
+        return ['nodule'] * masks.shape[0], masks
 
     def get_data_points(self) -> list[LIDR_IDRIDataPoint]:
         return [

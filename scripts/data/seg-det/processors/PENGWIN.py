@@ -26,7 +26,7 @@ class PENGWINT1Processor(PENGWINProcessor):
     def dataset_root(self):
         return super().dataset_root / 'Task-1'
 
-    def load_masks(self, data_point: MultiClassDataPoint) -> tuple[MetaTensor, list[str]]:
+    def load_masks(self, data_point: MultiClassDataPoint, *args, **kwargs) -> tuple[MetaTensor, list[str]]:
         label: MetaTensor = self.mask_loader(data_point.label).to(device=get_cuda_device())
         masks: MetaTensor = label.new_empty((3, *label.shape[1:]), dtype=torch.bool)
         masks.affine = label.affine
@@ -64,7 +64,7 @@ class PENGWINT2Processor(PENGWINProcessor):
     def dataset_root(self):
         return super().dataset_root / 'Task-2'
 
-    def load_masks(self, data_point: MultiClassDataPoint) -> tuple[MetaTensor, list[str]]:
+    def load_masks(self, data_point: MultiClassDataPoint, *args, **kwargs):
         label: MetaTensor = self.mask_loader(data_point.label)
         assert label.shape[0] == 1
         label = label[0]
@@ -78,7 +78,7 @@ class PENGWINT2Processor(PENGWINProcessor):
                 if mask.any():
                     fragments[name] += 1
         data_point.extra = {'fragments': fragments}
-        return masks, self.targets
+        return self.targets, masks
 
     def get_data_points(self):
         ret = []

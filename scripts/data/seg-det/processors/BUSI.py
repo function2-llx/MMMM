@@ -1,4 +1,3 @@
-import einops
 import torch
 
 from ._base import DataPoint, DefaultMaskLoaderMixin, MultiLabelMultiFileDataPoint, NaturalImageLoaderMixin, Processor
@@ -6,10 +5,6 @@ from ._base import DataPoint, DefaultMaskLoaderMixin, MultiLabelMultiFileDataPoi
 class BUSIProcessor(NaturalImageLoaderMixin, DefaultMaskLoaderMixin, Processor):
     name = 'BUSI'
     mask_dtype = torch.bool
-
-    def load_masks(self, data_point: DataPoint) -> tuple[torch.BoolTensor, list[str]]:
-        masks, targets = super().load_masks(data_point)
-        return einops.reduce(masks, 'c 1 h w -> 1 1 h w', 'any'), ['breast cancer']
 
     def get_data_points(self) -> list[DataPoint]:
         ret = []

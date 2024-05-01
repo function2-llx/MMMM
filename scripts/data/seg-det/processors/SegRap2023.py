@@ -7,8 +7,8 @@ class SegRap2023Processor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Proce
     name = 'SegRap2023'
     orientation = 'SRA'
 
-    def load_masks(self, data_point: MultiLabelMultiFileDataPoint) -> tuple[MetaTensor, list[str]]:
-        masks, targets = super().load_masks(data_point)
+    def load_masks(self, data_point: MultiLabelMultiFileDataPoint, images: MetaTensor):
+        targets, masks = super().load_masks(data_point, images)
         li = targets.index('left mandible')
         ri = targets.index('right mandible')
         mandible_mask = masks[li] | masks[ri]
