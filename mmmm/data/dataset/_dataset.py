@@ -8,7 +8,7 @@ from monai.transforms import apply_transform
 
 from mmmm.tokenizer import MMMMTokenizer
 from ..defs import split_t
-from .seg import SegTransConf, get_seg_data_list, get_seg_transform
+from .local import LocalTransConf, get_seg_data_list, get_seg_transform
 from .vl import VLTransConf, VLTransform, get_vl_data_list
 
 @dataclass(kw_only=True)
@@ -40,7 +40,7 @@ class DatasetConf:
     vit_patch_size_xy: int = 16
     pool_size_xy: int = 1
     base_pool_size_z: int = 1
-    seg_trans: SegTransConf
+    seg_trans: LocalTransConf
     vl_trans: VLTransConf
     max_seq_len: int | None = None
 

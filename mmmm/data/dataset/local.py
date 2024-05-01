@@ -16,7 +16,8 @@ from monai import transforms as mt
 
 from mmmm.tokenizer import MMMMTokenizer
 import mmmm.data.dataset._dataset as _dataset
-from ..defs import ConvTurn, DataPoint, PROCESSED_SEG_DATA_ROOT, Sparse, split_t
+from ..defs import ConvTurn, DataPoint, PROCESSED_SEG_DATA_ROOT, split_t
+from ..sparse import Sparse
 from ..utils import prepare_vlm_inputs
 from .misc import gen_modality_conversation, intensity_norm, toss
 
