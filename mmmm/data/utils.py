@@ -1,8 +1,18 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import nibabel as nib
+import numpy as np
 import torch
+
+from luolib.types import PathLike
+from luolib.utils import load_pt_zst
 
 from mmmm.tokenizer import MMMMTokenizer
 from mmmm.models.cogvlm import LANGUAGE_TOKEN_TYPE, VISION_TOKEN_TYPE
 from .defs import CE_IGNORE_INDEX, ConvTurn
+from .sparse import Sparse
 
 def get_text_position_ids(text_ids: torch.Tensor, tokenizer: MMMMTokenizer, start: int):
     ret = torch.empty_like(text_ids)
@@ -122,3 +132,27 @@ def prepare_vlm_inputs(
         for k, v in inputs.items():
             inputs[k] = v[:max_seq_len]
     return inputs, text
+
+def convert_to_slicer(data_dir: PathLike, output_dir: PathLike | None = None, multiclass: bool = True):
+    """convert the processed data by MMMM to the format readable by Slicer"""
+    data_dir = Path(data_dir)
+    output_dir = data_dir / 'slicer' if output_dir is None else Path(output_dir)
+    output_dir.mkdir(exist_ok=True, parents=True)
+    img = torch.load(data_dir / 'images.pt')
+    sparse = Sparse.from_json((data_dir / 'sparse.json').read_bytes())
+    for i, modality in enumerate(sparse.modalities):
+        nib.save(
+            nib.Nifti1Image(img[i].float().numpy(), np.diag([*sparse.spacing, 1])),
+            output_dir / f'{modality}.nii.gz',
+        )
+    masks: torch.BoolTensor = load_pt_zst(data_dir / 'masks.pt.zst')
+    if multiclass:
+        seg = torch.zeros(masks.shape[1:], dtype=torch.int16)
+        for c in range(masks.shape[0]):
+            seg[masks[c]] = c + 1
+    else:
+        seg = masks
+    nib.save(
+        nib.Nifti1Image(seg.numpy(), np.diag([*sparse.spacing, 1])),
+        output_dir / 'seg.nii.gz',
+    )
