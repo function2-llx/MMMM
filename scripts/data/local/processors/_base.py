@@ -82,7 +82,7 @@ def clip_intensity(image: torch.Tensor) -> mt.SpatialCrop:
         maxv = lt.quantile(x, _CLIP_UPPER, 1, True)
         x.clamp_(minv, maxv)
     select_mask = image.new_empty((1, *image.shape[1:]), dtype=torch.bool)
-    torch.any(x > minv, dim=0, out=select_mask.view(1, -1))
+    torch.any(x > minv, dim=0, keepdim=True, out=select_mask.view(1, -1))
     roi_start, roi_end = generate_spatial_bounding_box(select_mask)
     return mt.SpatialCrop(roi_start=roi_start, roi_end=roi_end)
 
