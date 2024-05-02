@@ -4,3 +4,6 @@
 [submodule "third-party/RadFM"]
 	path = third-party/RadFM
 	url = git@github.com:chaoyi-wu/RadFM.git
+[submodule "third-party/LLaVA-Med"]
+	path = third-party/LLaVA-Med
+	url = git@github.com:microsoft/LLaVA-Med.git

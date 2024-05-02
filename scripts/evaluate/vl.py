@@ -4,10 +4,12 @@ from jsonargparse import CLI
 import pandas as pd
 from pathlib import Path
 import random
+import sys
 import torch
 from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
 
+from llavamed import llavamed_collate_fn, setup_llavamed, KeywordsStoppingCriteria
 from m3d import m3d_collate_fn, setup_m3d
 from medflamingo import medflamingo_collate_fn, setup_medflamingo
 from mmmm.data.defs import PROCESSED_VL_DATA_ROOT
@@ -24,9 +26,10 @@ class VQATestDataset(Dataset):
         self.name = dataset
         with open(PROCESSED_VL_DATA_ROOT / dataset / 'test.json') as f:
             self.dataset = [
-                {'image': x['image'][0], **vqa}
+                {'image': image, **vqa}
                 for x in json.load(f)
                 for vqa in x['vqa']
+                for image in x['image']
             ]
 
     def __getitem__(self, index: int):
@@ -220,9 +223,9 @@ class VLEvaluator:
                 '<im_patch>' * 256 + ' ' + sample['question'],
                 return_tensors='pt',
             )['input_ids'].to('cuda')
-            image = sample['image'].to(device='cuda', dtype=torch.bfloat16)
+            vision = sample['image'].to(device='cuda', dtype=torch.bfloat16)
             prediction = tokenizer.decode(
-                model.generate(image, language, max_new_tokens=256)[0],
+                model.generate(vision, language, max_new_tokens=256)[0],
                 skip_special_tokens=True,
             ).strip()
 
@@ -245,6 +248,100 @@ class VLEvaluator:
         )
         with open(
             self.output_dir / f'{self.task}_{self.dataset.name}_m3d_zeroshot.json', 'w'
+        ) as f:
+            json.dump(
+                {
+                    'bleu': results['bleu'].mean(),
+                    'rouge': results['rouge'].mean(),
+                    'meteor': results['meteor'].mean(),
+                    'bertscore': results['bertscore'].mean(),
+                    'exact_match': results['exact_match'].mean(),
+                },
+                f,
+                indent=4,
+            )
+
+    def llavamed(self):
+        sys.path.append('third-party/LLaVA-Med')
+        from llava.conversation import conv_templates
+
+        model, tokenizer, image_processor, image_token_len = setup_llavamed(
+            self.checkpoint, self.tokenizer
+        )
+
+        dataloader = DataLoader(
+            self.dataset,
+            batch_size=1,
+            num_workers=self.num_workers,
+            pin_memory=True,
+            collate_fn=llavamed_collate_fn,
+        )
+
+        results = []
+
+        for sample in tqdm(dataloader):
+            question = sample['question']
+            if getattr(model.config, 'mm_use_im_start_end', False):
+                question = (
+                    question
+                    + '\n'
+                    + '<im_start>'
+                    + '<im_patch>' * image_token_len
+                    + '<im_end>'
+                )
+            else:
+                question = question + '\n' + '<im_patch>' * image_token_len
+            conv = conv_templates['simple'].copy()
+            conv.append_message(conv.roles[0], question)
+            prompt = conv.get_prompt()
+            language = torch.as_tensor(tokenizer([prompt]).input_ids).to('cuda')
+            stopping_criteria = KeywordsStoppingCriteria(['###'], tokenizer, language)
+
+            vision = image_processor.preprocess(sample['image'], return_tensors='pt')[
+                'pixel_values'
+            ][0]
+            vision = repeat(vision, 'c h w -> 1 c h w').half().to('cuda')
+
+            prediction = tokenizer.decode(
+                model.generate(
+                    language,
+                    images=vision,
+                    do_sample=True,
+                    temperature=0.7,
+                    stopping_criteria=[stopping_criteria],
+                    max_new_tokens=1024,
+                )[0, language.shape[1]:],
+                skip_special_tokens=True,
+            )
+
+            try:
+                index = prediction.index(conv.sep)
+            except ValueError:
+                prediction += conv.sep
+                index = prediction.index(conv.sep)
+
+            prediction = prediction[:index].split('Assistant: ')[1].strip()
+
+            results.append(
+                {
+                    'question': sample['question'],
+                    'answer': sample['answer'],
+                    'prediction': prediction,
+                    **self.metrics.compute(prediction, sample['answer']),
+                },
+            )
+
+            print(sample['question'])
+            print(sample['answer'])
+            print(prediction)
+
+        results = pd.DataFrame(results)
+        results.to_csv(
+            self.output_dir / f'{self.task}_{self.dataset.name}_llavamed_zeroshot.csv'
+        )
+        with open(
+            self.output_dir / f'{self.task}_{self.dataset.name}_llavamed_zeroshot.json',
+            'w',
         ) as f:
             json.dump(
                 {

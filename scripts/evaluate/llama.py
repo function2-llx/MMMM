@@ -17,7 +17,7 @@ class LlamaMetric:
     def __init__(self):
         self.llama = transformers.pipeline(
             'text-generation',
-            model='meta-llama/Meta-Llama-3-8B-Instruct',
+            model='/data/llama3/Meta-Llama-3-8B-Instruct',
             model_kwargs={'torch_dtype': torch.bfloat16},
             use_auth_token=True,
             device='cuda',

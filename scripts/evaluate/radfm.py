@@ -8,21 +8,21 @@ from transformers import LlamaTokenizer
 
 
 def setup_radfm(checkpoint: str, tokenizer: str):
-    sys.path.append("third-party/RadFM/Quick_demo/Model")
+    sys.path.append('third-party/RadFM/Quick_demo/Model')
     from RadFM.multimodality_model import MultiLLaMAForCausalLM
 
     model = MultiLLaMAForCausalLM(
         lang_model_path=tokenizer,
     )
-    checkpoint = torch.load(checkpoint, map_location="cpu")
+    checkpoint = torch.load(checkpoint, map_location='cpu')
     model.load_state_dict(checkpoint)
-    model = model.to("cuda")
+    model = model.to('cuda')
     model.eval()
 
     tokenizer = LlamaTokenizer.from_pretrained(tokenizer)
     special_tokens = {
-        "additional_special_tokens": [f"<image{i}>" for i in range(32)]
-        + ["<image>", "</image>"]
+        'additional_special_tokens': [f'<image{i}>' for i in range(32)]
+        + ['<image>', '</image>']
     }
     tokenizer.add_special_tokens(special_tokens)
     tokenizer.pad_token_id = 0
@@ -34,8 +34,8 @@ def setup_radfm(checkpoint: str, tokenizer: str):
 
 def radfm_collate_fn(batch: list[dict]):
     assert len(batch) == 1
-    if batch[0]["image"].endswith(".pt"):
-        image = torch.load(batch[0]["image"]).float()
+    if batch[0]['image'].endswith('.pt'):
+        image = torch.load(batch[0]['image']).float()
         image = (image - image.min()) / (image.max() - image.min())
     else:
         transform = transforms.Compose(
@@ -48,7 +48,7 @@ def radfm_collate_fn(batch: list[dict]):
                 transforms.ToTensor(),
             ]
         )
-        image = transform(Image.open(batch[0]["image"]).convert("RGB"))
+        image = transform(Image.open(batch[0]['image']).convert('RGB'))
     target_d, max_d = 4, 4
     if len(image.shape) == 4:
         max_d = max(image.shape[3], max_d)
@@ -57,15 +57,15 @@ def radfm_collate_fn(batch: list[dict]):
             target_d = temp_d
     if len(image.shape) == 3:
         image = torch.nn.functional.interpolate(
-            repeat(image, "c h w -> 1 c h w 1"), size=(512, 512, target_d)
+            repeat(image, 'c h w -> 1 c h w 1'), size=(512, 512, target_d)
         ).unsqueeze(0)
     else:
         image = torch.nn.functional.interpolate(
-            repeat(image, "c h w d -> 1 c h w d"), size=(512, 512, target_d)
+            repeat(image, 'c h w d -> 1 c h w d'), size=(512, 512, target_d)
         ).unsqueeze(0)
 
     return {
-        "image": image,
-        "question": batch[0]["question"],
-        "answer": batch[0]["answer"],
+        'image': image,
+        'question': batch[0]['question'],
+        'answer': batch[0]['answer'],
     }
