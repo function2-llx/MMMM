@@ -1,3 +1,5 @@
+from collections import Counter
+
 import torch
 
 from luolib.utils import get_cuda_device
@@ -17,27 +19,18 @@ class PENGWINProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processo
     def dataset_root(self):
         return ORIGIN_SEG_DATA_ROOT / 'PENGWIN'
 
-    def load_annotations(self, data_point: MultiClassDataPoint, *args, **kwargs):
+    def load_masks(self, data_point: MultiClassDataPoint, *args, **kwargs):
         label: MetaTensor = self.mask_loader(data_point.label).to(device=get_cuda_device())
-
-        # masks: MetaTensor = label.new_empty((3, *label.shape[1:]), dtype=torch.bool)
-        targets = []
-        neg_targets = []
-        masks = []
-        for i, name in enumerate(self.targets):
-            is_neg = True
-            for j in range(i * 10 + 1, (i + 1) * 10):
-                mask = (label >> j & 1).bool()
-                # reduction for bitwise operation is not yet supported: https://github.com/pytorch/pytorch/issues/35641
-                if mask.any():
-                    is_neg = False
-                    targets.append(name)
-                    masks.append(mask)
-            if is_neg:
-                neg_targets.append(name)
-        masks = torch.stack(masks)
+        masks: MetaTensor = label.new_empty((len(self.targets), *label.shape[1:]), dtype=torch.bool)
         masks.affine = label.affine
-        return self.targets, set(neg_targets), masks, None
+        fragments = {}
+        unique_labels = label.unique()
+        for i, name in enumerate(self.targets):
+            low, high = i * 10 + 1, (i + 1) * 10
+            masks[i] = (low <= label) & (label <= high)
+            fragments[name] = ((low <= unique_labels) & (unique_labels <= high)).sum().item()
+        data_point.extra = {'fragments': fragments}
+        return self.targets, masks
 
 class PENGWINT1Processor(PENGWINProcessor):
     name = 'PENGWIN-T1'
