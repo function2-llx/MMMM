@@ -68,9 +68,10 @@ init_args:
       type: seg
     - name: PENGWIN-T1
       type: seg
-    - name: PENGWIN-T2
-      type: seg
-      weight: 0.04
+# the quality of PENGWIN-T2 seems not to be so good
+#    - name: PENGWIN-T2
+#      type: seg
+#      weight: 0.04
     - name: PI-CAI
       type: seg
     - name: Prostate158

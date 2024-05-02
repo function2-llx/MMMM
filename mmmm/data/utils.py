@@ -138,11 +138,11 @@ def convert_to_slicer(data_dir: PathLike, output_dir: PathLike | None = None, mu
     data_dir = Path(data_dir)
     output_dir = data_dir / 'slicer' if output_dir is None else Path(output_dir)
     output_dir.mkdir(exist_ok=True, parents=True)
-    img = torch.load(data_dir / 'images.pt')
+    images = load_pt_zst(data_dir / 'images.pt.zst')
     sparse = Sparse.from_json((data_dir / 'sparse.json').read_bytes())
     for i, modality in enumerate(sparse.modalities):
         nib.save(
-            nib.Nifti1Image(img[i].float().numpy(), np.diag([*sparse.spacing, 1])),
+            nib.Nifti1Image(images[i].float().numpy(), np.diag([*sparse.spacing, 1])),
             output_dir / f'{modality}.nii.gz',
         )
     masks: torch.BoolTensor = load_pt_zst(data_dir / 'masks.pt.zst')
