@@ -15,7 +15,9 @@ def main():
                 local_dir_use_symlinks=True,
             )
             break
-        except:
+        except KeyboardInterrupt:
+            break
+        except Exception:
             pass
 
 if __name__ == '__main__':
