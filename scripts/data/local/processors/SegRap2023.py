@@ -16,7 +16,7 @@ class SegRap2023Processor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Proce
         targets.remove('left mandible')
         targets.remove('right mandible')
         targets.append('mandible')
-        return masks, targets
+        return targets, masks
 
     def get_data_points(self):
         ret = []
