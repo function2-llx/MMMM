@@ -116,7 +116,7 @@ class Processor(ABC):
         if self.chunksize is None or override:
             self.chunksize = chunksize
 
-    def _get_category(self, name):
+    def _get_category(self, name: str):
         return self.tax[name].category
 
     @property
@@ -216,7 +216,7 @@ class Processor(ABC):
 
     def load_annotations(
         self, data_point: DataPoint, images: MetaTensor,
-    ) -> tuple[list[str], set[str], MetaTensor | None, torch.ShortTensor | None]:
+    ) -> tuple[list[str], set[str], MetaTensor | None, torch.Tensor | None]:
         """
         NOTE: metadata for mask should be preserved to match with the image
         Args:
@@ -339,7 +339,7 @@ class Processor(ABC):
                 merged_mask = einops.reduce(masks[indexes], 'n ... -> ...', 'any')
                 positions = merged_mask.nonzero().short()
             elif class_boxes is not None:
-                positions = box_centers(class_boxes).round().short()
+                positions = box_centers(class_boxes).floor().short()
             if class_positions is not None:
                 if positions.shape[0] > self.max_class_positions:
                     positions = positions[
@@ -387,15 +387,16 @@ class Processor(ABC):
             self._check_targets(targets)
             self._check_targets(neg_targets)
             # 1. orientation
+            # start to accumulate for boxes transform
+            if boxes is None:
+                assert (boxes[:, 3:] <= boxes.new_tensor(images.shape[1:])).all()
+            origin_affine = images.affine
             orient = mt.Orientation(self.get_orientation(images))
             images: MetaTensor = orient(images).contiguous()  # type: ignore
             if masks is not None:
                 masks: MetaTensor = orient(masks).contiguous()  # type: ignore
                 assert images.shape[1:] == masks.shape[1:]
                 self._check_affine(images.affine, masks.affine)
-            elif boxes is not None:
-                # clear affine and start to accumulate for boxes transform
-                images.affine = torch.eye(4)
             spacing: torch.DoubleTensor = images.pixdim
             info = {
                 'key': key,
@@ -429,7 +430,7 @@ class Processor(ABC):
                 save_pt_zst(as_tensor(masks).cpu(), save_dir / 'masks.pt.zst')
             elif boxes is not None:
                 # apply the accumulated transform to boxes
-                boxes_f = apply_affine_to_boxes(boxes, images.affine.inverse())
+                boxes_f = apply_affine_to_boxes(boxes, torch.linalg.solve(images.affine, origin_affine))
                 boxes_f, keep = clip_boxes_to_image(boxes_f, new_shape)
                 assert keep.all()
                 boxes = torch.empty_like(boxes_f, dtype=torch.int16)

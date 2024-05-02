@@ -6,10 +6,10 @@ import torch
 
 from monai.data import MetaTensor
 
-from ._base import DataPoint, DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor
+from ._base import DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor, SegDataPoint
 
 @dataclass(kw_only=True)
-class Prostate158DataPoint(DataPoint):
+class Prostate158DataPoint(SegDataPoint):
     anatomy: Path
     tumor: Path | None = None
 
