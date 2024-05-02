@@ -388,7 +388,7 @@ class Processor(ABC):
             self._check_targets(neg_targets)
             # 1. orientation
             # start to accumulate for boxes transform
-            if boxes is None:
+            if boxes is not None:
                 assert (boxes[:, 3:] <= boxes.new_tensor(images.shape[1:])).all()
             origin_affine = images.affine
             orient = mt.Orientation(self.get_orientation(images))
