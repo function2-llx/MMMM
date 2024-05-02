@@ -61,8 +61,10 @@ def _cluster(objects: list[pd.Series], image_size: tuple3_t[int]) -> torch.Tenso
         for obj in objects
     ])
     boxes, keep = clip_boxes_to_image(boxes, image_size)
+    assert keep.all()
     iou: np.ndarray = box_iou(boxes, boxes)
     rad_ids = np.array([x['rad_id'] for x in objects])
+    num_rads = len(np.unique(rad_ids))
     rad_mask = rad_ids[:, None] != rad_ids[None, :]
     # use a low threshold
     iou_th = 0.25
@@ -70,7 +72,7 @@ def _cluster(objects: list[pd.Series], image_size: tuple3_t[int]) -> torch.Tenso
     while True:
         nc, labels = connected_components((iou >= iou_th) & rad_mask, directed=False)
         _, counts = np.unique(labels, return_counts=True)
-        if (iou_th := iou_th + step_size) > 1 or counts.max() <= 3:
+        if (iou_th := iou_th + step_size) > 1 or counts.max() <= num_rads:
             break
     assert labels.min() == 0 and labels.max() == nc - 1
     mean_boxes = np.concatenate([boxes[labels == i].mean(axis=0, keepdims=True) for i in range(nc)])
@@ -84,9 +86,9 @@ class VinDrCXRProcessor(DefaultImageLoaderMixin, Processor):
         super().__init__(*args, **kwargs)
         self._ignore_anomalies = {'nodule/mass', 'other lesion'}
 
-    def image_loader(self, path: Path) -> MetaTensor:
-        image = super().image_loader(path)
-        return image.mT
+    # def image_loader(self, path: Path) -> MetaTensor:
+    #     image = super().image_loader(path)
+    #     return image.mT
 
     def load_annotations(
         self, data_point: VinDrCXRDataPoint, images: MetaTensor,
