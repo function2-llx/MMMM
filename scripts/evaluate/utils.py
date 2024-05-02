@@ -1,164 +1,18 @@
-from einops import repeat
 import evaluate
+import json
 import numpy as np
 import pandas as pd
-from PIL import Image
 import random
-import sys
 import torch
-from torchvision import transforms
-from transformers import LlamaTokenizer
 
 
 def setup_seed(seed):
     np.random.seed(seed)
     random.seed(seed)
     torch.manual_seed(seed)
-    torch.use_deterministic_algorithms(True)  # export CUBLAS_WORKSPACE_CONFIG=:16:8
     torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
-
-
-def setup_radfm(checkpoint: str, tokenizer: str):
-    sys.path.append("third-party/RadFM/Quick_demo/Model")
-    from RadFM.multimodality_model import MultiLLaMAForCausalLM
-
-    model = MultiLLaMAForCausalLM(
-        lang_model_path=tokenizer,
-    )
-    checkpoint = torch.load(checkpoint, map_location="cpu")
-    model.load_state_dict(checkpoint)
-    model = model.to("cuda")
-    model.eval()
-
-    tokenizer = LlamaTokenizer.from_pretrained(tokenizer)
-    special_tokens = {
-        "additional_special_tokens": [f"<image{i}>" for i in range(32)]
-        + ["<image>", "</image>"]
-    }
-    tokenizer.add_special_tokens(special_tokens)
-    tokenizer.pad_token_id = 0
-    tokenizer.bos_token_id = 1
-    tokenizer.eos_token_id = 2
-
-    return model, tokenizer
-
-
-def radfm_collate_fn(batch: list[dict]):
-    assert len(batch) == 1
-    if batch[0]["image"].endswith(".pt"):
-        image = torch.load(batch[0]["image"])
-        image = (image - image.min()) / (image.max() - image.min())
-    else:
-        transform = transforms.Compose(
-            [
-                transforms.RandomResizedCrop(
-                    [512, 512],
-                    scale=(0.8, 1.0),
-                    interpolation=transforms.InterpolationMode.BICUBIC,
-                ),
-                transforms.ToTensor(),
-            ]
-        )
-        image = transform(Image.open(batch[0]["image"]).convert("RGB"))
-    target_d, max_d = 4, 4
-    if len(image.shape) == 4:
-        max_d = max(image.shape[3], max_d)
-    for temp_d in range(4, 65, 4):
-        if abs(temp_d - max_d) < abs(target_d - max_d):
-            target_d = temp_d
-    if len(image.shape) == 3:
-        image = torch.nn.functional.interpolate(
-            repeat(image, "c h w -> 1 c h w 1"), size=(512, 512, target_d)
-        ).unsqueeze(0)
-    else:
-        image = torch.nn.functional.interpolate(
-            repeat(image, "c h w d -> 1 c h w d"), size=(512, 512, target_d)
-        ).unsqueeze(0)
-    question_list = [False for _ in range(len(str(batch[0]["question"])))]
-    question = ""
-    if random.random() < 0.5:
-        position = 0
-    else:
-        position = len(question_list) - 1
-    question_list[position] = True
-    for i in range(len(question_list)):
-        if question_list[i]:
-            question += (
-                "<image>"
-                + "".join([f"<image{i}>" for i in range(32)])
-                + "</image>"
-                + batch[0]["question"][i]
-            )
-        else:
-            question += batch[0]["question"][i]
-    return {
-        "image": image,
-        "question": question,
-        "answer": batch[0]["answer"],
-    }
-
-
-def setup_medflamingo(checkpoint: str, tokenizer: str):
-    from accelerate import Accelerator
-    from huggingface_hub import hf_hub_download
-    from open_flamingo import create_model_and_transforms
-
-    model, image_processor, tokenizer = create_model_and_transforms(
-        clip_vision_encoder_path="ViT-L-14",
-        clip_vision_encoder_pretrained="openai",
-        lang_encoder_path=checkpoint,
-        tokenizer_path=tokenizer,
-        cross_attn_every_n_layers=4,
-    )
-    medflamingo = hf_hub_download("med-flamingo/med-flamingo", "model.pt")
-    model.load_state_dict(torch.load(medflamingo, map_location="cpu"), strict=False)
-
-    processor = FlamingoProcessor(tokenizer, image_processor)
-
-    accelerator = Accelerator()
-    model = accelerator.prepare(model)
-    model.eval()
-
-    return model, processor
-
-
-def medflamingo_collate_fn(batch: list[dict]):
-    assert len(batch) == 1
-    image = Image.open(batch[0]["image"]).convert("RGB")
-
-    return {
-        "image": image,
-        "question": '<image>Question:' + batch[0]["question"] + ' Answer:',
-        "answer": batch[0]["answer"],
-    }
-
-
-class FlamingoProcessor:
-    """
-    Processor class for Flamingo.
-    """
-
-    def __init__(self, tokenizer, vision_processor):
-        """
-        OF does not use same vision processor, image_processor only transforms single image
-        """
-        self.tokenizer = tokenizer
-        self.vision_processor = vision_processor
-
-    def encode_text(self, prompt):
-        self.tokenizer.padding_side = "left"
-        # For generation padding tokens should be on the left
-        return self.tokenizer(
-            [prompt],
-            return_tensors="pt",
-        )
-
-    def preprocess_images(self, images: list):
-        vision_x = [self.vision_processor(im).unsqueeze(0) for im in images]
-        vision_x = torch.cat(vision_x, dim=0)
-        return vision_x
 
 
 class NLPMetrics:
@@ -195,3 +49,28 @@ class NLPMetrics:
                 predictions=[prediction.lower()], references=[reference.lower()]
             )["exact_match"],
         }
+
+    def process(self, csv: str, json_file: str):
+        df = pd.read_csv(csv)
+        with open(json_file, "r") as f:
+            summary = json.load(f)
+        results = {
+            "bleu": [],
+            "rouge": [],
+            "meteor": [],
+            "bertscore": [],
+            "exact_match": [],
+        }
+
+        for _, row in df.iterrows():
+            score = self.compute(row["prediction"], row["answer"])
+            for key in results.keys():
+                results[key].append(score[key])
+
+        for key in results.keys():
+            df[key] = results[key]
+            summary[key] = sum(results[key]) / len(results[key])
+
+        df.to_csv(csv)
+        with open(json_file, "w") as f:
+            json.dump(summary, f)

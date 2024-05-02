@@ -1,0 +1,46 @@
+from einops import repeat, reduce
+from PIL import Image
+import torch
+from transformers import AutoTokenizer, AutoModelForCausalLM
+import torchvision.transforms as transforms
+
+
+def setup_m3d(checkpoint: str, tokenizer: str):
+    model = AutoModelForCausalLM.from_pretrained(
+        checkpoint, torch_dtype=torch.bfloat16, trust_remote_code=True
+    )
+    tokenizer = AutoTokenizer.from_pretrained(
+        tokenizer,
+        model_max_length=512,
+        padding_side="right",
+        use_fast=False,
+        trust_remote_code=True,
+    )
+
+    model = model.to("cuda")
+    model = model.eval()
+
+    return model, tokenizer
+
+
+def m3d_collate_fn(batch: list[dict]):
+    assert len(batch) == 1
+
+    if batch[0]["image"].endswith(".pt"):
+        image = torch.load(batch[0]["image"]).float()
+        image = (image - image.min()) / (image.max() - image.min())
+        image = reduce(image, "c d h w -> d h w", "mean")
+        image = repeat(image, "d h w -> 1 1 d h w")
+    else:
+        transform = transforms.ToTensor()
+        image = transform(Image.open(batch[0]["image"]).convert("RGB"))
+        image = reduce(image, "c h w -> h w", "mean")
+        image = repeat(image, "h w -> 1 1 1 h w")
+
+    image = torch.nn.functional.interpolate(image, size=(32, 256, 256))
+
+    return {
+        "image": image,
+        "question": batch[0]["question"],
+        "answer": batch[0]["answer"],
+    }

@@ -3,16 +3,17 @@ import json
 from jsonargparse import CLI
 import pandas as pd
 from pathlib import Path
+import random
+import torch
 from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
 
+from m3d import m3d_collate_fn, setup_m3d
+from medflamingo import medflamingo_collate_fn, setup_medflamingo
 from mmmm.data.defs import PROCESSED_VL_DATA_ROOT
+from radfm import radfm_collate_fn, setup_radfm
 from utils import (
     setup_seed,
-    setup_radfm,
-    radfm_collate_fn,
-    setup_medflamingo,
-    medflamingo_collate_fn,
     NLPMetrics,
 )
 
@@ -21,11 +22,11 @@ class VQATestDataset(Dataset):
     def __init__(self, dataset: str):
         super().__init__()
         self.name = dataset
-        with open(PROCESSED_VL_DATA_ROOT / dataset / "test.json") as f:
+        with open(PROCESSED_VL_DATA_ROOT / dataset / 'test.json') as f:
             self.dataset = [
-                {"image": x["image"][0], **vqa}
+                {'image': x['image'][0], **vqa}
                 for x in json.load(f)
-                for vqa in x["vqa"]
+                for vqa in x['vqa']
             ]
 
     def __getitem__(self, index: int):
@@ -44,7 +45,7 @@ class VLEvaluator:
         dataset: str,
         seed: int = 233,
         num_workers: int = 8,
-        output_dir: str = "results/",
+        output_dir: str = 'results/',
     ):
         self.checkpoint = checkpoint
         self.tokenizer = tokenizer
@@ -70,41 +71,62 @@ class VLEvaluator:
         results = []
 
         for sample in tqdm(dataloader):
+            question_list = [False for _ in range(len(str(sample['question'])))]
+            question = ''
+            if random.random() < 0.5:
+                position = 0
+            else:
+                position = len(question_list) - 1
+            question_list[position] = True
+            for i in range(len(question_list)):
+                if question_list[i]:
+                    question += (
+                        '<image>'
+                        + ''.join([f'<image{i}>' for i in range(32)])
+                        + '</image>'
+                        + sample['question'][i]
+                    )
+                else:
+                    question += sample['question'][i]
             language = tokenizer(
-                sample["question"],
-                max_length=2048,
-                return_tensors="pt",
-                padding=True,
-                truncation=True,
-            )["input_ids"].to("cuda")
-            vision = sample["image"].to("cuda")
+                question,
+                return_tensors='pt',
+            )[
+                'input_ids'
+            ].to('cuda')
+            vision = sample['image'].to('cuda')
             prediction = tokenizer.decode(
                 model.generate(language, vision)[0], skip_special_tokens=True
-            )
+            ).strip()
 
             results.append(
                 {
-                    "question": sample["question"],
-                    "answer": sample["answer"],
-                    "prediction": prediction,
-                    **self.metrics.compute(prediction, sample["answer"]),
+                    'question': sample['question'],
+                    'answer': sample['answer'],
+                    'prediction': prediction,
+                    **self.metrics.compute(prediction, sample['answer']),
                 },
             )
 
-            print(sample["question"])
-            print(sample["answer"])
+            print(sample['question'])
+            print(sample['answer'])
             print(prediction)
 
         results = pd.DataFrame(results)
-        results.to_csv(self.output_dir / f"{self.task}_{self.dataset.name}_radfm_zeroshot.csv")
-        with open(self.output_dir / f"{self.task}_{self.dataset.name}_radfm_zeroshot.json", "w") as f:
+        results.to_csv(
+            self.output_dir / f'{self.task}_{self.dataset.name}_radfm_zeroshot.csv'
+        )
+        with open(
+            self.output_dir / f'{self.task}_{self.dataset.name}_radfm_zeroshot.json',
+            'w',
+        ) as f:
             json.dump(
                 {
-                    "bleu": results["bleu"].mean(),
-                    "rouge": results["rouge"].mean(),
-                    "meteor": results["meteor"].mean(),
-                    "bertscore": results["bertscore"].mean(),
-                    "exact_match": results["exact_match"].mean(),
+                    'bleu': results['bleu'].mean(),
+                    'rouge': results['rouge'].mean(),
+                    'meteor': results['meteor'].mean(),
+                    'bertscore': results['bertscore'].mean(),
+                    'exact_match': results['exact_match'].mean(),
                 },
                 f,
                 indent=4,
@@ -123,50 +145,119 @@ class VLEvaluator:
         results = []
 
         for sample in tqdm(dataloader):
-            language = processor.encode_text(sample["question"])
-            vision = processor.preprocess_images([sample["image"]])
-            vision = repeat(vision, "1 c h w -> 1 1 1 c h w")
+            language = processor.encode_text(
+                'You are a helpful medical assistant. You are being provided with images and a question about the image, please answer the question. <image>Question:'
+                + sample['question']
+                + ' Answer:'
+            )
+            vision = processor.preprocess_images([sample['image']])
+            vision = repeat(vision, '1 c h w -> 1 1 1 c h w')
             prediction = (
                 processor.tokenizer.decode(
                     model.generate(
-                        vision_x=vision.to("cuda"),
-                        lang_x=language["input_ids"].to("cuda"),
-                        attention_mask=language["attention_mask"].to("cuda"),
-                        max_new_tokens=256,
+                        vision_x=vision.to('cuda'),
+                        lang_x=language['input_ids'].to('cuda'),
+                        attention_mask=language['attention_mask'].to('cuda'),
+                        max_new_tokens=50,
                     )[0]
                 )
-                .replace("<unk> ", "")
+                .replace('<unk> ', '')
+                .split('Answer:')[1]
                 .strip()
+                .split('\n')[0]
             )
 
             results.append(
                 {
-                    "question": sample["question"],
-                    "answer": sample["answer"],
-                    "prediction": prediction,
-                    **self.metrics.compute(prediction, sample["answer"]),
+                    'question': sample['question'],
+                    'answer': sample['answer'],
+                    'prediction': prediction,
+                    **self.metrics.compute(prediction, sample['answer']),
                 },
             )
 
-            print(sample["question"])
-            print(sample["answer"])
+            print(sample['question'])
+            print(sample['answer'])
             print(prediction)
 
         results = pd.DataFrame(results)
-        results.to_csv(self.output_dir / f"{self.task}_{self.dataset.name}_medflamingo_zeroshot.csv")
-        with open(self.output_dir / f"{self.task}_{self.dataset.name}_medflamingo_zeroshot.json", "w") as f:
+        results.to_csv(
+            self.output_dir
+            / f'{self.task}_{self.dataset.name}_medflamingo_zeroshot.csv'
+        )
+        with open(
+            self.output_dir
+            / f'{self.task}_{self.dataset.name}_medflamingo_zeroshot.json',
+            'w',
+        ) as f:
             json.dump(
                 {
-                    "bleu": results["bleu"].mean(),
-                    "rouge": results["rouge"].mean(),
-                    "meteor": results["meteor"].mean(),
-                    "bertscore": results["bertscore"].mean(),
-                    "exact_match": results["exact_match"].mean(),
+                    'bleu': results['bleu'].mean(),
+                    'rouge': results['rouge'].mean(),
+                    'meteor': results['meteor'].mean(),
+                    'bertscore': results['bertscore'].mean(),
+                    'exact_match': results['exact_match'].mean(),
+                },
+                f,
+                indent=4,
+            )
+
+    def m3d(self):
+        model, tokenizer = setup_m3d(self.checkpoint, self.tokenizer)
+
+        dataloader = DataLoader(
+            self.dataset,
+            batch_size=1,
+            num_workers=self.num_workers,
+            pin_memory=True,
+            collate_fn=m3d_collate_fn,
+        )
+
+        results = []
+
+        for sample in tqdm(dataloader):
+            language = tokenizer(
+                '<im_patch>' * 256 + ' ' + sample['question'],
+                return_tensors='pt',
+            )['input_ids'].to('cuda')
+            image = sample['image'].to(device='cuda', dtype=torch.bfloat16)
+            prediction = tokenizer.decode(
+                model.generate(image, language, max_new_tokens=256)[0],
+                skip_special_tokens=True,
+            ).strip()
+
+            results.append(
+                {
+                    'question': sample['question'],
+                    'answer': sample['answer'],
+                    'prediction': prediction,
+                    **self.metrics.compute(prediction, sample['answer']),
+                },
+            )
+
+            print(sample['question'])
+            print(sample['answer'])
+            print(prediction)
+
+        results = pd.DataFrame(results)
+        results.to_csv(
+            self.output_dir / f'{self.task}_{self.dataset.name}_m3d_zeroshot.csv'
+        )
+        with open(
+            self.output_dir / f'{self.task}_{self.dataset.name}_m3d_zeroshot.json', 'w'
+        ) as f:
+            json.dump(
+                {
+                    'bleu': results['bleu'].mean(),
+                    'rouge': results['rouge'].mean(),
+                    'meteor': results['meteor'].mean(),
+                    'bertscore': results['bertscore'].mean(),
+                    'exact_match': results['exact_match'].mean(),
                 },
                 f,
                 indent=4,
             )
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     CLI(VLEvaluator, as_positional=False)
