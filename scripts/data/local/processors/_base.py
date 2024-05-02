@@ -15,6 +15,7 @@ from scipy.stats import norm
 import torch
 from torch.nn import functional as nnf
 from torchvision.transforms.v2 import functional as tvtf
+from torchvision.transforms.v2.functional import to_dtype
 
 from luolib import transforms as lt
 from luolib.transforms import affine_resize
@@ -80,7 +81,9 @@ def clip_intensity(image: torch.Tensor) -> mt.SpatialCrop:
         minv = lt.quantile(x, _CLIP_LOWER, 1, True)
         maxv = lt.quantile(x, _CLIP_UPPER, 1, True)
         x.clamp_(minv, maxv)
-    roi_start, roi_end = generate_spatial_bounding_box(image > minv)
+    select_mask = image.new_empty((1, *image.shape[1:]), dtype=torch.bool)
+    torch.any(x > minv, dim=0, out=select_mask.view(1, -1))
+    roi_start, roi_end = generate_spatial_bounding_box(select_mask)
     return mt.SpatialCrop(roi_start=roi_start, roi_end=roi_end)
 
 class Processor(ABC):
@@ -467,7 +470,7 @@ class Processor(ABC):
     def normalize_image(self, images: MetaTensor, new_shape: npt.NDArray[np.int32]) -> tuple[MetaTensor, torch.Tensor, torch.Tensor]:
         # 1. rescale to [0, 1]
         if images.dtype == torch.uint8:
-            images = images.float() / 255
+            images = to_dtype(images, scale=True)
         else:
             images = images.float()
             minv, maxv = images.amin((1, 2, 3), keepdim=True), images.amax((1, 2, 3), keepdim=True)
