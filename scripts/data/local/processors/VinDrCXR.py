@@ -8,8 +8,11 @@ import pandas as pd
 from scipy.sparse.csgraph import connected_components
 import torch
 
-from mmmm.data.target_tax import TargetCategory
+from luolib.types import tuple3_t
 from monai.data import MetaTensor, box_iou
+from monai.data.box_utils import clip_boxes_to_image
+
+from mmmm.data.target_tax import TargetCategory
 from ._base import DataPoint, DefaultImageLoaderMixin, Processor
 
 @dataclass(kw_only=True)
@@ -52,11 +55,12 @@ global_labels = {
     # 'No finding': 'no finding',
 }
 
-def _cluster(objects: list[pd.Series]) -> torch.Tensor:
+def _cluster(objects: list[pd.Series], image_size: tuple3_t[int]) -> torch.Tensor:
     boxes = np.array([
         (0, obj['x_min'], obj['y_min'], 1, obj['x_max'], obj['y_max'])
         for obj in objects
     ])
+    boxes, keep = clip_boxes_to_image(boxes, image_size)
     iou: np.ndarray = box_iou(boxes, boxes)
     rad_ids = np.array([x['rad_id'] for x in objects])
     rad_mask = rad_ids[:, None] != rad_ids[None, :]
@@ -74,6 +78,7 @@ def _cluster(objects: list[pd.Series]) -> torch.Tensor:
 
 class VinDrCXRProcessor(DefaultImageLoaderMixin, Processor):
     name = 'VinDr-CXR'
+    image_reader = 'pydicomreader'
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -81,9 +86,7 @@ class VinDrCXRProcessor(DefaultImageLoaderMixin, Processor):
 
     def image_loader(self, path: Path) -> MetaTensor:
         image = super().image_loader(path)
-        assert image.shape[-1] == 1
-        image = self._adapt_to_3d(image[..., 0].mT)
-        return image
+        return image.mT
 
     def load_annotations(
         self, data_point: VinDrCXRDataPoint, images: MetaTensor,
@@ -104,7 +107,7 @@ class VinDrCXRProcessor(DefaultImageLoaderMixin, Processor):
             class_objects: dict = cytoolz.groupby(lambda x: x.class_name, data_point.objects)  # type: ignore
             class_objects.pop('No finding', None)
             for class_name_key, objects in class_objects.items():
-                objects_boxes = _cluster(objects)
+                objects_boxes = _cluster(objects, images.shape[1:])
                 targets.extend([local_labels[class_name_key]] * objects_boxes.shape[0])
                 boxes.append(objects_boxes)
             boxes = torch.cat(boxes)

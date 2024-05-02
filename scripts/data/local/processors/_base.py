@@ -505,7 +505,8 @@ INF_SPACING = 1e8
 class _LoaderBase:
     def _adapt_to_3d(self, image: MetaTensor):
         image = image.unsqueeze(1)
-        image.affine[0, 0] = INF_SPACING
+        # the original affine information of a 2D image is discarded
+        image.affine = np.diag([INF_SPACING, 1, 1, 1])
         return image
 
 class DefaultImageLoaderMixin(_LoaderBase):
