@@ -8,7 +8,7 @@ from monai.transforms import apply_transform
 
 from mmmm.tokenizer import MMMMTokenizer
 from ..defs import split_t
-from .local import LocalTransConf, get_local_data_list, get_seg_transform
+from .local import LocalTransConf, get_local_data_list, get_local_transform
 from .vl import VLTransConf, VLTransform, get_vl_data_list
 
 @dataclass(kw_only=True)
@@ -67,7 +67,7 @@ class MMMMDataset(Dataset):
             for dataset in conf.datasets
         ]
         # NOTE: use attributes instead of storing in a dict to make MONAI's set_rnd work
-        self.seg_transform = get_seg_transform(conf, tokenizer, False)
+        self.seg_transform = get_local_transform(conf, tokenizer, False)
         self.vl_transform = VLTransform(conf, tokenizer, False)
 
     @property

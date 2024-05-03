@@ -328,7 +328,9 @@ class Processor(ABC):
 
     def _group_targets(
         self, targets: list[str], masks: torch.BoolTensor | None, boxes: torch.LongTensor | None,
-    ) -> tuple[list[Sparse.Target], torch.BoolTensor | None, torch.LongTensor]:
+    ) -> tuple[list[Sparse.Target], torch.BoolTensor | None, torch.LongTensor | None]:
+        if len(targets) == 0:
+            return [], None, None
         groups = []
         permute = []
         if masks is not None:
@@ -386,14 +388,21 @@ class Processor(ABC):
                     torch.cuda.empty_cache()
             modalities, images = self.load_images(data_point)
             targets, neg_targets, masks, boxes = self.load_annotations(data_point, images)
+            if targets:
+                if masks is None:
+                    assert boxes is not None
+                    assert len(targets) == boxes.shape[0]
+                else:
+                    assert boxes is None
+                    assert len(targets) == masks.shape[0]
             if len(self.semantic_targets) > 0:
                 assert boxes is None, 'only masks can be merged'
             self._check_targets(targets)
             self._check_targets(neg_targets)
             # 1. orientation
-            # start to accumulate for boxes transform
             if boxes is not None:
                 assert (boxes[:, 3:] <= boxes.new_tensor(images.shape[1:])).all()
+            # start to accumulate for boxes transform
             origin_affine = images.affine
             orient = mt.Orientation(self.get_orientation(images))
             images: MetaTensor = orient(images).contiguous()  # type: ignore
@@ -404,6 +413,7 @@ class Processor(ABC):
             spacing: torch.DoubleTensor = images.pixdim
             info = {
                 'key': key,
+                'label': len(targets) > 0,
                 **{f'shape-o-{i}': s for i, s in enumerate(images.shape[1:])},
                 **{f'space-o-{i}': s.item() for i, s in enumerate(spacing)}
             }
@@ -431,7 +441,7 @@ class Processor(ABC):
                 masks = cropper(masks)  # type: ignore
                 masks = self.resize_masks(masks, new_shape)
                 assert einops.reduce(masks, 'c ... -> c', 'any').all()
-            else:
+            elif boxes is not None:
                 # apply the accumulated transform to boxes
                 boxes_f = apply_affine_to_boxes(boxes, torch.linalg.solve(images.affine, origin_affine))
                 boxes_f, keep = clip_boxes_to_image(boxes_f, new_shape)
@@ -442,8 +452,9 @@ class Processor(ABC):
             groups, masks, class_positions = self._group_targets(targets, masks, boxes)
             if masks is not None:
                 save_pt_zst(as_tensor(masks).cpu(), save_dir / 'masks.pt.zst')
-            # the size of clas_positions is small, and we can use mmap, thus not compressed
-            torch.save(class_positions.cpu(), save_dir / 'class_positions.pt')
+            if class_positions is not None:
+                # the size of clas_positions is small, and we can use mmap, thus not compressed
+                torch.save(class_positions.cpu(), save_dir / 'class_positions.pt')
             # 4.4 handle and save sparse information
             sparse = Sparse(
                 spacing=new_spacing,
