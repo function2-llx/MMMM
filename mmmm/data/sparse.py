@@ -11,10 +11,21 @@ import numpy as np
 from numpy import typing as npt
 import orjson
 
+from luolib.types import tuple2_t
 from mmmm.data.target_tax import TargetCategory
 
-def _numpy_field(dtype: np.dtype):
-    return field(metadata={'serialize': pass_through, 'deserialize': partial(np.array, dtype=dtype)})
+def _numpy_field(dtype: np.dtype, *, optional: bool = False):
+    to_array = partial(np.array, dtype=dtype)
+    if optional:
+        deserialize = lambda x: None if x is None else to_array(x)
+    else:
+        deserialize = to_array
+    return field(
+        metadata={
+            'serialize': pass_through,
+            'deserialize': deserialize,
+        },
+    )
 
 @dataclass(kw_only=True)
 class Sparse(DataClassORJSONMixin):
@@ -36,26 +47,20 @@ class Sparse(DataClassORJSONMixin):
         indistinguishable instances of the same class
         Attributes:
             name: class name
-            num: number of instances (== len(boxes) == len(masks), if available)
-            merged: whether different instances are merged (e.g., semantic), bbox makes less sense in this case
+            semantic: whether different instances are merged in the mask (i.e., semantic), bbox makes less sense in this case
             position_offset: offsets of the corresponding class positions
+            index_offset: index offset among all instances of all targets
             boxes: use MONAI's StandardMode (CornerCornerModeTypeA)
-            masks: mask index of each instance corresponding to the mask file; if None, no mask for the instance available
         """
         name: str
-        num: int
-        merged: bool
-        position_offset: tuple[int, int] | None
-
-        @dataclass
-        class MaskInfo:
-            index: int
-            size: int
-        masks: list[MaskInfo] | None
+        semantic: bool
+        position_offset: tuple2_t[int]
+        index_offset: tuple2_t[int] | None
+        mask_sizes: npt.NDArray[np.int64] | None = _numpy_field(np.int64, optional=True)
         boxes: npt.NDArray[np.int64] = _numpy_field(np.int64)
 
     annotations: dict[TargetCategory, list[Annotation]]
-    neg_targets: dict[TargetCategory, set[str]]
+    neg_targets: dict[TargetCategory, list[str]]
     complete_anomaly: bool
     extra: Any = None
 

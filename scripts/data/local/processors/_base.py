@@ -5,6 +5,7 @@ import gc
 import itertools as it
 from logging import Logger
 from pathlib import Path
+from typing import TypeVar
 
 import cytoolz
 import einops
@@ -28,7 +29,7 @@ from monai.data.box_utils import CornerCornerModeTypeB, box_centers, clip_boxes_
 from monai.transforms import generate_spatial_bounding_box
 
 from mmmm.data import load_target_tax
-from mmmm.data.defs import ORIGIN_SEG_DATA_ROOT, PROCESSED_SEG_DATA_ROOT
+from mmmm.data.defs import ORIGIN_LOCAL_DATA_ROOT, PROCESSED_LOCAL_DATA_ROOT
 from mmmm.data.sparse import Sparse
 
 @dataclass(kw_only=True)
@@ -86,6 +87,8 @@ def clip_intensity(image: torch.Tensor) -> mt.SpatialCrop:
     roi_start, roi_end = generate_spatial_bounding_box(select_mask)
     return mt.SpatialCrop(roi_start=roi_start, roi_end=roi_end)
 
+tensor_t = TypeVar('tensor_t', bound=torch.Tensor)
+
 class Processor(ABC):
     """
     TODO: check aspect ratio
@@ -94,7 +97,7 @@ class Processor(ABC):
         orientation: if orientation is None, will determine it from the spacing
         min_aniso_ratio: minimum value for spacing_z / spacing_xy
         cuda_cache_th: cuda cache usage threshold to empty cache (in GiB)
-        merged_targets: classes that merge multiple instances into a single mask, and will be excluded from bbox calculation from the mask
+        semantic_targets: classes that merge multiple instances into a single mask
     """
     name: str
     max_workers: int | None = None
@@ -105,7 +108,7 @@ class Processor(ABC):
     mask_batch_size: int = 8
     max_class_positions: int = 10000
     cuda_cache_th: int = 15
-    merged_targets: set[str] = set()
+    semantic_targets: set[str] = set()
     affine_atol: float = 1e-2
 
     def __init__(self, logger: Logger, *, max_workers: int, chunksize: int, override: bool):
@@ -116,12 +119,15 @@ class Processor(ABC):
         if self.chunksize is None or override:
             self.chunksize = chunksize
 
+    def to_device(self, x: tensor_t) -> tensor_t:
+        return x.to(device=get_cuda_device())
+
     def _get_category(self, name: str):
         return self.tax[name].category
 
     @property
     def dataset_root(self):
-        return ORIGIN_SEG_DATA_ROOT / self.name
+        return ORIGIN_LOCAL_DATA_ROOT / self.name
 
     @property
     def output_name(self) -> str:
@@ -129,7 +135,7 @@ class Processor(ABC):
 
     @property
     def output_root(self):
-        return PROCESSED_SEG_DATA_ROOT / self.output_name
+        return PROCESSED_LOCAL_DATA_ROOT / self.output_name
 
     @property
     def case_data_root(self):
@@ -320,54 +326,50 @@ class Processor(ABC):
         boxes = convert_box_to_standard_mode(boxes, CornerCornerModeTypeB)
         return torch.from_numpy(boxes)
 
-    def _convert_annotations(
+    def _group_annotations(
         self, targets: list[str], masks: torch.BoolTensor | None, boxes: torch.LongTensor | None,
-    ) -> tuple[list[Sparse.Annotation], torch.LongTensor | None]:
-        ret = []
-        class_positions = None if masks is None and boxes is None else []
+    ) -> tuple[list[Sparse.Annotation], torch.BoolTensor | None, torch.LongTensor]:
+        annotations = []
+        permute = []
         if masks is not None:
-            mask_sizes: list[int] = einops.reduce(masks, 'c ... -> c', 'sum').tolist()
             assert boxes is None
             boxes = Processor._generate_bbox_from_mask(masks)
-        offset = 0
+        class_positions = []
+        index_offset = position_offset = 0
         for target, group in cytoolz.groupby(lambda x: x[1], enumerate(targets)).items():
             indexes: list[int] = [i for i, _ in group]
-            merged = target in self.merged_targets
-            num = len(group)
-            if merged:
-                assert num == 1
-            class_boxes = None if boxes is None else torch.stack([boxes[i] for i in indexes])
-            if masks is not None:
-                merged_mask = einops.reduce(masks[indexes], 'n ... -> ...', 'any')
-                positions = merged_mask.nonzero().short()
-            elif class_boxes is not None:
-                positions = box_centers(class_boxes).floor().short()
-            if class_positions is not None:
-                if positions.shape[0] > self.max_class_positions:
-                    positions = positions[
-                        # deterministic? random!
-                        torch.randint(positions.shape[0], (self.max_class_positions,), device=positions.device),
-                    ]
-                class_positions.append(positions)
-                position_offset = (offset, (offset := offset + positions.shape[0]))
+            permute.extend(indexes)
+            semantic = target in self.semantic_targets
+            num_instances = len(group)
+            if semantic:
+                assert num_instances == 1
+            target_masks = masks[indexes]
+            target_boxes = boxes[indexes]
+            if masks is None:
+                positions = box_centers(target_boxes).floor().long()
             else:
-                position_offset = None
-            ret.append(
+                merged_mask = einops.reduce(masks[indexes], 'n ... -> ...', 'any')
+                positions = merged_mask.nonzero()
+            if positions.shape[0] > self.max_class_positions:
+                positions = positions[
+                    # deterministic? random!
+                    torch.randint(positions.shape[0], (self.max_class_positions,), device=positions.device),
+                ]
+            class_positions.append(positions)
+            annotations.append(
                 Sparse.Annotation(
                     name=target,
-                    num=num,
-                    merged=merged,
-                    position_offset=position_offset,
-                    boxes=None if boxes is None else torch.stack([boxes[i] for i in indexes]).numpy(),
-                    masks=None if masks is None else [
-                        Sparse.Annotation.MaskInfo(i, mask_sizes[i])
-                        for i in indexes
-                    ],
+                    semantic=semantic,
+                    position_offset=(position_offset, (position_offset := position_offset + positions.shape[0])),
+                    index_offset=(index_offset, (index_offset := index_offset + num_instances)),
+                    mask_sizes=einops.reduce(target_masks, 'n ... -> n', 'sum').cpu().numpy(),
+                    boxes=target_boxes.numpy(),
                 ),
             )
-        if class_positions is not None:
-            class_positions = torch.cat(class_positions)
-        return ret, class_positions
+        class_positions = torch.cat(class_positions)
+        if masks is not None:
+            masks = masks[permute]
+        return annotations, masks, class_positions
 
     def process_data_point(self, data_point: DataPoint, empty_cache: bool, raise_error: bool):
         """
@@ -384,7 +386,7 @@ class Processor(ABC):
                     torch.cuda.empty_cache()
             modalities, images = self.load_images(data_point)
             targets, neg_targets, masks, boxes = self.load_annotations(data_point, images)
-            if len(self.merged_targets) > 0:
+            if len(self.semantic_targets) > 0:
                 assert boxes is None, 'only masks can be merged'
             self._check_targets(targets)
             self._check_targets(neg_targets)
@@ -429,7 +431,6 @@ class Processor(ABC):
                 masks = cropper(masks)  # type: ignore
                 masks = self.resize_masks(masks, new_shape)
                 assert einops.reduce(masks, 'c ... -> c', 'any').all()
-                save_pt_zst(as_tensor(masks).cpu(), save_dir / 'masks.pt.zst')
             else:
                 # apply the accumulated transform to boxes
                 boxes_f = apply_affine_to_boxes(boxes, torch.linalg.solve(images.affine, origin_affine))
@@ -438,12 +439,12 @@ class Processor(ABC):
                 boxes = torch.empty_like(boxes_f, dtype=torch.int64)
                 boxes[:, :3] = boxes_f[:, :3].floor()
                 boxes[:, 3:] = boxes_f[:, 3:].ceil()
-            annotations, class_positions = self._convert_annotations(targets, masks, boxes)
+            annotations, masks, class_positions = self._group_annotations(targets, masks, boxes)
+            if masks:
+                save_pt_zst(as_tensor(masks).cpu(), save_dir / 'masks.pt.zst')
             if class_positions is not None:
                 # the size of clas_positions is small, and we can use mmap, thus not compressed
                 torch.save(class_positions.cpu(), save_dir / 'class_positions.pt')
-            annotations = cytoolz.groupby(lambda annotation: self._get_category(annotation.name), annotations)
-            neg_targets = cytoolz.groupby(lambda name: self._get_category(name), neg_targets)
             # 4.4 handle and save sparse information
             sparse = Sparse(
                 spacing=new_spacing,
@@ -451,8 +452,8 @@ class Processor(ABC):
                 mean=mean.cpu().numpy(),
                 std=std.cpu().numpy(),
                 modalities=modalities,
-                annotations=annotations,
-                neg_targets={category: set(targets) for category, targets in neg_targets.items()},
+                annotations=cytoolz.groupby(lambda annotation: self._get_category(annotation.name), annotations),  # type: ignore
+                neg_targets=cytoolz.groupby(lambda name: self._get_category(name), neg_targets),  # type: ignore
                 complete_anomaly=data_point.complete_anomaly,
                 extra=data_point.extra,
             )

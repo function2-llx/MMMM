@@ -10,16 +10,16 @@ from luolib.types import tuple3_t
 DATA_ROOT = Path('data')
 ORIGIN_DATA_ROOT = DATA_ROOT / 'origin'
 PROCESSED_DATA_ROOT = DATA_ROOT / 'processed'
-ORIGIN_SEG_DATA_ROOT = ORIGIN_DATA_ROOT / 'image'
+ORIGIN_LOCAL_DATA_ROOT = ORIGIN_DATA_ROOT / 'local'
 ORIGIN_VL_DATA_ROOT = ORIGIN_DATA_ROOT / 'vision-language'
-PROCESSED_SEG_DATA_ROOT = PROCESSED_DATA_ROOT / 'image'
+PROCESSED_LOCAL_DATA_ROOT = PROCESSED_DATA_ROOT / 'local'
 PROCESSED_VL_DATA_ROOT = PROCESSED_DATA_ROOT / 'vision-language'
 PROCESSED_VG_DATA_ROOT = PROCESSED_DATA_ROOT / 'visual-grounding'
 
 class DataPoint(TypedDict):
     """
     Attributes:
-        mask_idxes: for each target, indicating the corresponding mask index of each instance
+        index_offsets: (n, 2) for each target, indicating the label index offsets for
             if , no mask label for this target
         num_uncertain: number of uncertain instances for the target.
             -1 to ignore this target when calculating grounding loss
@@ -31,8 +31,8 @@ class DataPoint(TypedDict):
     pool_size: tuple3_t[int]
     vlm_inputs: dict[str, torch.Tensor]
     masks: torch.BoolTensor
-    mask_idxes: list[torch.LongTensor]
-    boxes: list[torch.Tensor]
+    boxes: torch.Tensor
+    index_offsets: torch.LongTensor
     num_uncertain: torch.LongTensor
     semantic: torch.BoolTensor
 
@@ -43,8 +43,8 @@ class Batch(TypedDict):
     pool_size: list[tuple3_t[int]]
     vlm_inputs: dict[str, torch.Tensor]
     masks: list[torch.BoolTensor]
-    mask_idxes: list[torch.LongTensor]
     boxes: list[torch.Tensor]
+    index_offsets: list[torch.LongTensor]
     num_uncertain: list[torch.LongTensor]
     semantic: list[torch.BoolTensor]
 
