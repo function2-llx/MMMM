@@ -8,7 +8,7 @@ from monai.transforms import apply_transform
 
 from mmmm.tokenizer import MMMMTokenizer
 from ..defs import split_t
-from .local import LocalTransConf, get_seg_data_list, get_seg_transform
+from .local import LocalTransConf, get_local_data_list, get_seg_transform
 from .vl import VLTransConf, VLTransform, get_vl_data_list
 
 @dataclass(kw_only=True)
@@ -24,7 +24,7 @@ class DatasetSpec:
     def get_data_list(self, split: Literal['train', 'validate', 'test']) -> list:
         match self.type:
             case 'seg':
-                return get_seg_data_list(self.name, split)
+                return get_local_data_list(self.name, split)
             case 'vl':
                 return get_vl_data_list(self.name, split)
             case _:
