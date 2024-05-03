@@ -440,11 +440,10 @@ class Processor(ABC):
                 boxes[:, :3] = boxes_f[:, :3].floor()
                 boxes[:, 3:] = boxes_f[:, 3:].ceil()
             annotations, masks, class_positions = self._group_annotations(targets, masks, boxes)
-            if masks:
+            if masks is not None:
                 save_pt_zst(as_tensor(masks).cpu(), save_dir / 'masks.pt.zst')
-            if class_positions is not None:
-                # the size of clas_positions is small, and we can use mmap, thus not compressed
-                torch.save(class_positions.cpu(), save_dir / 'class_positions.pt')
+            # the size of clas_positions is small, and we can use mmap, thus not compressed
+            torch.save(class_positions.cpu(), save_dir / 'class_positions.pt')
             # 4.4 handle and save sparse information
             sparse = Sparse(
                 spacing=new_spacing,
