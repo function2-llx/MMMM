@@ -1,12 +1,8 @@
 from copy import copy
 
-import numpy as np
 import pandas as pd
 
-from monai.data import MetaTensor
-
-from mmmm.data.defs import ORIGIN_SEG_DATA_ROOT
-from ._base import DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor, MultiClassDataPoint
+from ._base import DefaultImageLoaderMixin, DefaultMaskLoaderMixin, MultiClassDataPoint, Processor
 
 class AMOS22Processor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor):
     name = 'AMOS22'
@@ -54,18 +50,18 @@ class AMOS22Processor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor
                 ret.append(data_point)
         return ret
 
-class AMOS22DebugProcessor(AMOS22Processor):
-    name = 'AMOS22-debug'
-    mask_batch_size = 8
-
-    @property
-    def dataset_root(self):
-        return ORIGIN_SEG_DATA_ROOT / 'AMOS22'
-
-    def compute_resize(self, images: MetaTensor):
-        shape = np.array(images.shape[1:])
-        spacing = images.pixdim.numpy()
-        # from nnU-Net
-        new_spacing = np.array([2.0, 0.712890625, 0.712890625])
-        new_shape = (shape * spacing / new_spacing).round().astype(np.int32)
-        return new_spacing, new_shape
+# class AMOS22DebugProcessor(AMOS22Processor):
+#     name = 'AMOS22-debug'
+#     mask_batch_size = 8
+#
+#     @property
+#     def dataset_root(self):
+#         return ORIGIN_SEG_DATA_ROOT / 'AMOS22'
+#
+#     def compute_resize(self, images: MetaTensor):
+#         shape = np.array(images.shape[1:])
+#         spacing = images.pixdim.numpy()
+#         # from nnU-Net
+#         new_spacing = np.array([2.0, 0.712890625, 0.712890625])
+#         new_shape = (shape * spacing / new_spacing).round().astype(np.int32)
+#         return new_spacing, new_shape

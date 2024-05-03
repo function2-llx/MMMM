@@ -106,7 +106,7 @@ class Processor(ABC):
     max_class_positions: int = 10000
     cuda_cache_th: int = 15
     merged_targets: set[str] = set()
-    affine_atol: float = 1e-4
+    affine_atol: float = 1e-2
 
     def __init__(self, logger: Logger, *, max_workers: int, chunksize: int, override: bool):
         self.tax = load_target_tax()
@@ -275,7 +275,7 @@ class Processor(ABC):
             return self.orientation
         codes = ['RAS', 'ASR', 'SRA']
         diff = np.empty(len(codes))
-        shape_diff = np.empty(len(codes), dtype=np.int32)
+        shape_diff = np.empty(len(codes), dtype=np.int64)
         dummy = MetaTensor(torch.empty(0, *images.shape[1:], device=images.device), images.affine)
         for i, code in enumerate(codes):
             orientation = mt.Orientation(code)
@@ -292,7 +292,9 @@ class Processor(ABC):
             orientation = 'SRA'
         return orientation
 
-    def compute_resize(self, spacing: torch.DoubleTensor, shape: tuple3_t[int]) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.int16]]:
+    def compute_resize(
+        self, spacing: torch.DoubleTensor, shape: tuple3_t[int],
+    ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.int64]]:
         if self.max_smaller_edge < (smaller_edge := min(shape[1:])):
             scale_xy = smaller_edge / self.max_smaller_edge
         else:
@@ -302,7 +304,7 @@ class Processor(ABC):
         new_spacing = np.array([new_spacing_z, new_spacing_xy, new_spacing_xy])
         scale_z = new_spacing_z / spacing[0].item()
         scale = np.array([scale_z, scale_xy, scale_xy])
-        new_shape = (np.array(shape) / scale).round().astype(np.int16)
+        new_shape = (np.array(shape) / scale).round().astype(np.int64)
         return new_spacing, new_shape
 
     def _check_targets(self, targets: Iterable[str]):
@@ -312,15 +314,15 @@ class Processor(ABC):
             raise ValueError
 
     @staticmethod
-    def _generate_bbox_from_mask(masks: torch.BoolTensor) -> torch.ShortTensor:
+    def _generate_bbox_from_mask(masks: torch.BoolTensor) -> torch.LongTensor:
         bbox_t = mt.BoundingRect()
-        boxes = bbox_t(masks).astype(np.int16)
+        boxes = bbox_t(masks).astype(np.int64)
         boxes = convert_box_to_standard_mode(boxes, CornerCornerModeTypeB)
         return torch.from_numpy(boxes)
 
     def _convert_annotations(
-        self, targets: list[str], masks: torch.BoolTensor | None, boxes: torch.ShortTensor | None,
-    ) -> tuple[list[Sparse.Annotation], torch.ShortTensor | None]:
+        self, targets: list[str], masks: torch.BoolTensor | None, boxes: torch.LongTensor | None,
+    ) -> tuple[list[Sparse.Annotation], torch.LongTensor | None]:
         ret = []
         class_positions = None if masks is None and boxes is None else []
         if masks is not None:
@@ -356,7 +358,7 @@ class Processor(ABC):
                     num=num,
                     merged=merged,
                     position_offset=position_offset,
-                    boxes=None if boxes is None or merged else torch.stack([boxes[i] for i in indexes]).numpy(),
+                    boxes=None if boxes is None else torch.stack([boxes[i] for i in indexes]).numpy(),
                     masks=None if masks is None else [
                         Sparse.Annotation.MaskInfo(i, mask_sizes[i])
                         for i in indexes
@@ -428,12 +430,12 @@ class Processor(ABC):
                 masks = self.resize_masks(masks, new_shape)
                 assert einops.reduce(masks, 'c ... -> c', 'any').all()
                 save_pt_zst(as_tensor(masks).cpu(), save_dir / 'masks.pt.zst')
-            elif boxes is not None:
+            else:
                 # apply the accumulated transform to boxes
                 boxes_f = apply_affine_to_boxes(boxes, torch.linalg.solve(images.affine, origin_affine))
                 boxes_f, keep = clip_boxes_to_image(boxes_f, new_shape)
                 assert keep.all()
-                boxes = torch.empty_like(boxes_f, dtype=torch.int16)
+                boxes = torch.empty_like(boxes_f, dtype=torch.int64)
                 boxes[:, :3] = boxes_f[:, :3].floor()
                 boxes[:, 3:] = boxes_f[:, 3:].ceil()
             annotations, class_positions = self._convert_annotations(targets, masks, boxes)
@@ -468,7 +470,7 @@ class Processor(ABC):
                 import traceback
                 self.logger.error(traceback.format_exc())
 
-    def normalize_image(self, images: MetaTensor, new_shape: npt.NDArray[np.int32]) -> tuple[MetaTensor, torch.Tensor, torch.Tensor]:
+    def normalize_image(self, images: MetaTensor, new_shape: npt.NDArray[np.int64]) -> tuple[MetaTensor, torch.Tensor, torch.Tensor]:
         # 1. rescale to [0, 1]
         if images.dtype == torch.uint8:
             images = to_dtype(images, scale=True)
@@ -488,7 +490,7 @@ class Processor(ABC):
             std[i] = fg.std()
         return images, mean, std
 
-    def resize_masks(self, masks: torch.BoolTensor, new_shape: npt.NDArray[np.int32]) -> torch.BoolTensor:
+    def resize_masks(self, masks: torch.BoolTensor, new_shape: npt.NDArray[np.int64]) -> torch.BoolTensor:
         new_shape = tuple(new_shape.tolist())
         if masks.shape[1:] == new_shape:
             resized_masks = masks
