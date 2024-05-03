@@ -1,15 +1,28 @@
+from dataclasses import dataclass
+from pathlib import Path
+
 import torch
 
-from ._base import DefaultMaskLoaderMixin, DefaultImageLoaderMixin, MultiLabelMultiFileDataPoint, Processor
+from monai.data import MetaTensor
+from ._base import DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor, SegDataPoint
+
+@dataclass(kw_only=True)
+class RibFracDataPoint(SegDataPoint):
+    label: Path
 
 class RibFracProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor):
     name = 'RibFrac'
     orientation = 'SRA'
-    merged_targets = {'rib fracture'}
 
-    def _ensure_binary_mask(self, mask: torch.Tensor):
-        mask[mask != 0] = 1
-        return super()._ensure_binary_mask(mask)
+    def load_masks(self, data_point: RibFracDataPoint, images: MetaTensor) -> tuple[list[str], MetaTensor]:
+        label = self.mask_loader(data_point.label)
+        label = self.to_device(label)
+        label_ids = label.unique()
+        max_label_id = label_ids.max().item()
+        assert label_ids.min() == 0 and max_label_id + 1 == label_ids.shape[0]
+        label_ids = label_ids[label_ids != 0]
+        masks: MetaTensor = label == label_ids[:, None, None, None]  # type: ignore
+        return ['rib fracture'] * max_label_id, masks
 
     def get_data_points(self):
         ret = []
@@ -17,10 +30,10 @@ class RibFracProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processo
             key = label_path.name[:-len('-label.nii.gz')]
             image_path = label_path.with_name(f'{key}-image.nii.gz')
             ret.append(
-                MultiLabelMultiFileDataPoint(
+                RibFracDataPoint(
                     key=key,
                     images={'CT': image_path},
-                    masks=[('rib fracture', label_path)],
+                    label=label_path,
                 )
             )
         return ret
