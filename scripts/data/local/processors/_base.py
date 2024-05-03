@@ -326,10 +326,10 @@ class Processor(ABC):
         boxes = convert_box_to_standard_mode(boxes, CornerCornerModeTypeB)
         return torch.from_numpy(boxes)
 
-    def _group_annotations(
+    def _group_targets(
         self, targets: list[str], masks: torch.BoolTensor | None, boxes: torch.LongTensor | None,
-    ) -> tuple[list[Sparse.Annotation], torch.BoolTensor | None, torch.LongTensor]:
-        annotations = []
+    ) -> tuple[list[Sparse.Target], torch.BoolTensor | None, torch.LongTensor]:
+        groups = []
         permute = []
         if masks is not None:
             assert boxes is None
@@ -356,8 +356,8 @@ class Processor(ABC):
                     torch.randint(positions.shape[0], (self.max_class_positions,), device=positions.device),
                 ]
             class_positions.append(positions)
-            annotations.append(
-                Sparse.Annotation(
+            groups.append(
+                Sparse.Target(
                     name=target,
                     semantic=semantic,
                     position_offset=(position_offset, (position_offset := position_offset + positions.shape[0])),
@@ -369,7 +369,7 @@ class Processor(ABC):
         class_positions = torch.cat(class_positions)
         if masks is not None:
             masks = masks[permute]
-        return annotations, masks, class_positions
+        return groups, masks, class_positions
 
     def process_data_point(self, data_point: DataPoint, empty_cache: bool, raise_error: bool):
         """
@@ -439,7 +439,7 @@ class Processor(ABC):
                 boxes = torch.empty_like(boxes_f, dtype=torch.int64)
                 boxes[:, :3] = boxes_f[:, :3].floor()
                 boxes[:, 3:] = boxes_f[:, 3:].ceil()
-            annotations, masks, class_positions = self._group_annotations(targets, masks, boxes)
+            groups, masks, class_positions = self._group_targets(targets, masks, boxes)
             if masks is not None:
                 save_pt_zst(as_tensor(masks).cpu(), save_dir / 'masks.pt.zst')
             # the size of clas_positions is small, and we can use mmap, thus not compressed
@@ -451,7 +451,7 @@ class Processor(ABC):
                 mean=mean.cpu().numpy(),
                 std=std.cpu().numpy(),
                 modalities=modalities,
-                annotations=cytoolz.groupby(lambda annotation: self._get_category(annotation.name), annotations),  # type: ignore
+                targets=cytoolz.groupby(lambda target: self._get_category(target.name), groups),  # type: ignore
                 neg_targets=cytoolz.groupby(lambda name: self._get_category(name), neg_targets),  # type: ignore
                 complete_anomaly=data_point.complete_anomaly,
                 extra=data_point.extra,

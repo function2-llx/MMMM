@@ -42,7 +42,7 @@ class Sparse(DataClassORJSONMixin):
     std: npt.NDArray[np.float32] = _numpy_field(np.float32)
 
     @dataclass(kw_only=True)
-    class Annotation:
+    class Target:
         """
         indistinguishable instances of the same class
         Attributes:
@@ -59,7 +59,7 @@ class Sparse(DataClassORJSONMixin):
         mask_sizes: npt.NDArray[np.int64] | None = _numpy_field(np.int64, optional=True)
         boxes: npt.NDArray[np.int64] = _numpy_field(np.int64)
 
-    annotations: dict[TargetCategory, list[Annotation]]
+    targets: dict[TargetCategory, list[Target]]
     neg_targets: dict[TargetCategory, list[str]]
     complete_anomaly: bool
     extra: Any = None
