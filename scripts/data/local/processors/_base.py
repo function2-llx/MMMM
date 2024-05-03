@@ -22,6 +22,7 @@ from luolib import transforms as lt
 from luolib.transforms import affine_resize
 from luolib.types import tuple3_t
 from luolib.utils import as_tensor, fall_back_none, get_cuda_device, process_map, save_pt_zst
+from mmmm.data.target_tax import TargetCategory
 from monai import transforms as mt
 from monai.apps.detection.transforms.box_ops import apply_affine_to_boxes
 from monai.data import MetaTensor, convert_box_to_standard_mode
@@ -118,6 +119,7 @@ class Processor(ABC):
             self.max_workers = max_workers
         if self.chunksize is None or override:
             self.chunksize = chunksize
+        self._check_targets(self.semantic_targets)
 
     def to_device(self, x: tensor_t) -> tensor_t:
         return x.to(device=get_cuda_device())
@@ -345,12 +347,14 @@ class Processor(ABC):
             num_instances = len(group)
             if semantic:
                 assert num_instances == 1
-            target_masks = masks[indexes]
             target_boxes = boxes[indexes]
             if masks is None:
                 positions = box_centers(target_boxes).floor().long()
+                mask_sizes = None
             else:
-                merged_mask = einops.reduce(masks[indexes], 'n ... -> ...', 'any')
+                target_masks = masks[indexes]
+                mask_sizes = einops.reduce(target_masks, 'n ... -> n', 'sum').cpu().numpy()
+                merged_mask = einops.reduce(target_masks, 'n ... -> ...', 'any')
                 positions = merged_mask.nonzero()
             if positions.shape[0] > self.max_class_positions:
                 positions = positions[
@@ -364,7 +368,7 @@ class Processor(ABC):
                     semantic=semantic,
                     position_offset=(position_offset, (position_offset := position_offset + positions.shape[0])),
                     index_offset=(index_offset, (index_offset := index_offset + num_instances)),
-                    mask_sizes=einops.reduce(target_masks, 'n ... -> n', 'sum').cpu().numpy(),
+                    mask_sizes=mask_sizes,
                     boxes=target_boxes.numpy(),
                 ),
             )
@@ -449,12 +453,13 @@ class Processor(ABC):
                 boxes = torch.empty_like(boxes_f, dtype=torch.int64)
                 boxes[:, :3] = boxes_f[:, :3].floor()
                 boxes[:, 3:] = boxes_f[:, 3:].ceil()
-            groups, masks, class_positions = self._group_targets(targets, masks, boxes)
+            targets, masks, class_positions = self._group_targets(targets, masks, boxes)
             if masks is not None:
                 save_pt_zst(as_tensor(masks).cpu(), save_dir / 'masks.pt.zst')
             if class_positions is not None:
                 # the size of clas_positions is small, and we can use mmap, thus not compressed
                 torch.save(class_positions.cpu(), save_dir / 'class_positions.pt')
+            assert len(targets) > 0 or len(neg_targets) > 0
             # 4.4 handle and save sparse information
             sparse = Sparse(
                 spacing=new_spacing,
@@ -462,11 +467,14 @@ class Processor(ABC):
                 mean=mean.cpu().numpy(),
                 std=std.cpu().numpy(),
                 modalities=modalities,
-                targets=cytoolz.groupby(lambda target: self._get_category(target.name), groups),  # type: ignore
+                targets=cytoolz.groupby(lambda target: self._get_category(target.name), targets),  # type: ignore
                 neg_targets=cytoolz.groupby(lambda name: self._get_category(name), neg_targets),  # type: ignore
                 complete_anomaly=data_point.complete_anomaly,
                 extra=data_point.extra,
             )
+            for category in TargetCategory:
+                sparse.targets.setdefault(category, [])
+                sparse.neg_targets.setdefault(category, [])
             (save_dir / 'sparse.json').write_text(sparse.to_json())
             # 4.5. save info, wait for collection
             pd.to_pickle(info, save_dir / 'info.pkl')

@@ -47,6 +47,7 @@ class MSDLiverProcessor(MSDProcessor):
     name = 'MSD/Task03_Liver'
     orientation = 'SRA'
     class_mapping = {1: 'liver', 2: 'liver tumor'}
+    semantic_targets = {'liver tumor'}
 
 class MSDHippocampusProcessor(MSDProcessor):
     name = 'MSD/Task04_Hippocampus'
@@ -74,16 +75,19 @@ class MSDLungProcessor(MSDProcessor):
     name = 'MSD/Task06_Lung'
     orientation = 'SRA'
     class_mapping = {1: 'lung cancer'}
+    semantic_targets = {'lung cancer'}
 
 class MSDPancreasProcessor(MSDProcessor):
     name = 'MSD/Task07_Pancreas'
     orientation = 'SRA'
     class_mapping = {1: 'pancreas', 2: 'pancreatic cancer'}
+    semantic_targets = {'pancreatic cancer'}
 
 class MSDHepaticVesselProcessor(MSDProcessor):
     name = 'MSD/Task08_HepaticVessel'
     orientation = 'SRA'
     class_mapping = {1: 'hepatic vessel', 2: 'liver tumor'}
+    semantic_targets = {'liver tumor'}
 
 class MSDSpleenProcessor(MSDProcessor):
     name = 'MSD/Task09_Spleen'
@@ -93,3 +97,4 @@ class MSDSpleenProcessor(MSDProcessor):
 class MSDColonProcessor(MSDProcessor):
     name = 'MSD/Task10_Colon'
     class_mapping = {1: 'colon cancer'}
+    semantic_targets = {'colon cancer'}

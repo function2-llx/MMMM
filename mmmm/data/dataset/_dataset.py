@@ -67,7 +67,7 @@ class MMMMDataset(Dataset):
             for dataset in conf.datasets
         ]
         # NOTE: use attributes instead of storing in a dict to make MONAI's set_rnd work
-        self.seg_transform = get_local_transform(conf, tokenizer, False)
+        self.local_transform = get_local_transform(conf, tokenizer, False)
         self.vl_transform = VLTransform(conf, tokenizer, False)
 
     @property

@@ -8,6 +8,7 @@ _checked_keys = {'48', '49', '50', '51', '52'}
 class LiTSProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor):
     name = 'LiTS'
     orientation = 'SRA'
+    semantic_targets = {'liver tumor'}
 
     def load_masks(self, data_point: SegDataPoint, images: MetaTensor):
         targets, masks = super().load_masks(data_point, images)

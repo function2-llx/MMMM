@@ -19,7 +19,7 @@ import mmmm.data.dataset._dataset as _dataset
 from mmmm.tokenizer import MMMMTokenizer
 from ..defs import ConvTurn, DataPoint, PROCESSED_VL_DATA_ROOT, split_t
 from ..utils import prepare_vlm_inputs
-from .misc import gen_modality_conversation, intensity_norm, toss
+from .misc import gen_modality_conv, intensity_norm, toss
 
 CAPTION_PROMPTS = [
     'Describe the following image in detail.',
@@ -211,7 +211,7 @@ class VLTransform(mt.RandomizableTransform):
         self.R.shuffle(conversation)
         if modality is not None and toss(self.R, 0.5):
             # prepend the modality conversation
-            conversation = gen_modality_conversation(modality, self.R) + conversation
+            conversation = gen_modality_conv(modality, self.R) + conversation
         vlm_inputs, conversation_text = prepare_vlm_inputs(
             conversation,
             self.tokenizer,

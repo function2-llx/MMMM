@@ -21,7 +21,7 @@ class Prostate158Processor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Proc
     def dataset_root(self):
         return super().dataset_root / 'prostate158_train'
 
-    def load_masks(self, data_point: Prostate158DataPoint):
+    def load_masks(self, data_point: Prostate158DataPoint, images: MetaTensor):
         anatomy: MetaTensor = self.mask_loader(data_point.anatomy)
         anatomy_masks = torch.cat([anatomy == 1, anatomy == 2])
         targets = ['transition zone of prostate', 'peripheral zone of prostate']

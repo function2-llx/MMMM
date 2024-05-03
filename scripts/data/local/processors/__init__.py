@@ -25,7 +25,7 @@ from .MSD import (
 )
 from .PARSE2022 import PARSE2022Processor
 from .PENGWIN import PENGWINT1Processor, PENGWINT2Processor
-from .PI_CAI import PI_CAIProcessor
+# from .PI_CAI import PI_CAIProcessor
 from .Prostate158 import Prostate158Processor
 from .RibFrac import RibFracProcessor
 from .SEGA2023 import SEGA2022Processor
