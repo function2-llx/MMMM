@@ -4,6 +4,7 @@ from typing import Iterable
 
 import cytoolz
 import numpy as np
+import numpy.typing as npt
 import pandas as pd
 from scipy.sparse.csgraph import connected_components
 import torch
@@ -57,6 +58,19 @@ global_labels = {
     # 'No finding': 'no finding',
 }
 
+def _remove_duplicate(objects: list[pd.Series], boxes: np.ndarray) -> tuple[list[pd.Series], np.ndarray]:
+    rad_ids = np.array([x['rad_id'] for x in objects])
+    identical = (boxes[:, None] == boxes[None, :]).all(-1) & (rad_ids[:, None] == rad_ids[None, :])
+    nc, labels = connected_components(identical, directed=False)
+    objects_ret = [None] * nc
+    boxes_ret = np.empty((nc, 6), dtype=boxes.dtype)
+    for i in range(boxes.shape[0]):
+        if objects_ret[label := labels[i]] is not None:
+            continue
+        objects_ret[label] = objects[i]
+        boxes_ret[label] = boxes[i]
+    return objects_ret, boxes_ret
+
 def _cluster(objects: list[pd.Series], image_size: tuple3_t[int]) -> torch.Tensor:
     boxes = np.array([
         (0, obj['x_min'], obj['y_min'], 1, obj['x_max'], obj['y_max'])
@@ -66,10 +80,10 @@ def _cluster(objects: list[pd.Series], image_size: tuple3_t[int]) -> torch.Tenso
     boxes, keep = clip_boxes_to_image(boxes, image_size)
     if boxes.shape[0] == 0:
         return boxes
-    # objects = np.array(objects)[keep].tolist(), not work, series index will lost
     objects = [obj for i, obj in enumerate(objects) if keep[i]]
-    iou: np.ndarray = box_iou(boxes.astype(np.float64), boxes.astype(np.float64))
+    objects, boxes = _remove_duplicate(objects, boxes)
     rad_ids = np.array([x['rad_id'] for x in objects])
+    iou: np.ndarray = box_iou(boxes.astype(np.float64), boxes.astype(np.float64))
     num_rads = len(np.unique(rad_ids))
     rad_mask = rad_ids[:, None] != rad_ids[None, :]
     # use a low threshold
