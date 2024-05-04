@@ -68,7 +68,7 @@ def _cluster(objects: list[pd.Series], image_size: tuple3_t[int]) -> torch.Tenso
         return boxes
     # objects = np.array(objects)[keep].tolist(), not work, series index will lost
     objects = [obj for i, obj in enumerate(objects) if keep[i]]
-    iou: np.ndarray = box_iou(boxes, boxes)
+    iou: np.ndarray = box_iou(boxes.astype(np.float64), boxes.astype(np.float64))
     rad_ids = np.array([x['rad_id'] for x in objects])
     num_rads = len(np.unique(rad_ids))
     rad_mask = rad_ids[:, None] != rad_ids[None, :]
