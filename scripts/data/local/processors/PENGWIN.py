@@ -1,8 +1,5 @@
-from collections import Counter
-
 import torch
 
-from luolib.utils import get_cuda_device
 from monai.data import MetaTensor
 
 from mmmm.data.defs import ORIGIN_LOCAL_DATA_ROOT
@@ -20,7 +17,7 @@ class PENGWINProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processo
         return ORIGIN_LOCAL_DATA_ROOT / 'PENGWIN'
 
     def load_masks(self, data_point: MultiClassDataPoint, *args, **kwargs):
-        label: MetaTensor = self.mask_loader(data_point.label).to(device=get_cuda_device())
+        label: MetaTensor = self.mask_loader(data_point.label).to(device=self.device)
         masks: MetaTensor = label.new_empty((len(self.targets), *label.shape[1:]), dtype=torch.bool)
         masks.affine = label.affine
         fragments = {}

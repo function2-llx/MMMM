@@ -1,10 +1,8 @@
 from pathlib import Path
 
-import torch
-
-from luolib.utils import get_cuda_device
 from monai.data import MetaTensor
-from ._base import DataPoint, DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor, MultiClassDataPoint
+
+from ._base import DataPoint, DefaultImageLoaderMixin, DefaultMaskLoaderMixin, MultiClassDataPoint, Processor
 
 class MSDProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor):
     class_mapping: dict[int, str]
@@ -19,10 +17,10 @@ class MSDProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor):
         modality = meta['modality']
         return [modality[str(i)] for i in range(len(modality))]
 
-    def load_images(self, data_point: DataPoint) -> tuple[list[str], MetaTensor, bool]:
+    def load_images(self, data_point: DataPoint) -> tuple[list[str], MetaTensor]:
         modalities = self.get_modalities()
         images = self.image_loader(data_point.images['_all'])
-        return modalities, images.to(device=get_cuda_device())
+        return modalities, images.to(device=self.device)
 
     def get_data_points(self) -> list[DataPoint]:
         ret = []

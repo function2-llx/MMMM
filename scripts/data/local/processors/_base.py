@@ -121,8 +121,9 @@ class Processor(ABC):
             self.chunksize = chunksize
         self._check_targets(self.semantic_targets)
 
-    def to_device(self, x: tensor_t) -> tensor_t:
-        return x.to(device=get_cuda_device())
+    @property
+    def device(self):
+        return get_cuda_device()
 
     def _get_category(self, name: str):
         return self.tax[name].category
@@ -194,7 +195,6 @@ class Processor(ABC):
         return pos_targets, neg_targets, masks, None
 
     def load_masks(self, data_point: SegDataPoint, images: MetaTensor) -> tuple[list[str], MetaTensor]:
-        device = get_cuda_device()
         if isinstance(data_point, MultiLabelMultiFileDataPoint):
             targets, mask_paths = zip(*data_point.masks)
             targets = list(targets)
@@ -206,15 +206,15 @@ class Processor(ABC):
             affine = mask_list[0].affine
             for mask in mask_list[1:]:
                 self._check_affine(affine, mask.affine)
-            masks: MetaTensor = torch.cat(mask_list).to(device=device)
+            masks: MetaTensor = torch.cat(mask_list).to(device=self.device)
             masks.affine = affine
             masks = self._ensure_binary_mask(masks)
         elif isinstance(data_point, MultiClassDataPoint):
             class_mapping = data_point.class_mapping
             targets = list(class_mapping.values())
-            label: MetaTensor = self.mask_loader(data_point.label).to(dtype=torch.int16, device=device)
+            label: MetaTensor = self.mask_loader(data_point.label).to(dtype=torch.int16, device=self.device)
             assert label.shape[0] == 1
-            class_ids = torch.tensor([c for c in class_mapping], dtype=torch.int16, device=device)
+            class_ids = torch.tensor([c for c in class_mapping], dtype=torch.int16, device=self.device)
             for _ in range(label.ndim - 1):
                 class_ids = class_ids[..., None]  # make broadcastable
             masks = label == class_ids

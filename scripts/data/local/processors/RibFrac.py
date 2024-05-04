@@ -16,7 +16,7 @@ class RibFracProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processo
 
     def load_masks(self, data_point: RibFracDataPoint, images: MetaTensor) -> tuple[list[str], MetaTensor]:
         label = self.mask_loader(data_point.label)
-        label = self.to_device(label)
+        label = label.to(device=self.device)
         label_ids = label.unique()
         max_label_id = label_ids.max().item()
         assert label_ids.min() == 0 and max_label_id + 1 == label_ids.shape[0]

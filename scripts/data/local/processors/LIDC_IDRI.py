@@ -6,10 +6,7 @@ import pylidc as pl
 from pylidc.utils import consensus
 import torch
 
-from luolib.types import tuple3_t
-from luolib.utils import get_cuda_device
 from monai.data import MetaTensor
-
 from ._base import DefaultImageLoaderMixin, Processor, SegDataPoint
 
 @dataclass(kw_only=True)
@@ -34,12 +31,15 @@ class LIDC_IDRIProcessor(DefaultImageLoaderMixin, Processor):
     def load_masks(self, data_point: LIDR_IDRIDataPoint, images: MetaTensor):
         scan: pl.Scan = cytoolz.first(pl.query(pl.Scan).filter(pl.Scan.series_instance_uid == data_point.series_instance_uid))
         nodules = scan.cluster_annotations()
+        if len(nodules) == 0:
+            # TODO: calm down
+            return ['nodule'], torch.zeros(1,  dtype=torch.bool, device=self.device)
         masks = np.zeros((len(nodules), *images.shape[1:]), dtype=np.bool_)
         for i, nodule in enumerate(nodules):
             assert len(nodule) <= 4
             mask, mask_bbox = consensus(nodule, ret_masks=False)
             masks[i, *mask_bbox] = mask
-        masks = MetaTensor(torch.as_tensor(masks, device=get_cuda_device()), images.affine)
+        masks = MetaTensor(torch.as_tensor(masks, device=self.device), images.affine)
         return ['nodule'] * masks.shape[0], masks
 
     def get_data_points(self) -> list[LIDR_IDRIDataPoint]:
