@@ -41,7 +41,7 @@ class Batch(TypedDict):
     patch_size: list[tuple3_t[int]]
     pool_size: list[tuple3_t[int]]
     vlm_inputs: dict[str, torch.Tensor]
-    masks: list[torch.BoolTensor]
+    masks: list[torch.BoolTensor | None]
     boxes: list[torch.Tensor]
     index_offsets: list[torch.LongTensor]
     num_uncertain: list[torch.LongTensor]

@@ -6,6 +6,7 @@ from pathlib import Path
 
 import cytoolz
 import einops
+import math
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
@@ -13,20 +14,22 @@ import torch
 from torch.types import Device
 import torchvision.transforms.v2.functional as tvtf
 
+from luolib.transforms.box_ops import apply_affine_to_boxes_int, norm_boxes
 from luolib.types import tuple2_t
 from luolib.utils import load_pt_zst
-from mmmm.data.dataset.local.template import gen_anomaly_conversation, gen_general_conv
+from luolib.utils.misc import ceil_divide
 from monai import transforms as mt
-from monai.apps.detection.transforms.box_ops import apply_affine_to_boxes
-from monai.data.box_utils import box_area, clip_boxes_to_image
+from monai.data.box_utils import box_area, spatial_crop_boxes
+from monai.utils import GridSamplePadMode
 
 import mmmm.data.dataset._dataset as _dataset
-from mmmm.tokenizer import MMMMTokenizer
-from mmmm.data.dataset.misc import gen_modality_conv, intensity_norm, toss
 from mmmm.data.defs import DataPoint, PROCESSED_LOCAL_DATA_ROOT, split_t
 from mmmm.data.sparse import Sparse
 from mmmm.data.target_tax import TargetCategory, get_target_tax
 from mmmm.data.utils import prepare_vlm_inputs
+from mmmm.tokenizer import MMMMTokenizer
+from ..misc import gen_modality_conv, get_max_scale_for_size, intensity_norm, toss
+from .template import gen_anomaly_conv, gen_general_conv
 
 __all__ = [
     'get_local_data_list',
@@ -57,11 +60,11 @@ class LocalTransConf:
     max_tokens_z: int
     scale_xy: tuple2_t[float]
     scale_xy_p: float
-    aniso_ratio_range: tuple2_t[float] = (0.5, 2.)
+    aniso_ratio_range: tuple2_t[float] = (0.5, 4.)
     log2_vit_patch_size_z_std = 0.5  # 2-sigma, 95.45%
     num_pos: int  # I've encountered cases setting this to larger than 48 causing NCCL timeout
     num_neg: int
-    mask_th_abs: int = 1000
+    mask_th_abs: int = 2500
     mask_th_rel: float = 0.5
     box_th: float = 0.5
     grounding_prob: float = 0.99
@@ -74,6 +77,21 @@ def get_local_transform(
     return SamplePatch(conf, tokenizer, inference)
 
 _ignore_anomalies = {'nodule/mass', 'other lesion'}
+
+def _get_patch_size_xy(size: npt.NDArray[np.int64], scale: float, stride: int, max_tokens: int) -> tuple2_t[int]:
+    size_scaled = size / scale
+    # smaller_size, larger_size = size_scaled.sort()
+    smaller_idx = size_scaled.argmin()
+    max_smaller_tokens = math.floor(max_tokens ** 0.5)
+    smaller_tokens = ceil_divide(size[smaller_idx], stride)
+    if smaller_tokens > max_smaller_tokens:
+        patch_size = max_smaller_tokens * stride
+        return patch_size, patch_size
+    larger_tokens = max_tokens // smaller_tokens
+    ret = np.empty(2, dtype=np.int64)
+    ret[smaller_idx] = smaller_tokens * stride
+    ret[smaller_idx ^ 1] = larger_tokens * stride
+    return tuple(ret.tolist())
 
 class SamplePatch(mt.Randomizable):
     def __init__(
@@ -100,55 +118,63 @@ class SamplePatch(mt.Randomizable):
         else:
             # TODO: maybe there's a better approximation for tokens_z
             tokens_z = self.R.randint(1, trans_conf.max_tokens_z + 1)
-        tokens_xy = int((trans_conf.max_vision_tokens / tokens_z) ** 0.5)
-        patch_size_xy = tokens_xy * conf.stride_xy
         # 2. sample scale_xy
-        if (max_scale_xy := max(sparse.shape[1:]) / patch_size_xy) <= trans_conf.scale_xy[0]:
-            # the original image is too small, just resize to patch size
+        tokens_xy_total = trans_conf.max_vision_tokens // tokens_z
+        min_scale_xy = 1. if tokens_z == 1 else trans_conf.scale_xy[0]
+        max_scale_xy = min(
+            1 / get_max_scale_for_size(
+                sparse.shape[1:], conf.stride_xy, tokens_xy_total,
+            ),
+            trans_conf.scale_xy[1],
+        )
+        if max_scale_xy <= min_scale_xy:
+            # the original image is too small, just scale as much as possible
             scale_xy = max_scale_xy
         elif toss(self.R, trans_conf.scale_xy_p):
-            scale_xy = self.R.uniform(
-                trans_conf.scale_xy[0],
-                min(trans_conf.scale_xy[1], max_scale_xy),
-            )
+            scale_xy = self.R.uniform(min_scale_xy, max_scale_xy)
         else:
             scale_xy = 1.
+        spacing_xy = min(sparse.spacing[1:]) * scale_xy
         # 3. sample scale_z
-        if sparse.spacing[0] < 2 * min(sparse.spacing[1:]):
-            # initialize with isotropic scale
-            scale_z = scale_xy
-            if toss(self.R, trans_conf.scale_z_p):
-                scale_z *= self.R.uniform(
-                    max(
-                        trans_conf.scale_z[0],
-                        trans_conf.aniso_ratio_range[0] * min(sparse.spacing[1:]) / sparse.spacing[0],
-                    ),
-                    min(
-                        trans_conf.scale_z[1],
-                        trans_conf.aniso_ratio_range[1] * min(sparse.spacing[1:]) / sparse.spacing[0],
-                    ),
-                )
-        else:
+        if sparse.shape[0] == 1:
             scale_z = 1.
+        else:
+            spacing_z = np.maximum(sparse.spacing[0], trans_conf.aniso_ratio_range[0] * spacing_xy)
+            if spacing_z < trans_conf.aniso_ratio_range[1] * spacing_xy:
+                if toss(self.R, trans_conf.scale_z_p):
+                    spacing_z *= self.R.uniform(
+                        max(
+                            trans_conf.scale_z[0],
+                            trans_conf.aniso_ratio_range[0] * spacing_xy / spacing_z,
+                        ),
+                        min(
+                            trans_conf.scale_z[1],
+                            trans_conf.aniso_ratio_range[1] * spacing_xy / spacing_z,
+                        ),
+                    )
+            scale_z = spacing_z / sparse.spacing[0]
         # 4. determine vit_patch_size_z
         if sparse.shape[0] == 1:
             pool_size_z = 1
             vit_patch_size_z = 1
         else:
             pool_size_z = conf.base_pool_size_z
-            spacing_xy = min(sparse.spacing[1:]) * scale_xy
-            spacing_z = sparse.spacing[0] * scale_z
             log2_vit_patch_size_z = self.R.normal(
                 np.log2(conf.base_vit_patch_size_z * spacing_xy / spacing_z),
                 trans_conf.log2_vit_patch_size_z_std,
             )
             log2_vit_patch_size_z = np.clip(
-                np.rint(log2_vit_patch_size_z), 0, conf.base_vit_patch_size_z.bit_length() - 1,
+                np.rint(log2_vit_patch_size_z),
+                0, conf.base_vit_patch_size_z.bit_length() - 1,
             )
             vit_patch_size_z = 1 << int(log2_vit_patch_size_z)
         vit_patch_size = np.array((vit_patch_size_z, conf.vit_patch_size_xy, conf.vit_patch_size_xy))
         scale = np.array((scale_z, scale_xy, scale_xy))
-        patch_size = np.array((tokens_z * vit_patch_size_z * pool_size_z, patch_size_xy, patch_size_xy))
+        patch_size_z = tokens_z * vit_patch_size_z * pool_size_z
+        patch_size_xy = _get_patch_size_xy(
+            sparse.shape[1:], scale_xy, conf.stride_xy, tokens_xy_total,
+        )
+        patch_size = np.array((patch_size_z, *patch_size_xy))
         pool_size = np.array((pool_size_z, conf.pool_size_xy, conf.pool_size_xy))
         return patch_size, scale, vit_patch_size, pool_size
 
@@ -173,30 +199,32 @@ class SamplePatch(mt.Randomizable):
         """
         conf = self.trans_conf
         # NOTE: boxes cropping is applied here
-        boxes = torch.from_numpy(target.boxes - einops.repeat(patch_start, 'd -> (l2 d)', l2=2))
-        clipped_boxes, keep = clip_boxes_to_image(boxes, patch_size)
-        if clipped_boxes.shape[0] == 0:
-            return [], clipped_boxes, 0
+        origin_boxes = torch.from_numpy(target.boxes)
+        boxes, keep = spatial_crop_boxes(origin_boxes, patch_start, patch_start + patch_size)
+        if boxes.shape[0] == 0:
+            return [], boxes, 0
         else:
             if patch_masks is None:
-                keep = box_area(clipped_boxes) >= box_area(boxes[keep]) * self.trans_conf.box_th
+                keep = box_area(boxes) >= box_area(origin_boxes[keep]) * self.trans_conf.box_th
                 mask_indexes = []
+                num_uncertain = boxes.shape[0] - keep.sum().item()
             else:
-                mask_sizes = target.mask_sizes[keep]
+                mask_sizes = torch.from_numpy(target.mask_sizes)[keep]
                 mask_indexes = torch.arange(*target.index_offset)[keep]
                 patch_mask_sizes = einops.reduce(
                     patch_masks[slice(*target.index_offset)], 'n ... -> n', 'sum',
-                ).numpy()
-                keep = (patch_mask_sizes >= mask_sizes * conf.mask_th_rel) & (patch_mask_sizes >= conf.mask_th_abs)
+                )
+                keep = (patch_mask_sizes >= conf.mask_th_abs) | (patch_mask_sizes >= mask_sizes * conf.mask_th_rel)
                 mask_indexes = mask_indexes[keep].tolist()
-            boxes = clipped_boxes[keep]
-            num_uncertain = clipped_boxes.shape[0] - keep.sum().item()
+                num_uncertain = boxes.shape[0] - keep.sum().item() - (patch_mask_sizes == 0).sum().item()
+            boxes = boxes[keep]
             return mask_indexes, boxes, num_uncertain
 
     def _get_category(self, name: str):
         if name in _ignore_anomalies:
             return TargetCategory.ANOMALY
         return self.target_tax[name].category
+
     def _sample_targets(self, category: str, targets: Iterable[str], limit: int) -> list[str]:
         targets = [*filter(lambda target: self._get_category(target) == category, targets)]
         if len(targets) > limit:
@@ -253,7 +281,7 @@ class SamplePatch(mt.Randomizable):
         for target in cytoolz.concat(sparse.targets.values()):
             target: Sparse.Target
             mask_indexes, boxes, num_uncertain = self.filter_target(
-                target, patch_masks, patch_start, patch_size,
+                target, patch_masks, patch_start, effective_patch_size,
             )
             if boxes.shape[0] == 0 and num_uncertain == 0:
                 neg_targets.append(target.name)
@@ -281,6 +309,10 @@ class SamplePatch(mt.Randomizable):
                 ),
             ],
             lazy=True,
+            overrides={
+                'image': {'padding_mode': GridSamplePadMode.ZEROS},
+                'masks': {'padding_mode': GridSamplePadMode.ZEROS},
+            }
         )
         affine_trans.set_random_state(state=self.R)
         _dict_data = {'image': patch}
@@ -306,7 +338,7 @@ class SamplePatch(mt.Randomizable):
         )
         conv.extend(conv_anatomy)
         req_classes.extend(req_classes_anatomy)
-        conv_anomaly, req_classes_anomaly = gen_anomaly_conversation(
+        conv_anomaly, req_classes_anomaly = gen_anomaly_conv(
             self._sample_targets(TargetCategory.ANOMALY, targets, trans_conf.num_pos),
             self._sample_targets(TargetCategory.ANOMALY, neg_targets, trans_conf.num_neg),
             sparse.complete_anomaly,
@@ -368,8 +400,8 @@ class SamplePatch(mt.Randomizable):
                 'semantic': torch.zeros(len(req_classes), dtype=torch.bool),
                 'index_offsets': torch.zeros(len(req_classes), 2, dtype=torch.int64),
             }
-        boxes = _data['boxes']
-        apply_affine_to_boxes(boxes, trans_affine.inverse())
+        boxes = apply_affine_to_boxes_int(_data['boxes'], trans_affine.inverse())
+        boxes_normed = norm_boxes(boxes, patch_size)
         data_point: DataPoint = {
             'image': patch,
             # TODO: apply transform on grounding image
@@ -378,7 +410,7 @@ class SamplePatch(mt.Randomizable):
             'pool_size': tuple(pool_size.tolist()),
             'vlm_inputs': vlm_inputs,
             'masks': None if patch_masks is None else patch_masks[_data['mask_indexes']],
-            'boxes': _data['boxes'],
+            'boxes': boxes_normed,
             'num_uncertain': _data['num_uncertain'],
             'semantic': _data['semantic'],
             'index_offsets': _data['index_offsets'],

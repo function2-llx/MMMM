@@ -10,7 +10,6 @@ import torch
 from torchvision.io import read_image
 from torchvision.transforms import v2 as tvt
 
-from luolib.types import tuple2_t
 from luolib.utils.misc import ensure_rgb
 from monai import transforms as mt
 from monai.utils import InterpolateMode, convert_to_tensor
@@ -19,7 +18,7 @@ import mmmm.data.dataset._dataset as _dataset
 from mmmm.tokenizer import MMMMTokenizer
 from ..defs import ConvTurn, DataPoint, PROCESSED_VL_DATA_ROOT, split_t
 from ..utils import prepare_vlm_inputs
-from .misc import gen_modality_conv, intensity_norm, toss
+from .misc import get_max_resize, gen_modality_conv, intensity_norm, toss
 
 CAPTION_PROMPTS = [
     'Describe the following image in detail.',
@@ -107,28 +106,6 @@ class VLTransConf:
     max_tokens_z: int
     log2_patch_size_z_std: float = 0.5
 
-@np.vectorize
-def _solve(a: float, M: int):
-    """find max integer t s.t. t⌈at⌉ ≤ M"""
-    aM = a * M
-    n = math.ceil(math.sqrt(aM))
-    if aM > (n - 1) * n:
-        t = math.floor(M / n)
-    else:
-        t = math.floor((n - 1) / a)
-    return t
-
-def _get_resize(size: tuple2_t[int], stride: int, max_tokens: int) -> tuple2_t[int]:
-    size = np.array(size)
-    gcd = np.gcd(size, stride)
-    size_p = size // gcd
-    stride //= gcd
-    ps = stride * np.flip(size_p)
-    t = _solve(ps / np.flip(ps), max_tokens)
-    scale = (t * stride / size_p).max()
-    resize = (size * scale).round().astype(np.int64)
-    return tuple(resize.tolist())
-
 class VLTransform(mt.RandomizableTransform):
     def __init__(
         self,
@@ -175,7 +152,7 @@ class VLTransform(mt.RandomizableTransform):
         stride = (stride_z, conf.stride_xy, conf.stride_xy)
         resize_shape = (
             min(size_z, tokens_z * stride_z),  # do not resize z if unnecessary
-            *_get_resize(
+            *get_max_resize(
                 image.shape[2:],
                 conf.stride_xy,
                 trans_conf.max_tokens // tokens_z,

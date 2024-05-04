@@ -106,8 +106,8 @@ init_args:
       scale_z: [1, 2]
       scale_z_p: 0.5
       max_tokens_z: 4
-      scale_xy: [1, 3]
-      scale_xy_p: 0.8
+      scale_xy: [0.9, 3]
+      scale_xy_p: 0.9
       num_pos: 32
       num_neg: 8
     vl_trans:
