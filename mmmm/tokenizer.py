@@ -110,10 +110,8 @@ class MMMMTokenizer(LlamaTokenizer):
                 seg_token = self.seg_token
             else:
                 seg_token = self.seg_tokens[self.class_to_idx[name]]
+            # space?
             ret = f'{ret} {seg_token}'
         return ret
-
-    def wrap_name_neg(self, name: str):
-        return self.wrap_name(name, neg=True)
 
 build = class_from_function(MMMMTokenizer.build, MMMMTokenizer)

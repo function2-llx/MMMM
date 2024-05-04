@@ -25,6 +25,8 @@ class TargetClass:
 
     def _update(self, info: pd.Series, classes: dict[str, TargetClass]):
         self.synonyms = _split_items(info['synonyms'])
+        if self.name not in self.synonyms:
+            self.synonyms.insert(0, self.name)
         self.parents = [
             classes[parent_name]
             for parent_name in _split_items(info['parents'])

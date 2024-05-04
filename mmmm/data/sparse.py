@@ -49,7 +49,7 @@ class Sparse(DataClassORJSONMixin):
             name: class name
             semantic: whether different instances are merged in the mask (i.e., semantic), bbox makes less sense in this case
             position_offset: offsets of the corresponding class positions
-            index_offset: index offset among all instances of all targets
+            index_offset: index offset in masks
             boxes: use MONAI's StandardMode (CornerCornerModeTypeA)
         """
         name: str

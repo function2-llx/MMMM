@@ -18,12 +18,12 @@ class DatasetSpec:
         weight: scale factor of the dataset weight
     """
     name: str
-    type: Literal['seg', 'vl']
+    type: Literal['local', 'vl']
     weight: float = 1.
 
     def get_data_list(self, split: Literal['train', 'validate', 'test']) -> list:
         match self.type:
-            case 'seg':
+            case 'local':
                 return get_local_data_list(self.name, split)
             case 'vl':
                 return get_vl_data_list(self.name, split)

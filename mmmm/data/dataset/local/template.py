@@ -123,7 +123,7 @@ def _join_list(tokenizer: MMMMTokenizer, names: Iterable[str], *, wrap: bool):
     #     wrapper = partial(tokenizer.wrap_name, neg=neg)
     #     names = map(wrapper, names)
     names = list(names)
-    space = ' ' if wrap else ''
+    space = '' if wrap else ' '
     ret = f', and{space}'.join([f',{space}'.join(names[:-1]), names[-1]])
     return ret
 
@@ -180,7 +180,8 @@ def gen_general_conv(
         prompt_template = R.choice(template['general-plural'])
     # replace with synonyms
     names = [
-        R.choice(target_tax[class_name].synonyms)
+        class_name if (target := target_tax.get(class_name)) is None
+        else R.choice(target.synonyms)
         for class_name in classes
     ]
     prompt = f'{prompt_template.format(_join_list(tokenizer, names, wrap=False))} {list_desc}'
