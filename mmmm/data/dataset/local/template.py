@@ -188,7 +188,7 @@ def gen_general_conv(
     response = _list_results(tokenizer, names, pos_class_mask, wrap=grounding)
     return [ConvTurn(prompt, response)], classes
 
-def gen_anomaly_conversation(
+def gen_anomaly_conv(
     pos_classes: list[str],
     neg_classes: list[str],
     _complete: bool,

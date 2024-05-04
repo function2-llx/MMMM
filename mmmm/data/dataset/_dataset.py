@@ -36,10 +36,10 @@ def _is_power_of_2(x: int):
 @dataclass(kw_only=True)
 class DatasetConf:
     datasets: list[DatasetSpec]
-    base_vit_patch_size_z: int = 16
-    vit_patch_size_xy: int = 16
-    pool_size_xy: int = 1
-    base_pool_size_z: int = 1
+    base_vit_patch_size_z: int
+    vit_patch_size_xy: int
+    pool_size_xy: int
+    base_pool_size_z: int
     seg_trans: LocalTransConf
     vl_trans: VLTransConf
     max_seq_len: int | None = None
