@@ -20,11 +20,11 @@ from torchvision.transforms.v2.functional import to_dtype
 
 from luolib import transforms as lt
 from luolib.transforms import affine_resize
+from luolib.transforms.box_ops import apply_affine_to_boxes_int
 from luolib.types import tuple3_t
 from luolib.utils import as_tensor, fall_back_none, get_cuda_device, process_map, save_pt_zst
 from mmmm.data.target_tax import TargetCategory
 from monai import transforms as mt
-from monai.apps.detection.transforms.box_ops import apply_affine_to_boxes
 from monai.data import MetaTensor, convert_box_to_standard_mode
 from monai.data.box_utils import CornerCornerModeTypeB, box_centers, clip_boxes_to_image
 from monai.transforms import generate_spatial_bounding_box
@@ -408,10 +408,12 @@ class Processor(ABC):
                 assert (boxes[:, 3:] <= boxes.new_tensor(images.shape[1:])).all()
             # start to accumulate for boxes transform
             origin_affine = images.affine
-            orient = mt.Orientation(self.get_orientation(images))
-            images: MetaTensor = orient(images).contiguous()  # type: ignore
+            if images.shape[1] > 1:
+                orient = mt.Orientation(self.get_orientation(images))
+                images: MetaTensor = orient(images).contiguous()  # type: ignore
+                if masks is not None:
+                    masks: MetaTensor = orient(masks).contiguous()  # type: ignore
             if masks is not None:
-                masks: MetaTensor = orient(masks).contiguous()  # type: ignore
                 assert images.shape[1:] == masks.shape[1:]
                 self._check_affine(images.affine, masks.affine)
             spacing: torch.DoubleTensor = images.pixdim
@@ -447,12 +449,9 @@ class Processor(ABC):
                 assert einops.reduce(masks, 'c ... -> c', 'any').all()
             elif boxes is not None:
                 # apply the accumulated transform to boxes
-                boxes_f = apply_affine_to_boxes(boxes, torch.linalg.solve(images.affine, origin_affine))
-                boxes_f, keep = clip_boxes_to_image(boxes_f, new_shape)
+                boxes = apply_affine_to_boxes_int(boxes, torch.linalg.solve(images.affine, origin_affine))
+                boxes, keep = clip_boxes_to_image(boxes, new_shape)
                 assert keep.all()
-                boxes = torch.empty_like(boxes_f, dtype=torch.int64)
-                boxes[:, :3] = boxes_f[:, :3].floor()
-                boxes[:, 3:] = boxes_f[:, 3:].ceil()
             targets, masks, class_positions = self._group_targets(targets, masks, boxes)
             if masks is not None:
                 save_pt_zst(as_tensor(masks).cpu(), save_dir / 'masks.pt.zst')
@@ -498,7 +497,7 @@ class Processor(ABC):
             minv, maxv = images.amin((1, 2, 3), keepdim=True), images.amax((1, 2, 3), keepdim=True)
             images = (images - minv) / (maxv - minv)
         # 2. resize
-        images = affine_resize(images, new_shape, dtype=torch.float16).float()
+        images = affine_resize(images, new_shape)
         images.clamp_(0, 1)
         # 3. calculate mean & std on non-zero values
         mean = images.new_empty((images.shape[0], ))
