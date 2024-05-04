@@ -83,7 +83,7 @@ def _get_patch_size_xy(size: npt.NDArray[np.int64], scale: float, stride: int, m
     # smaller_size, larger_size = size_scaled.sort()
     smaller_idx = size_scaled.argmin()
     max_smaller_tokens = math.floor(max_tokens ** 0.5)
-    smaller_tokens = ceil_divide(size[smaller_idx], stride)
+    smaller_tokens = ceil_divide(size_scaled[smaller_idx], stride)
     if smaller_tokens > max_smaller_tokens:
         patch_size = max_smaller_tokens * stride
         return patch_size, patch_size
@@ -211,6 +211,7 @@ class SamplePatch(mt.Randomizable):
             else:
                 mask_sizes = torch.from_numpy(target.mask_sizes)[keep]
                 mask_indexes = torch.arange(*target.index_offset)[keep]
+                patch_masks = patch_masks[keep]
                 patch_mask_sizes = einops.reduce(
                     patch_masks[slice(*target.index_offset)], 'n ... -> n', 'sum',
                 )
@@ -324,6 +325,7 @@ class SamplePatch(mt.Randomizable):
             patch_masks = _dict_data['masks'].round().bool().as_tensor()
         # NOTE: will apply affine transform to boxes later
         trans_affine = patch.affine
+        patch = patch.as_tensor()
         # 6. generate conversation
         conv = gen_modality_conv(modality, self.R)
         req_classes = []
@@ -370,7 +372,7 @@ class SamplePatch(mt.Randomizable):
             _data = {
                 'mask_indexes': [],
                 'boxes': [],
-                'num_uncertain': torch.empty(len(req_classes), dtype=torch.bool),
+                'num_uncertain': torch.empty(len(req_classes), dtype=torch.int64),
                 'semantic': torch.empty(len(req_classes), dtype=torch.bool),
                 'index_offsets': torch.empty(len(req_classes), 2, dtype=torch.int64),
             }

@@ -4,7 +4,6 @@ from typing import Iterable
 
 import cytoolz
 import numpy as np
-import numpy.typing as npt
 import pandas as pd
 from scipy.sparse.csgraph import connected_components
 import torch
