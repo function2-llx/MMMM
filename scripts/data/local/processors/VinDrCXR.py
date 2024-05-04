@@ -8,9 +8,11 @@ import pandas as pd
 from scipy.sparse.csgraph import connected_components
 import torch
 
+from luolib.transforms.box_ops import convert_boxes_to_int
 from luolib.types import tuple3_t
 from monai.data import MetaTensor, box_iou
 from monai.data.box_utils import clip_boxes_to_image
+import monai.transforms as mt
 
 from mmmm.data.target_tax import TargetCategory
 from ._base import DataPoint, DefaultImageLoaderMixin, Processor
@@ -60,8 +62,12 @@ def _cluster(objects: list[pd.Series], image_size: tuple3_t[int]) -> torch.Tenso
         (0, obj['x_min'], obj['y_min'], 1, obj['x_max'], obj['y_max'])
         for obj in objects
     ])
+    boxes = convert_boxes_to_int(boxes)
     boxes, keep = clip_boxes_to_image(boxes, image_size)
-    assert keep.all()
+    if boxes.shape[0] == 0:
+        return boxes
+    # objects = np.array(objects)[keep].tolist(), not work, series index will lost
+    objects = [obj for i, obj in enumerate(objects) if keep[i]]
     iou: np.ndarray = box_iou(boxes, boxes)
     rad_ids = np.array([x['rad_id'] for x in objects])
     num_rads = len(np.unique(rad_ids))
@@ -80,15 +86,19 @@ def _cluster(objects: list[pd.Series], image_size: tuple3_t[int]) -> torch.Tenso
 
 class VinDrCXRProcessor(DefaultImageLoaderMixin, Processor):
     name = 'VinDr-CXR'
-    image_reader = 'pydicomreader'
+    # pydicom reader seems to produce reversed intensities
+    image_reader = 'itkreader'
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._ignore_anomalies = {'nodule/mass', 'other lesion'}
 
-    # def image_loader(self, path: Path) -> MetaTensor:
-    #     image = super().image_loader(path)
-    #     return image.mT
+    def image_loader(self, path: Path) -> MetaTensor:
+        loader = mt.LoadImage(self.image_reader, image_only=True, dtype=self.image_dtype, ensure_channel_first=True)
+        image = loader(path)
+        assert image.ndim == 4 and image.shape[-1] == 1
+        image = self._adapt_to_3d(image[..., 0])
+        return image
 
     def load_annotations(
         self, data_point: VinDrCXRDataPoint, images: MetaTensor,
