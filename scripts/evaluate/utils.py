@@ -4,6 +4,19 @@ import numpy as np
 import pandas as pd
 import random
 import torch
+import transformers
+
+
+LLAMA_SYSTEM_PROMPT = '''
+You are an AI assistant specialized in medical topics. 
+'''
+
+LLAMA_USER_PROMPT = '''
+You are given the question, ground truth and prediction of a medical visual question answering task. Your task is to evaluate the prediction based on the question and ground truth in terms of medical knowledge. You should consider various aspects, such as the correctness, completeness and relevance of the prediction. You should provide a final score from 0 to 10 to summarize the overall quality of the prediction. The output format is 'score: xx'. Do not output anything else other than the score.
+question: {question}
+ground truth: {answer}
+prediction: {prediction}
+'''
 
 
 def setup_seed(seed):
@@ -50,9 +63,9 @@ class NLPMetrics:
             )['exact_match'],
         }
 
-    def process(self, csv: str, json_file: str):
-        df = pd.read_csv(csv)
-        with open(json_file, 'r') as f:
+    def process(self, run: str):
+        df = pd.read_csv(run + '.csv')
+        with open(run + '.json', 'r') as f:
             summary = json.load(f)
         results = {
             'bleu': [],
@@ -71,6 +84,72 @@ class NLPMetrics:
             df[key] = results[key]
             summary[key] = sum(results[key]) / len(results[key])
 
-        df.to_csv(csv)
-        with open(json_file, 'w') as f:
+        df.to_csv(run + '.csv')
+        with open(run + '.json', 'w') as f:
             json.dump(summary, f)
+
+
+class LlamaMetric:
+    def __init__(self):
+        self.llama = transformers.pipeline(
+            'text-generation',
+            model='/data/llama3/Meta-Llama-3-70B-Instruct-hf',
+            model_kwargs={'torch_dtype': torch.bfloat16},
+            device_map='auto',
+        )
+
+    def compute(self, question: str, prediction: str, reference: str):
+        messages = [
+            {"role": "system", "content": LLAMA_SYSTEM_PROMPT},
+            {"role": "user", "content": LLAMA_USER_PROMPT.format(question=question, answer=reference, prediction=prediction)},
+        ]
+
+        prompt = self.llama.tokenizer.apply_chat_template(
+            messages, 
+            tokenize=False, 
+            add_generation_prompt=True
+        )
+
+        terminators = [
+            self.llama.tokenizer.eos_token_id,
+            self.llama.tokenizer.convert_tokens_to_ids("<|eot_id|>")
+        ]
+
+        while True:
+            try:
+                response = self.llama(
+                    prompt,
+                    max_new_tokens=50,
+                    do_sample=True,
+                    temperature=0.2,
+                    eos_token_id=terminators,
+                    pad_token_id=self.llama.tokenizer.eos_token_id,
+                )[0]['generated_text'][len(prompt):]
+                print(response)
+                return {
+                    'llama': int(response.split('score: ')[1].strip()),
+                }
+            except:
+                continue
+
+    def process(self, run: str):
+        df = pd.read_csv(run + '.csv')
+        with open(run + '.json', 'r') as f:
+            summary = json.load(f)
+        llama = []
+
+        for _, row in df.iterrows():
+            score = self.compute(row['question'], row['prediction'], row['answer'])['llama']
+            llama.append(score)
+
+        df['llama'] = llama
+        summary['llama'] = sum(llama) / len(llama)
+
+        df.to_csv(run + '.csv')
+        with open(run + '.json', 'w') as f:
+            json.dump(summary, f)
+
+
+if __name__ == '__main__':
+    llama_metric = LlamaMetric()
+    llama_metric.process('results/vqa_VQA-RAD_m3d_zeroshot')
