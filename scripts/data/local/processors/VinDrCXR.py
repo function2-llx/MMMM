@@ -8,7 +8,7 @@ import pandas as pd
 from scipy.sparse.csgraph import connected_components
 import torch
 
-from luolib.transforms.box_ops import convert_boxes_to_int
+from luolib.transforms.box_ops import round_boxes
 from luolib.types import tuple3_t
 from monai.data import MetaTensor, box_iou
 from monai.data.box_utils import clip_boxes_to_image
@@ -75,7 +75,7 @@ def _cluster(objects: list[pd.Series], image_size: tuple3_t[int]) -> torch.Tenso
         (0, obj['x_min'], obj['y_min'], 1, obj['x_max'], obj['y_max'])
         for obj in objects
     ])
-    boxes = convert_boxes_to_int(boxes)
+    boxes = round_boxes(boxes)
     boxes, keep = clip_boxes_to_image(boxes, image_size)
     if boxes.shape[0] == 0:
         return boxes

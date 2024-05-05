@@ -199,10 +199,7 @@ class Processor(ABC):
             targets, mask_paths = zip(*data_point.masks)
             targets = list(targets)
             # NOTE: make sure that mask loader returns bool tensor
-            mask_list: list[MetaTensor] = process_map(
-                self.mask_loader, mask_paths,
-                new_mapper=False, disable=True, max_workers=min(4, len(mask_paths)),
-            )
+            mask_list: list[MetaTensor] = list(map(self.mask_loader, mask_paths))
             affine = mask_list[0].affine
             for mask in mask_list[1:]:
                 self._check_affine(affine, mask.affine)
@@ -540,6 +537,7 @@ class DefaultImageLoaderMixin(_LoaderBase):
             assert image.dtype == torch.uint8
             assert (image[3] == 255).all()
             image = image[:3]
+        assert image.shape[0] in (1, 3)
         if self.assert_gray_scale and image.shape[0] != 1:
             # check gray scale
             assert (image[0] == image[1]).all() and (image[0] == image[2]).all()
