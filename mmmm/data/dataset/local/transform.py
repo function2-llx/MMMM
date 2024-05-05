@@ -66,7 +66,7 @@ class LocalTransConf:
     log2_vit_patch_size_z_std = 0.5  # 2-sigma, 95.45%
     num_pos: int  # I've encountered cases setting this to larger than 48 causing NCCL timeout
     num_neg: int
-    mask_th_abs: int = 2500
+    mask_th_abs: int = 1000
     mask_th_rel: float = 0.5
     box_th: float = 0.5
     grounding_prob: float = 0.99
@@ -142,18 +142,17 @@ class SamplePatch(mt.Randomizable):
             scale_z = 1.
         else:
             spacing_z = np.maximum(sparse.spacing[0], trans_conf.aniso_ratio_range[0] * spacing_xy)
-            if spacing_z < trans_conf.aniso_ratio_range[1] * spacing_xy:
-                if toss(self.R, trans_conf.scale_z_p):
-                    spacing_z *= self.R.uniform(
-                        max(
-                            trans_conf.scale_z[0],
-                            trans_conf.aniso_ratio_range[0] * spacing_xy / spacing_z,
-                        ),
-                        min(
-                            trans_conf.scale_z[1],
-                            trans_conf.aniso_ratio_range[1] * spacing_xy / spacing_z,
-                        ),
-                    )
+            if spacing_z < trans_conf.aniso_ratio_range[1] * spacing_xy and toss(self.R, trans_conf.scale_z_p):
+                spacing_z *= self.R.uniform(
+                    max(
+                        trans_conf.scale_z[0],
+                        trans_conf.aniso_ratio_range[0] * spacing_xy / spacing_z,
+                    ),
+                    min(
+                        trans_conf.scale_z[1],
+                        trans_conf.aniso_ratio_range[1] * spacing_xy / spacing_z,
+                    ),
+                )
             scale_z = spacing_z / sparse.spacing[0]
         # 4. determine vit_patch_size_z
         if sparse.shape[0] == 1:
@@ -211,11 +210,16 @@ class SamplePatch(mt.Randomizable):
                 mask_indexes = []
                 num_uncertain = boxes.shape[0] - keep.sum().item()
             else:
+                _center =  patch_size >> 1
                 mask_sizes = torch.from_numpy(target.mask_sizes)[keep]
                 mask_indexes = torch.arange(*target.index_offset)[keep]
                 patch_masks = patch_masks[slice(*target.index_offset)][keep]
                 patch_mask_sizes = einops.reduce(patch_masks, 'n ... -> n', 'sum')
-                keep = (patch_mask_sizes >= conf.mask_th_abs) | (patch_mask_sizes >= mask_sizes * conf.mask_th_rel)
+                keep = (
+                    (patch_mask_sizes >= conf.mask_th_abs) |
+                    (patch_mask_sizes >= mask_sizes * conf.mask_th_rel) |
+                    patch_masks[:, *_center]
+                )
                 mask_indexes = mask_indexes[keep].tolist()
                 num_uncertain = boxes.shape[0] - keep.sum().item() - (patch_mask_sizes == 0).sum().item()
             boxes = boxes[keep]
@@ -419,6 +423,8 @@ class SamplePatch(mt.Randomizable):
         if patch_masks is not None:
             # select masks before affine transform to save computation
             patch_masks = patch_masks[targets_data['mask_indexes']]
+            if patch_masks.shape[0] == 0:
+                patch_masks = None
         patch, patch_masks, boxes = self._affine_transform(
             patch, patch_masks, targets_data['boxes'], patch_size, scale,
         )
