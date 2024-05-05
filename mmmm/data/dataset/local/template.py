@@ -116,7 +116,7 @@ template = {
     ]
 }
 
-list_desc = "List each request followed by a colon and 'yes' or 'no' to indicate its presence or absence."
+list_desc = 'List each request followed by "yes" or "no" to indicate its presence or absence.'
 
 def _join_list(tokenizer: MMMMTokenizer, names: Iterable[str], *, wrap: bool):
     # if wrap:

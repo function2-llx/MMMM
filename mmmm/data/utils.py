@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import warnings
 
 import nibabel as nib
 import numpy as np
@@ -58,37 +59,38 @@ def prepare_vlm_inputs(
     )
     dtype = torch.long
     text_ids = []
-    # the last response is empty iff inference
-    assert inference == (conversation[-1].response == '')
-    lm_targets = None if inference else []
+    if inference:
+        assert conversation[-1].response == ''
+    labels = None if inference else []
     for i, (query, answer) in enumerate(conversation):
-        prompt = f'{user_start} {query} {sys_start}'
+        prompt = f'{user_start} {query}{sys_start}'
         prompt_ids = torch.tensor(tokenizer.encode(prompt, add_special_tokens=False))
-
-        if answer == '':
+        if inference and i + 1 == len(conversation):
             assert i == len(conversation) - 1 and inference
             text_ids.append(prompt_ids)
         else:
             answer_ids = torch.tensor(tokenizer.encode(answer, add_special_tokens=False))
-            bonp_mask = answer_ids == tokenizer.bonp_token_id
-            eonp_mask = answer_ids == tokenizer.eonp_token_id
-            text_ids.append(
+            text_ids.append(torch.cat([prompt_ids, answer_ids]))
+            labels.append(
                 torch.cat([
-                    prompt_ids,
-                    convert_np_input_ids(answer_ids, bonp_mask, eonp_mask, tokenizer),
+                    torch.full((prompt_ids.shape[0] - 1, ), CE_IGNORE_INDEX),
+                    answer_ids,
+                    torch.tensor([tokenizer.eos_token_id]),
                 ]),
             )
-            if not inference:
-                lm_targets.append(
-                    torch.cat([
-                        torch.full((prompt_ids.shape[0] - 1, ), CE_IGNORE_INDEX),
-                        answer_ids.masked_fill(bonp_mask | eonp_mask, CE_IGNORE_INDEX),
-                        torch.tensor([tokenizer.eos_token_id]),
-                    ]),
-                )
     text_ids = torch.cat(text_ids)
+    text_ids_ex_bos = text_ids[1:]
+    bonp_mask: torch.BoolTensor = text_ids_ex_bos == tokenizer.bonp_token_id  # type: ignore
+    eonp_mask: torch.BoolTensor = text_ids_ex_bos == tokenizer.eonp_token_id  # type: ignore
+    text_ids_ex_bos[bonp_mask] = tokenizer.bop_token_id
+    text_ids_ex_bos[eonp_mask] = tokenizer.eop_token_id
     if not inference:
-        lm_targets = torch.cat(lm_targets)
+        labels = torch.cat(labels)
+        labels_ex_eos = labels[:-1]
+        # <p> should not be predicted for negative target, but the normal next text token
+        labels_ex_eos[bonp_mask] = labels[1:][bonp_mask]
+        # the open tag <p> presents after all, predict the close tag as well for negative targets
+        labels_ex_eos[eonp_mask] = tokenizer.eop_token_id
     num_image_tokens += 2  # to include boi and eoi
     input_ids = torch.cat([
         torch.tensor([tokenizer.bos_token_id]),
@@ -114,10 +116,10 @@ def prepare_vlm_inputs(
     ])
     attention_mask = torch.ones(input_ids.shape, dtype=dtype)
     if not inference:
-        lm_targets = torch.cat([
+        labels = torch.cat([
             # bos, (boi, *image, eoi), grounding
             torch.full((1 + num_image_tokens + 1, ), CE_IGNORE_INDEX),
-            lm_targets,
+            labels,
         ])
     inputs = {
         'input_ids': input_ids,
@@ -127,7 +129,7 @@ def prepare_vlm_inputs(
         'attention_mask': attention_mask,
     }
     if not inference:
-        inputs['lm_targets'] = lm_targets
+        inputs['labels'] = labels
     if max_seq_len is not None:
         for k, v in inputs.items():
             inputs[k] = v[:max_seq_len]
