@@ -87,7 +87,7 @@ def _get_patch_size_xy(size: npt.NDArray[np.int64], scale: float, stride: int, m
     if smaller_tokens > max_smaller_tokens:
         patch_size = max_smaller_tokens * stride
         return patch_size, patch_size
-    larger_tokens = max_tokens // smaller_tokens
+    larger_tokens = min(max_tokens // smaller_tokens, ceil_divide(size_scaled[smaller_idx ^ 1], stride).astype(np.int64))
     ret = np.empty(2, dtype=np.int64)
     ret[smaller_idx] = smaller_tokens * stride
     ret[smaller_idx ^ 1] = larger_tokens * stride
@@ -211,10 +211,8 @@ class SamplePatch(mt.Randomizable):
             else:
                 mask_sizes = torch.from_numpy(target.mask_sizes)[keep]
                 mask_indexes = torch.arange(*target.index_offset)[keep]
-                patch_masks = patch_masks[keep]
-                patch_mask_sizes = einops.reduce(
-                    patch_masks[slice(*target.index_offset)], 'n ... -> n', 'sum',
-                )
+                patch_masks = patch_masks[slice(*target.index_offset)][keep]
+                patch_mask_sizes = einops.reduce(patch_masks, 'n ... -> n', 'sum')
                 keep = (patch_mask_sizes >= conf.mask_th_abs) | (patch_mask_sizes >= mask_sizes * conf.mask_th_rel)
                 mask_indexes = mask_indexes[keep].tolist()
                 num_uncertain = boxes.shape[0] - keep.sum().item() - (patch_mask_sizes == 0).sum().item()
@@ -297,17 +295,18 @@ class SamplePatch(mt.Randomizable):
         # 5. apply affine transform!
         affine_trans = mt.Compose(
             [
-                *[
-                    mt.RandFlipD(['image', 'masks'], 0.5, i, allow_missing_keys=True)
-                    for i in range(3)
-                ],
-                mt.RandRotate90D(['image', 'masks'], 0.5, spatial_axes=(1, 2), allow_missing_keys=True),
+                # NOTE: scaling should be performed firstly since spatial axis order might change
                 mt.AffineD(
                     ['image', 'masks'],
                     scale_params=scale.tolist(),
                     spatial_size=patch_size.tolist(),
                     allow_missing_keys=True,
                 ),
+                *[
+                    mt.RandFlipD(['image', 'masks'], 0.5, i, allow_missing_keys=True)
+                    for i in range(3)
+                ],
+                mt.RandRotate90D(['image', 'masks'], 0.5, spatial_axes=(1, 2), allow_missing_keys=True),
             ],
             lazy=True,
             overrides={

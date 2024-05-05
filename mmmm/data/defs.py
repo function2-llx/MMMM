@@ -1,15 +1,21 @@
 from __future__ import annotations as _
 
+import os
 from pathlib import Path
 from typing import Literal, NamedTuple, TypedDict
 
 import torch
 
 from luolib.types import tuple3_t
+from monai.utils import str2bool
+
+def debug() -> bool:
+    val = os.environ.get('MMMM_DEBUG', False)
+    return val if isinstance(val, bool) else str2bool(val)
 
 DATA_ROOT = Path('data')
 ORIGIN_DATA_ROOT = DATA_ROOT / 'origin'
-PROCESSED_DATA_ROOT = DATA_ROOT / 'processed'
+PROCESSED_DATA_ROOT = DATA_ROOT / ('processed-debug' if debug() else 'processed')
 ORIGIN_LOCAL_DATA_ROOT = ORIGIN_DATA_ROOT / 'local'
 ORIGIN_VL_DATA_ROOT = ORIGIN_DATA_ROOT / 'vision-language'
 PROCESSED_LOCAL_DATA_ROOT = PROCESSED_DATA_ROOT / 'local'
