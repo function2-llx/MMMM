@@ -16,6 +16,7 @@ class SamArgs:
     pt_pos_embed_shape: tuple3_t[int] | None = None
     checkpoint: Path | None = None
     text_sim: bool = False
+    num_instances: int = 9
 
 def build_sam_vit_3d(args: SamArgs) -> Sam:
     return _build_sam(
@@ -51,7 +52,7 @@ def _build_sam(
         ),
         prompt_encoder=PromptEncoder(embed_dim=embed_dim),
         mask_decoder=MaskDecoder(
-            num_multimask_outputs=3,
+            num_instances=9,
             transformer=TwoWayTransformer(
                 depth=2,
                 embedding_dim=embed_dim,

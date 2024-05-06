@@ -36,7 +36,7 @@ class MaskDecoder(nn.Module):
         *,
         transformer_dim: int,
         transformer: TwoWayTransformer,
-        num_multimask_outputs: int = 3,
+        num_instances: int = 3,
         activation: Type[nn.Module] = nn.GELU,
         iou_head_depth: int = 3,
         iou_head_hidden_dim: int = 256,
@@ -49,8 +49,7 @@ class MaskDecoder(nn.Module):
         Arguments:
           transformer_dim (int): the channel dimension of the transformer
           transformer (nn.Module): the transformer used to predict masks
-          num_multimask_outputs (int): the number of masks to predict
-            when disambiguating masks
+          num_instances (int): the number of queries for the instance branch
           activation (nn.Module): the type of activation to use when
             upscaling masks
           iou_head_depth (int): the depth of the MLP used to predict
@@ -62,11 +61,9 @@ class MaskDecoder(nn.Module):
         super().__init__()
         self.transformer_dim = transformer_dim
         self.transformer = transformer
-
-        self.num_multimask_outputs = num_multimask_outputs
-
+        self.num_multimask_outputs = num_instances
         self.iou_token = nn.Embedding(1, transformer_dim)
-        self.num_mask_tokens = num_multimask_outputs + 1
+        self.num_mask_tokens = num_instances + 1
         self.mask_tokens = nn.Embedding(self.num_mask_tokens, transformer_dim)
 
         self.output_upscaling = nn.Sequential(
@@ -104,50 +101,17 @@ class MaskDecoder(nn.Module):
     def forward(
         self,
         image_embeddings: torch.Tensor,
-        text_embedding: Optional[torch.Tensor],
-        image_pe: torch.Tensor,
-        sparse_prompt_embeddings: torch.Tensor,
-        dense_prompt_embeddings: torch.Tensor,
-        multimask_output: bool,
-        patch_size_z: int,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Predict masks given image and prompt embeddings.
-
-        Returns:
-          torch.Tensor: batched predicted masks
-        """
-        # print('--------------decoder here--------------')
-        masks, iou_pred = self.predict_masks(
-            image_embeddings=image_embeddings,
-            text_embedding=text_embedding,
-            image_pe=image_pe,
-            sparse_prompt_embeddings=sparse_prompt_embeddings,
-            dense_prompt_embeddings=dense_prompt_embeddings,
-            patch_size_z=patch_size_z,
-        )
-
-        # Select the correct mask or masks for output
-        if multimask_output:
-            mask_slice = slice(1, None)
-        else:
-            mask_slice = slice(0, 1)
-        masks = masks[:, mask_slice, :, :, :]
-        iou_pred = iou_pred[:, mask_slice]
-
-        # Prepare output
-        return masks, iou_pred
-
-    def predict_masks(
-        self,
-        image_embeddings: torch.Tensor,
         text_embedding: torch.Tensor,
         image_pe: torch.Tensor,
         sparse_prompt_embeddings: torch.Tensor,
         dense_prompt_embeddings: torch.Tensor,
         patch_size_z: int,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Predicts masks. See 'forward' for more details."""
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Returns:
+            - predicted masks logits
+            - embeddings for each mask
+        """
         # Concatenate output tokens
         output_tokens = torch.cat([self.iou_token.weight, self.mask_tokens.weight], dim=0)
         output_tokens = output_tokens.unsqueeze(0).expand(sparse_prompt_embeddings.size(0), -1, -1)
@@ -166,7 +130,6 @@ class MaskDecoder(nn.Module):
 
         # Run the transformer
         hs, src = self.transformer(src, pos_src, tokens)
-        iou_token_out = hs[:, 0, :]
         mask_tokens_out = hs[:, 1:1 + self.num_mask_tokens, :]
 
         # Upscale mask embeddings and predict masks using the mask tokens
@@ -195,10 +158,8 @@ class MaskDecoder(nn.Module):
             # sim = einops.einsum(text_embedding_down, upscaled_embedding, 'n 1 c, n c ... -> ')
             sim = sim.repeat(1, masks.shape[1], 1, 1, 1)
             masks = masks + sim
-        iou_pred = self.iou_prediction_head(iou_token_out)
 
-        return masks, iou_pred
-
+        return masks, mask_tokens_out
 
 # Lightly adapted from
 # https://github.com/facebookresearch/MaskFormer/blob/main/mask_former/modeling/transformer/transformer_predictor.py # noqa
