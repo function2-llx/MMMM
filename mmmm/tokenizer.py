@@ -26,7 +26,7 @@ class MMMMTokenizer(LlamaTokenizer):
     eonp_token = '</np>'
     eonp_token_id: int
 
-    def __init__(self, *args, use_seg_token: bool, share_seg_token: bool, **kwargs):
+    def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.base_vocab_size = self.vocab_size
 
@@ -40,18 +40,6 @@ class MMMMTokenizer(LlamaTokenizer):
         for token_name, special_token_id in zip(special_token_names, special_token_ids):
             setattr(self, f'{token_name}_id', special_token_id)
 
-        self.use_seg_token = use_seg_token
-        self.share_seg_token = share_seg_token
-        if use_seg_token:
-            if share_seg_token:
-                self.seg_token = '[SEG]'
-                self.add_tokens(self.seg_token, special_tokens=True)
-                self.seg_token_id: int = self.convert_tokens_to_ids(self.seg_token)
-            else:
-                self.seg_token_id_start = len(self)
-                self.seg_tokens = [f'[SEG-{i}]' for i in range(500)]
-                self.add_tokens(self.seg_tokens, True)
-
     @classmethod
     def build(cls, hf_model_path: Path, use_seg_token: bool = False, share_seg_token: bool = True):
         # no type hint (https://github.com/huggingface/transformers/blob/v4.38.2/src/transformers/tokenization_utils_base.py#L1827)
@@ -59,19 +47,6 @@ class MMMMTokenizer(LlamaTokenizer):
         return cls.from_pretrained(
             hf_model_path, use_seg_token=use_seg_token, share_seg_token=share_seg_token,
         )
-
-    def create_seg_token_mask(self, token_ids: torch.LongTensor):
-        """
-        Args:
-            token_ids: the (possibly shifted) token ids to find seg tokens
-        """
-        if self.use_seg_token:
-            if self.share_seg_token:
-                return token_ids == self.seg_token_id
-            else:
-                return token_ids >= self.seg_token_id_start
-        else:
-            return token_ids == self.eop_token_id
 
     def _parse_targets(self, token_ids: list[int]) -> list[str] | None:
         ret = []
@@ -105,13 +80,6 @@ class MMMMTokenizer(LlamaTokenizer):
         else:
             bop_token, eop_token = self.bop_token, self.eop_token
         ret = f'{bop_token} {name}{eop_token}'
-        if self.use_seg_token:
-            if self.share_seg_token:
-                seg_token = self.seg_token
-            else:
-                seg_token = self.seg_tokens[self.class_to_idx[name]]
-            # space?
-            ret = f'{ret} {seg_token}'
         return ret
 
 build = class_from_function(MMMMTokenizer.build, MMMMTokenizer)

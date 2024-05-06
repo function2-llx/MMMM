@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-import warnings
 
 import nibabel as nib
 import numpy as np
@@ -10,8 +9,8 @@ import torch
 from luolib.types import PathLike
 from luolib.utils import load_pt_zst
 
-from mmmm.tokenizer import MMMMTokenizer
 from mmmm.models.cogvlm import LANGUAGE_TOKEN_TYPE, VISION_TOKEN_TYPE
+from mmmm.tokenizer import MMMMTokenizer
 from .defs import CE_IGNORE_INDEX, ConvTurn
 from .sparse import Sparse
 
