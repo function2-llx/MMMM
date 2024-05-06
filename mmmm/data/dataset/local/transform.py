@@ -210,7 +210,7 @@ class SamplePatch(mt.Randomizable):
                 mask_indexes = []
                 num_uncertain = boxes.shape[0] - keep.sum().item()
             else:
-                _center =  patch_size >> 1
+                _center = patch_size >> 1
                 mask_sizes = torch.from_numpy(target.mask_sizes)[keep]
                 mask_indexes = torch.arange(*target.index_offset)[keep]
                 patch_masks = patch_masks[slice(*target.index_offset)][keep]
@@ -279,8 +279,8 @@ class SamplePatch(mt.Randomizable):
             boxes_t = torch.empty(patch_masks_t.shape[0], 6, dtype=torch.int64)
             for i, mask in enumerate(patch_masks_t):
                 # setting allow_smaller=False to make MONAI happy
-                start, end = generate_spatial_bounding_box(mask[None], allow_smaller=False)
-                boxes_t[i] = torch.tensor([*start, *end])
+                _start, _end = generate_spatial_bounding_box(mask[None], allow_smaller=False)
+                boxes_t[i] = torch.tensor([*_start, *_end])
         return patch_t.as_tensor(), patch_masks_t, boxes_t
 
     def __call__(self, data: dict) -> DataPoint:
@@ -339,6 +339,12 @@ class SamplePatch(mt.Randomizable):
             mask_indexes, boxes, num_uncertain = self.filter_target(
                 target, patch_masks, patch_start, effective_patch_size,
             )
+            # NOTE: a target will be included for training if any:
+            #   - totally negative in the patch
+            #   - at least one instance certainly presents in the patch
+            #   - only know the target presents, but no localized information
+            #     - indicated with num_uncertain = -1
+            #     - not applicable for local type data
             if boxes.shape[0] == 0 and num_uncertain == 0:
                 neg_targets.append(target.name)
             elif boxes.shape[0] > 0:
@@ -422,8 +428,9 @@ class SamplePatch(mt.Randomizable):
             }
         if patch_masks is not None:
             # select masks before affine transform to save computation
-            patch_masks = patch_masks[targets_data['mask_indexes']]
-            if patch_masks.shape[0] == 0:
+            if len(mask_indexes := targets_data['mask_indexes']) > 0:
+                patch_masks = patch_masks[mask_indexes]
+            else:
                 patch_masks = None
         patch, patch_masks, boxes = self._affine_transform(
             patch, patch_masks, targets_data['boxes'], patch_size, scale,
@@ -433,7 +440,19 @@ class SamplePatch(mt.Randomizable):
             patch = einops.repeat(patch, '1 ... -> c ...', c=3).contiguous()
         if not mmmm_debug():
             patch = intensity_norm(patch)
-        boxes_normed = norm_boxes(boxes, patch.shape[1:])
+        index_offsets = targets_data['index_offsets']
+        # prepare semantic label
+        if patch_masks is None:
+            semantic_masks = semantic_boxes = None
+        else:
+            num_targets = index_offsets.shape[0]
+            semantic_masks = torch.empty(num_targets, 1, *patch_masks.shape[1:], dtype=torch.bool)
+            semantic_boxes = torch.empty(num_targets, 6, dtype=torch.int64)
+            for i, index_offset in enumerate(index_offsets):
+                semantic_masks[i] = einops.reduce(patch_masks[slice(*index_offset)], 'c ... -> 1 ...', 'any')
+                _start, _end = generate_spatial_bounding_box(semantic_masks[i])
+                semantic_boxes[i] = torch.tensor([*_start, *_end])
+
         data_point: DataPoint = {
             'src': (dataset_name, data['key']),
             'image': patch,
@@ -443,10 +462,12 @@ class SamplePatch(mt.Randomizable):
             'pool_size': tuple(pool_size.tolist()),
             'vlm_inputs': vlm_inputs,
             'masks': patch_masks,
-            'boxes': boxes_normed,
+            'boxes': norm_boxes(boxes, patch.shape[1:]),
+            'semantic_masks': semantic_masks,
+            'semantic_boxes': semantic_boxes,
             'num_uncertain': targets_data['num_uncertain'],
             'semantic': targets_data['semantic'],
-            'index_offsets': targets_data['index_offsets'],
+            'index_offsets': index_offsets,
         }
         return data_point
 
