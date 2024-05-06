@@ -9,12 +9,14 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
 
+from cogvlm import cogvlm_collate_fn, cogvlm_setup
 from llavamed import llavamed_collate_fn, setup_llavamed, KeywordsStoppingCriteria
 from m3d import m3d_collate_fn, setup_m3d
 from medflamingo import medflamingo_collate_fn, setup_medflamingo
 from mmmm.data.defs import PROCESSED_VL_DATA_ROOT
 from radfm import radfm_collate_fn, setup_radfm
 from utils import (
+    dump_results,
     setup_seed,
     NLPMetrics,
 )
@@ -46,6 +48,7 @@ class VLEvaluator:
         tokenizer: str,
         task: str,
         dataset: str,
+        setting: str,
         seed: int = 233,
         num_workers: int = 8,
         output_dir: str = 'results/',
@@ -55,6 +58,7 @@ class VLEvaluator:
         self.task = task
         if task == 'vqa':
             self.dataset = VQATestDataset(dataset)
+        self.setting = setting
         self.num_workers = num_workers
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -115,25 +119,7 @@ class VLEvaluator:
             print(sample['answer'])
             print(prediction)
 
-        results = pd.DataFrame(results)
-        results.to_csv(
-            self.output_dir / f'{self.task}_{self.dataset.name}_radfm_zeroshot.csv'
-        )
-        with open(
-            self.output_dir / f'{self.task}_{self.dataset.name}_radfm_zeroshot.json',
-            'w',
-        ) as f:
-            json.dump(
-                {
-                    'bleu': results['bleu'].mean(),
-                    'rouge': results['rouge'].mean(),
-                    'meteor': results['meteor'].mean(),
-                    'bertscore': results['bertscore'].mean(),
-                    'exact_match': results['exact_match'].mean(),
-                },
-                f,
-                indent=4,
-            )
+        dump_results(results, self.output_dir, self.task, self.dataset.name, 'radfm', self.setting)
 
     def medflamingo(self):
         model, processor = setup_medflamingo(self.checkpoint, self.tokenizer)
@@ -183,27 +169,7 @@ class VLEvaluator:
             print(sample['answer'])
             print(prediction)
 
-        results = pd.DataFrame(results)
-        results.to_csv(
-            self.output_dir
-            / f'{self.task}_{self.dataset.name}_medflamingo_zeroshot.csv'
-        )
-        with open(
-            self.output_dir
-            / f'{self.task}_{self.dataset.name}_medflamingo_zeroshot.json',
-            'w',
-        ) as f:
-            json.dump(
-                {
-                    'bleu': results['bleu'].mean(),
-                    'rouge': results['rouge'].mean(),
-                    'meteor': results['meteor'].mean(),
-                    'bertscore': results['bertscore'].mean(),
-                    'exact_match': results['exact_match'].mean(),
-                },
-                f,
-                indent=4,
-            )
+        dump_results(results, self.output_dir, self.task, self.dataset.name, 'medflamingo', self.setting)
 
     def m3d(self):
         model, tokenizer = setup_m3d(self.checkpoint, self.tokenizer)
@@ -242,24 +208,7 @@ class VLEvaluator:
             print(sample['answer'])
             print(prediction)
 
-        results = pd.DataFrame(results)
-        results.to_csv(
-            self.output_dir / f'{self.task}_{self.dataset.name}_m3d_zeroshot.csv'
-        )
-        with open(
-            self.output_dir / f'{self.task}_{self.dataset.name}_m3d_zeroshot.json', 'w'
-        ) as f:
-            json.dump(
-                {
-                    'bleu': results['bleu'].mean(),
-                    'rouge': results['rouge'].mean(),
-                    'meteor': results['meteor'].mean(),
-                    'bertscore': results['bertscore'].mean(),
-                    'exact_match': results['exact_match'].mean(),
-                },
-                f,
-                indent=4,
-            )
+        dump_results(results, self.output_dir, self.task, self.dataset.name, 'm3d', self.setting)
 
     def llavamed(self):
         sys.path.append('third-party/LLaVA-Med')
@@ -335,25 +284,47 @@ class VLEvaluator:
             print(sample['answer'])
             print(prediction)
 
-        results = pd.DataFrame(results)
-        results.to_csv(
-            self.output_dir / f'{self.task}_{self.dataset.name}_llavamed_zeroshot.csv'
+        dump_results(results, self.output_dir, self.task, self.dataset.name, 'llavamed', self.setting)
+
+    def cogvlm(self):
+        model, tokenizer = cogvlm_setup(self.checkpoint, self.tokenizer)
+
+        dataloader = DataLoader(
+            self.dataset,
+            batch_size=1,
+            num_workers=self.num_workers,
+            pin_memory=True,
+            collate_fn=cogvlm_collate_fn,
         )
-        with open(
-            self.output_dir / f'{self.task}_{self.dataset.name}_llavamed_zeroshot.json',
-            'w',
-        ) as f:
-            json.dump(
-                {
-                    'bleu': results['bleu'].mean(),
-                    'rouge': results['rouge'].mean(),
-                    'meteor': results['meteor'].mean(),
-                    'bertscore': results['bertscore'].mean(),
-                    'exact_match': results['exact_match'].mean(),
-                },
-                f,
-                indent=4,
+
+        results = []
+
+        for sample in tqdm(dataloader):
+            inputs = model.build_conversation_input_ids(tokenizer, query=sample['question'], images=[sample['image']])
+
+            prediction = tokenizer.decode(
+                model.generate(
+                    input_ids=inputs['input_ids'].unsqueeze(0).to('cuda'),
+                    token_type_ids=inputs['token_type_ids'].unsqueeze(0).to('cuda'),
+                    attention_mask=inputs['attention_mask'].unsqueeze(0).to('cuda'),
+                    images=[[inputs['image'][0].to('cuda').to(torch.bfloat16)]],
+                )
             )
+            
+            results.append(
+                {
+                    'question': sample['question'],
+                    'answer': sample['answer'],
+                    'prediction': prediction,
+                    **self.metrics.compute(prediction, sample['answer']),
+                },
+            )
+
+            print(sample['question'])
+            print(sample['answer'])
+            print(prediction)
+
+        dump_results(results, self.output_dir, self.task, self.dataset.name, 'cogvlm', self.setting)
 
 
 if __name__ == '__main__':

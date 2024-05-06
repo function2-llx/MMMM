@@ -28,6 +28,28 @@ def setup_seed(seed):
     torch.backends.cudnn.benchmark = False
 
 
+def dump_results(results: list[dict], output_dir, task: str, dataset: str, model: str, setting: str):
+    results = pd.DataFrame(results)
+    results.to_csv(
+        output_dir / f'{task}_{dataset}_{model}_{setting}.csv'
+    )
+    with open(
+        output_dir / f'{task}_{dataset}_{model}_{setting}.json',
+        'w',
+    ) as f:
+        json.dump(
+            {
+                'bleu': results['bleu'].mean(),
+                'rouge': results['rouge'].mean(),
+                'meteor': results['meteor'].mean(),
+                'bertscore': results['bertscore'].mean(),
+                'exact_match': results['exact_match'].mean(),
+            },
+            f,
+            indent=4,
+        )
+
+
 class NLPMetrics:
     def __init__(self):
         self.bleu = evaluate.load('bleu')
