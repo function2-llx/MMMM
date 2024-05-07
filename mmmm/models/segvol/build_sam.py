@@ -52,7 +52,7 @@ def _build_sam(
         ),
         prompt_encoder=PromptEncoder(embed_dim=embed_dim),
         mask_decoder=MaskDecoder(
-            num_instances=9,
+            num_instances=args.num_instances,
             transformer=TwoWayTransformer(
                 depth=2,
                 embedding_dim=embed_dim,

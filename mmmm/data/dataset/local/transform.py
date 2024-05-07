@@ -14,13 +14,13 @@ import torch
 from torch.types import Device
 import torchvision.transforms.v2.functional as tvtf
 
-from luolib.transforms.box_ops import apply_affine_to_boxes_int, norm_boxes
+from luolib.transforms.box_ops import apply_affine_to_boxes_int
 from luolib.types import tuple2_t
 from luolib.utils import load_pt_zst
 from luolib.utils.misc import ceil_divide
 from monai import transforms as mt
 from monai.data import MetaTensor
-from monai.data.box_utils import box_area, spatial_crop_boxes
+from monai.data.box_utils import CenterSizeMode, box_area, convert_box_mode, spatial_crop_boxes
 from monai.transforms import generate_spatial_bounding_box
 from monai.utils import GridSamplePadMode
 
@@ -94,6 +94,12 @@ def _get_patch_size_xy(size: npt.NDArray[np.int64], scale: float, stride: int, m
     ret[smaller_idx] = smaller_tokens * stride
     ret[smaller_idx ^ 1] = larger_tokens * stride
     return tuple(ret.tolist())
+
+def norm_boxes(boxes: torch.LongTensor, norm_size: Sequence[int]) -> torch.DoubleTensor:
+    norm_size_t = einops.repeat(torch.tensor(norm_size), 'd -> (l2 d)', l2=2)
+    boxes_normed = boxes.double() / norm_size_t
+    boxes_normed = convert_box_mode(boxes_normed, dst_mode=CenterSizeMode)
+    return boxes_normed
 
 class SamplePatch(mt.Randomizable):
     def __init__(
@@ -435,6 +441,7 @@ class SamplePatch(mt.Randomizable):
         patch, patch_masks, boxes = self._affine_transform(
             patch, patch_masks, targets_data['boxes'], patch_size, scale,
         )
+        boxes = norm_boxes(boxes, patch.shape[1:])
         if patch.shape[0] == 1:
             # ensure RGB
             patch = einops.repeat(patch, '1 ... -> c ...', c=3).contiguous()
@@ -452,6 +459,7 @@ class SamplePatch(mt.Randomizable):
                 semantic_masks[i] = einops.reduce(patch_masks[slice(*index_offset)], 'c ... -> 1 ...', 'any')
                 _start, _end = generate_spatial_bounding_box(semantic_masks[i])
                 semantic_boxes[i] = torch.tensor([*_start, *_end])
+            semantic_boxes = norm_boxes(semantic_boxes, patch.shape[1:])
 
         data_point: DataPoint = {
             'src': (dataset_name, data['key']),
@@ -462,7 +470,7 @@ class SamplePatch(mt.Randomizable):
             'pool_size': tuple(pool_size.tolist()),
             'vlm_inputs': vlm_inputs,
             'masks': patch_masks,
-            'boxes': norm_boxes(boxes, patch.shape[1:]),
+            'boxes': boxes,
             'semantic_masks': semantic_masks,
             'semantic_boxes': semantic_boxes,
             'num_uncertain': targets_data['num_uncertain'],

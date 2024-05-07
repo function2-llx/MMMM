@@ -1,6 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
-
+import re
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
@@ -13,6 +13,7 @@ from torch.nn import functional as F
 
 from luolib.models import spadop
 from luolib.utils import channel_first, channel_last
+from luolib.utils.misc import ceil_divide
 
 from mmmm.models import resample
 from .transformer import TwoWayTransformer
@@ -61,7 +62,7 @@ class MaskDecoder(nn.Module):
         super().__init__()
         self.transformer_dim = transformer_dim
         self.transformer = transformer
-        self.num_multimask_outputs = num_instances
+        self.num_instances = num_instances
         self.iou_token = nn.Embedding(1, transformer_dim)
         self.num_mask_tokens = num_instances + 1
         self.mask_tokens = nn.Embedding(self.num_mask_tokens, transformer_dim)
@@ -82,10 +83,10 @@ class MaskDecoder(nn.Module):
                 for _ in range(self.num_mask_tokens)
             ]
         )
-
-        self.iou_prediction_head = MLP(
-            transformer_dim, iou_head_hidden_dim, self.num_mask_tokens, iou_head_depth
-        )
+        # we don't do that here
+        # self.iou_prediction_head = MLP(
+        #     transformer_dim, iou_head_hidden_dim, self.num_mask_tokens, iou_head_depth
+        # )
 
         self.txt_align_upscaled_embedding = nn.Linear(768, 96)
         self.text_sim = text_sim
@@ -96,6 +97,28 @@ class MaskDecoder(nn.Module):
             bias = state_dict.get(f'{ln_prefix}bias')
             state_dict[f'{ln_prefix}weight'] = einops.reduce(weight, 'c ... -> c', 'mean')
             state_dict[f'{ln_prefix}bias'] = einops.reduce(bias, 'c ... -> c', 'mean')
+        pt_num_instances = 0
+        pattern = re.compile(rf'{prefix}output_hypernetworks_mlps\.(\d+)\.layers\.0\.weight')
+        for key in list(state_dict.keys()):
+            if match := pattern.match(key):
+                pt_num_instances = max(int(match.group(1)), pt_num_instances)
+            if key.startswith(f'{prefix}iou_prediction_head'):
+                state_dict.pop(key)
+        hyper_prefix = f'{prefix}output_hypernetworks_mlps.'
+        for i in range(1 + pt_num_instances, self.num_mask_tokens):
+            ref = 1 + (i - 1) % pt_num_instances
+            for key, _ in self.output_hypernetworks_mlps[i].named_parameters():
+                state_dict[f'{hyper_prefix}{i}.{key}'] = state_dict[f'{hyper_prefix}{ref}.{key}']
+        pt_mask_tokens_weight = state_dict[f'{prefix}mask_tokens.weight']
+        mask_tokens_weight_pad = torch.cat([
+            pt_mask_tokens_weight[0:1],
+            einops.repeat(
+                pt_mask_tokens_weight[1:],
+                'n ... -> (q n) ...',
+                q=ceil_divide(self.num_instances, pt_num_instances),
+            ),
+        ])
+        state_dict[f'{prefix}mask_tokens.weight'] = mask_tokens_weight_pad[:self.num_mask_tokens]
         return super()._load_from_state_dict(state_dict, prefix, *args, **kwargs)
 
     def forward(

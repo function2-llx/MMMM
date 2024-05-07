@@ -15,7 +15,8 @@ from luolib.lightning import LightningModule
 from luolib.losses import zero_loss
 from luolib.types import param3_t, tuple2_t, tuple3_t
 from luolib.utils.misc import pairwise_forward
-from monai.data import box_pair_giou
+from monai.data import box_pair_giou, convert_box_mode
+from monai.data.box_utils import CenterSizeMode
 from monai.losses.focal_loss import sigmoid_focal_loss
 
 from mmmm.data.defs import Batch
@@ -52,6 +53,7 @@ class MMMMOutputWithPast:
 
 @dataclass
 class VisualGroundingOutput:
+    """(batch size, num targets, num queries, ...)"""
     masks_logits: list[torch.Tensor] = field(default_factory=list)
     masks_logits_ds: list[torch.Tensor] = field(default_factory=list)
     boxes: list[torch.Tensor] = field(default_factory=list)
@@ -155,7 +157,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         sam.prompt_encoder.point_embeddings.requires_grad_(False)
         sam.prompt_encoder.not_a_point_embed.requires_grad_(False)
         sam.prompt_encoder.mask_downscaling.requires_grad_(False)
-        sam.mask_decoder.iou_prediction_head.requires_grad_(False)
+        # sam.mask_decoder.iou_prediction_head.requires_grad_(False)
         if not sam.mask_decoder.text_sim:
             sam.mask_decoder.txt_align_upscaled_embedding.requires_grad_(False)
 
@@ -177,12 +179,29 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         ]
         return vg_hidden_states
 
+    def _predict_masks(
+        self, vg_hidden_states: torch.Tensor, image_embeddings: torch.Tensor, patch_size_z: int
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        sam = self.sam_model
+        text_embedding = self.vg_proj(vg_hidden_states)
+        sparse_embeddings, dense_embeddings = sam.prompt_encoder(image_embeddings.shape[2:], text_embedding=text_embedding)
+        sparse_embeddings = sparse_embeddings.to(text_embedding.dtype)
+        masks_logits_ds, masks_embeds = sam.mask_decoder(
+            image_embeddings=image_embeddings,
+            text_embedding=text_embedding,  # make SegVol happy
+            image_pe=sam.prompt_encoder.get_dense_pe(image_embeddings.shape[2:]),
+            sparse_prompt_embeddings=sparse_embeddings,
+            dense_prompt_embeddings=dense_embeddings,
+            patch_size_z=patch_size_z,
+        )
+        return masks_logits_ds, masks_embeds
+
     def visual_grounding(
         self,
         token_ids: torch.LongTensor,
         hidden_states: torch.Tensor,
-        image_list: list[torch.Tensor],
-        patch_size_list: list[tuple3_t[int]],
+        image: list[torch.Tensor],
+        patch_size: list[tuple3_t[int]],
     ) -> VisualGroundingOutput:
         """
         TODO:
@@ -197,27 +216,18 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             - discrimination logits for instances
             each one has a size of (num_vg, num_queries, ...)
         """
+        batch_size = token_ids.shape[0]
         vg_hidden_states = self._get_vg_hidden_states(token_ids, hidden_states)
-        sam = self.sam_model
-        image_embedding_list: list[torch.Tensor] = sam.image_encoder(image_list, patch_size_list)
+        image_embeddings: list[torch.Tensor] = self.sam_model.image_encoder(image, patch_size)
         ret = VisualGroundingOutput()
-        for i, (image, image_embedding, patch_size) in enumerate(zip(image_list, image_embedding_list, patch_size_list)):
-            text_embedding = self.vg_proj(vg_hidden_states[i])
-            sparse_embeddings, dense_embeddings = sam.prompt_encoder(
-                image_embedding.shape[2:], text_embedding=text_embedding,
+        for i in range(batch_size):
+            masks_logits_ds, masks_embeds = self._predict_masks(
+                vg_hidden_states[i], image_embeddings[i], patch_size[i][0],
             )
-            sparse_embeddings = sparse_embeddings.to(text_embedding.dtype)
-            masks_logits_ds, masks_embeds = sam.mask_decoder(
-                image_embeddings=image_embedding_list[i],
-                text_embedding=text_embedding,  # make SegVol happy
-                image_pe=sam.prompt_encoder.get_dense_pe(image_embedding.shape[2:]),
-                sparse_prompt_embeddings=sparse_embeddings,
-                dense_prompt_embeddings=dense_embeddings,
-                patch_size_z=patch_size[0],
-            )
-            masks_logits = nnf.interpolate(masks_logits_ds, image.shape[1:], mode='trilinear')
-            boxes = self.box_head(masks_embeds)
-            disc_logit = self.disc_head(masks_embeds[1:])
+            masks_logits = nnf.interpolate(masks_logits_ds, image[i].shape[1:], mode='trilinear')
+            # calling sigmoid here to restrict range, following DETR
+            boxes = self.box_head(masks_embeds).sigmoid()
+            disc_logit = einops.rearrange(self.disc_head(masks_embeds[:, 1:]), 'nt nq 1 -> nt nq')
             ret.masks_logits.append(masks_logits)
             ret.masks_logits_ds.append(masks_logits_ds)
             ret.boxes.append(boxes)
@@ -234,14 +244,14 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         self.model.eval()
         self.gradient_checkpointing_enable({'use_reentrant': False})
 
-    def training_step(self, batch: Batch, batch_idx: int, *args, **kwargs):
+    def training_step(self, batch: Batch, *args, **kwargs):
         vlm_inputs = batch['vlm_inputs']
         input_ids: torch.LongTensor = vlm_inputs['input_ids']  # type: ignore
         vlm_output: CausalLMOutputWithPast = self(
             **vlm_inputs,
             image=batch['image'],
             patch_size=batch['patch_size'],
-            pool_size=batch['patch_size'],
+            pool_size=batch['pool_size'],
             return_dict=True,
             output_hidden_states=True,
         )
@@ -342,7 +352,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         )
         cost = mask_cost + box_cost + disc_cost
         row, col = linear_sum_assignment(cost.cpu().numpy())
-        match = torch.empty(num_queries)
+        match = torch.empty(num_queries, dtype=torch.int64)
         match[row] = torch.from_numpy(col)
         match[match >= num_pos] = MATCH_NEGATIVE
         match[match >= num_pos + num_neg] = MATCH_UNCERTAIN
@@ -351,11 +361,15 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
     def box_loss(
         self, input: torch.Tensor, target: torch.Tensor, reduce_batch: bool = True, return_dict: bool = False,
     ):
+        """input and target are in CenterSizeMode"""
         if reduce_batch:
             l1 = nnf.l1_loss(input, target)
         else:
             l1 = nnf.l1_loss(input, target, reduction='none').mean(dim=-1)
-        giou = box_pair_giou(input, target)
+        giou = box_pair_giou(
+            convert_box_mode(input, src_mode=CenterSizeMode),
+            convert_box_mode(target, src_mode=CenterSizeMode),
+        )
         if reduce_batch:
             giou = giou.mean()
         giou = 1 - giou
@@ -440,16 +454,17 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
     ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
         num_targets = masks_logits.shape[0]
         loss = zero_loss(masks_logits_ds, boxes_reg, disc_logit)
-        log_dict = {}
+        semantic_dict = {}
+        instance_dict = {}
 
         def _accumulate(loss_log_dict: dict[str, torch.Tensor], task: Literal['semantic', 'instance'], prefix: str):
             ret = loss_log_dict.pop('total')
             for k, v in loss_log_dict.items():
                 log_key = f'{task}-{prefix}-{k}'
                 if task == 'semantic':
-                    log_dict[log_key] = v
+                    semantic_dict[log_key] = v
                 else:
-                    log_dict.setdefault(log_key, []).append(v)
+                    instance_dict.setdefault(log_key, []).append(v)
             return ret
 
         # 1. semantic part
@@ -469,8 +484,9 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             masks_label_ds = None
         else:
             with torch.no_grad():
-                masks_label_ds = nnf.interpolate(masks_label, masks_logits_ds.shape[2:], mode='area')
-            masks_label_ds = masks_label_ds.round().bool()
+                masks_label_ds = nnf.interpolate(
+                    masks_label[None].byte(), masks_logits_ds.shape[2:], mode='nearest-exact',
+                )[0].bool()
         num_uncertain_list = num_uncertain.tolist()
         _loss_list = []
         for i in range(num_targets):
@@ -479,39 +495,46 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
                 continue
             _masks_logits = masks_logits[i, 1:]
             _boxes_reg = boxes_reg[i, 1:]
+            _disc_logit = disc_logit[i]
             label_slice = slice(*index_offsets[i])
             _boxes_label = boxes_label[label_slice]
             match = self._match_instances(
                 masks_logits_ds[i, 1:],
                 _boxes_reg,
-                disc_logit[i],
-                _optional_index(masks_label_ds, label_slice),
+                _disc_logit,
+                None if masks_label_ds is None else masks_label_ds[label_slice],
                 _boxes_label,
                 _num_uncertain,
             )
             match_pos_mask: torch.BoolTensor = match >= 0  # type: ignore
+            match_pos = match[match_pos_mask]
             match_neg_mask: torch.BoolTensor = match == MATCH_NEGATIVE  # type: ignore
             _loss = loss.new_tensor(0)
-            if (num_pos := match_pos_mask.shape[0]) > 0:
-                match_pos = match[match_pos_mask]
+            if (num_pos := match_pos.shape[0]) > 0:
                 _loss += _accumulate(
-                    self.disc_loss(disc_logit[match_pos_mask], disc_logit.new_ones(num_pos), return_dict=True),
+                    self.disc_loss(
+                        _disc_logit[match_pos_mask], disc_logit.new_ones(num_pos), return_dict=True,
+                    ),
                     'instance', 'disc-pos',
                 )
                 _loss += _accumulate(
-                    self.box_loss(_boxes_reg[match_pos_mask], _boxes_label[match_pos]),
+                    self.box_loss(
+                        _boxes_reg[match_pos_mask], _boxes_label[match_pos], return_dict=True,
+                    ),
                     'instance', 'box',
                 )
                 if masks_label is not None:
                     _loss += _accumulate(
                         self.mask_loss(
-                            _masks_logits[match_pos_mask], masks_label[label_slice][match_pos], return_dict=True
+                            _masks_logits[match_pos_mask], masks_label[label_slice][match_pos], return_dict=True,
                         ),
                         'instance', 'mask-pos',
                     )
-            if (num_neg := match_neg_mask.shape[0]) > 0:
+            if (num_neg := match_neg_mask.sum().item()) > 0:
                 _loss += _accumulate(
-                    self.disc_loss(disc_logit[match_neg_mask], disc_logit.new_zeros(num_neg), return_dict=True),
+                    self.disc_loss(
+                        _disc_logit[match_neg_mask], disc_logit.new_zeros(num_neg), return_dict=True,
+                    ),
                     'instance', 'disc-neg',
                 )
                 if self.neg_mask_loss:
@@ -526,6 +549,14 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             _loss_list.append(_loss)
         if len(_loss_list) > 0:
             loss += torch.stack(_loss_list).mean()
+        log_dict = {
+            **semantic_dict,
+            **{
+                k: torch.stack(v).mean()
+                for k, v in instance_dict.items()
+            },
+        }
+        return loss, log_dict
 
     # def sw_predictor(self, patch: torch.Tensor):
     #     output: MMMMOutputWithPast = self(
