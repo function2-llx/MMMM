@@ -3,7 +3,6 @@ import json
 from jsonargparse import CLI
 from pathlib import Path
 import random
-import re
 import sys
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -373,19 +372,8 @@ class VLEvaluator:
             self.setting,
         )
 
-    def llavanext(self):
-        sys.path.append('third-party/LLaVA')
-        from llava.constants import (
-            IMAGE_TOKEN_INDEX,
-            DEFAULT_IMAGE_TOKEN,
-            DEFAULT_IM_START_TOKEN,
-            DEFAULT_IM_END_TOKEN,
-            IMAGE_PLACEHOLDER,
-        )
-        from llava.conversation import conv_templates
-        from llava.mm_utils import process_images, tokenizer_image_token
-        
-        tokenizer, model, image_processor, context_len = setup_llavanext(
+    def llavanext(self):     
+        model, processor = setup_llavanext(
             self.checkpoint, self.tokenizer
         )
 
@@ -400,46 +388,18 @@ class VLEvaluator:
         results = []
 
         for sample in tqdm(dataloader):
-            question = sample['question']
-            image_token_se = DEFAULT_IM_START_TOKEN + DEFAULT_IMAGE_TOKEN + DEFAULT_IM_END_TOKEN
-            if IMAGE_PLACEHOLDER in question:
-                if model.config.mm_use_im_start_end:
-                    question = re.sub(IMAGE_PLACEHOLDER, image_token_se, question)
-                else:
-                    question = re.sub(IMAGE_PLACEHOLDER, DEFAULT_IMAGE_TOKEN, question)
-            else:
-                if model.config.mm_use_im_start_end:
-                    question = image_token_se + '\n' + question
-                else:
-                    question = DEFAULT_IMAGE_TOKEN + '\n' + question
+            prompt = 'A chat between a curious human and an artificial intelligence assistant. The assistant gives helpful, detailed, and polite answers to the human\'s questions. USER: <image>\n' + sample['question'] + ' ASSISTANT:'
 
-            conv = conv_templates['llava_v1'].copy()
-            conv.append_message(conv.roles[0], question)
-            conv.append_message(conv.roles[1], None)
-            prompt = conv.get_prompt()
-            language = (
-                tokenizer_image_token(prompt, tokenizer, IMAGE_TOKEN_INDEX, return_tensors='pt')
-                .unsqueeze(0)
-                .to('cuda')
-            )
-
-            image_sizes = [sample['image'].size]
-            images_tensor = process_images(
-                [sample['image']],
-                image_processor,
-                model.config,
-            ).to('cuda', dtype=torch.float16)
+            inputs = processor(prompt, sample['image'], return_tensors='pt').to('cuda')
 
             with torch.inference_mode():
-                prediction = tokenizer.decode(
+                prediction = processor.decode(
                     model.generate(
-                        language,
-                        images=images_tensor,
-                        image_sizes=image_sizes,
+                        **inputs,
                         max_new_tokens=256,
                     )[0],
                     skip_special_tokens=True,
-                ).strip()
+                ).split('ASSISTANT:')[1].strip()
 
             results.append(
                 {

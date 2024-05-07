@@ -7,6 +7,3 @@
 [submodule "third-party/LLaVA-Med"]
 	path = third-party/LLaVA-Med
 	url = git@github.com:microsoft/LLaVA-Med.git
-[submodule "third-party/LLaVA"]
-	path = third-party/LLaVA
-	url = git@github.com:haotian-liu/LLaVA.git
