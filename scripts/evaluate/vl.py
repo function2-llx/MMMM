@@ -1,9 +1,9 @@
 from einops import repeat
 import json
 from jsonargparse import CLI
-import pandas as pd
 from pathlib import Path
 import random
+import re
 import sys
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -11,6 +11,7 @@ from tqdm import tqdm
 
 from cogvlm import cogvlm_collate_fn, cogvlm_setup
 from llavamed import llavamed_collate_fn, setup_llavamed, KeywordsStoppingCriteria
+from llavanext import llavanext_collate_fn, setup_llavanext
 from m3d import m3d_collate_fn, setup_m3d
 from medflamingo import medflamingo_collate_fn, setup_medflamingo
 from mmmm.data.defs import PROCESSED_VL_DATA_ROOT
@@ -102,9 +103,11 @@ class VLEvaluator:
                 'input_ids'
             ].to('cuda')
             vision = sample['image'].to('cuda')
-            prediction = tokenizer.decode(
-                model.generate(language, vision)[0], skip_special_tokens=True
-            ).strip()
+
+            with torch.inference_mode():
+                prediction = tokenizer.decode(
+                    model.generate(language, vision)[0], skip_special_tokens=True
+                ).strip()
 
             results.append(
                 {
@@ -119,7 +122,14 @@ class VLEvaluator:
             print(sample['answer'])
             print(prediction)
 
-        dump_results(results, self.output_dir, self.task, self.dataset.name, 'radfm', self.setting)
+        dump_results(
+            results,
+            self.output_dir,
+            self.task,
+            self.dataset.name,
+            'radfm',
+            self.setting,
+        )
 
     def medflamingo(self):
         model, processor = setup_medflamingo(self.checkpoint, self.tokenizer)
@@ -141,20 +151,22 @@ class VLEvaluator:
             )
             vision = processor.preprocess_images([sample['image']])
             vision = repeat(vision, '1 c h w -> 1 1 1 c h w')
-            prediction = (
-                processor.tokenizer.decode(
-                    model.generate(
-                        vision_x=vision.to('cuda'),
-                        lang_x=language['input_ids'].to('cuda'),
-                        attention_mask=language['attention_mask'].to('cuda'),
-                        max_new_tokens=50,
-                    )[0]
+            
+            with torch.inference_mode():
+                prediction = (
+                    processor.tokenizer.decode(
+                        model.generate(
+                            vision_x=vision.to('cuda'),
+                            lang_x=language['input_ids'].to('cuda'),
+                            attention_mask=language['attention_mask'].to('cuda'),
+                            max_new_tokens=50,
+                        )[0]
+                    )
+                    .replace('<unk> ', '')
+                    .split('Answer:')[1]
+                    .strip()
+                    .split('\n')[0]
                 )
-                .replace('<unk> ', '')
-                .split('Answer:')[1]
-                .strip()
-                .split('\n')[0]
-            )
 
             results.append(
                 {
@@ -169,7 +181,14 @@ class VLEvaluator:
             print(sample['answer'])
             print(prediction)
 
-        dump_results(results, self.output_dir, self.task, self.dataset.name, 'medflamingo', self.setting)
+        dump_results(
+            results,
+            self.output_dir,
+            self.task,
+            self.dataset.name,
+            'medflamingo',
+            self.setting,
+        )
 
     def m3d(self):
         model, tokenizer = setup_m3d(self.checkpoint, self.tokenizer)
@@ -190,10 +209,12 @@ class VLEvaluator:
                 return_tensors='pt',
             )['input_ids'].to('cuda')
             vision = sample['image'].to(device='cuda', dtype=torch.bfloat16)
-            prediction = tokenizer.decode(
-                model.generate(vision, language, max_new_tokens=256)[0],
-                skip_special_tokens=True,
-            ).strip()
+            
+            with torch.inference_mode():
+                prediction = tokenizer.decode(
+                    model.generate(vision, language, max_new_tokens=256)[0],
+                    skip_special_tokens=True,
+                ).strip()
 
             results.append(
                 {
@@ -208,7 +229,9 @@ class VLEvaluator:
             print(sample['answer'])
             print(prediction)
 
-        dump_results(results, self.output_dir, self.task, self.dataset.name, 'm3d', self.setting)
+        dump_results(
+            results, self.output_dir, self.task, self.dataset.name, 'm3d', self.setting
+        )
 
     def llavamed(self):
         sys.path.append('third-party/LLaVA-Med')
@@ -251,17 +274,18 @@ class VLEvaluator:
             ][0]
             vision = repeat(vision, 'c h w -> 1 c h w').half().to('cuda')
 
-            prediction = tokenizer.decode(
-                model.generate(
-                    language,
-                    images=vision,
-                    do_sample=True,
-                    temperature=0.7,
-                    stopping_criteria=[stopping_criteria],
-                    max_new_tokens=1024,
-                )[0, language.shape[1]:],
-                skip_special_tokens=True,
-            )
+            with torch.inference_mode():
+                prediction = tokenizer.decode(
+                    model.generate(
+                        language,
+                        images=vision,
+                        do_sample=True,
+                        temperature=0.7,
+                        stopping_criteria=[stopping_criteria],
+                        max_new_tokens=256,
+                    )[0, language.shape[1] :],
+                    skip_special_tokens=True,
+                )
 
             try:
                 index = prediction.index(conv.sep)
@@ -284,7 +308,14 @@ class VLEvaluator:
             print(sample['answer'])
             print(prediction)
 
-        dump_results(results, self.output_dir, self.task, self.dataset.name, 'llavamed', self.setting)
+        dump_results(
+            results,
+            self.output_dir,
+            self.task,
+            self.dataset.name,
+            'llavamed',
+            self.setting,
+        )
 
     def cogvlm(self):
         model, tokenizer = cogvlm_setup(self.checkpoint, self.tokenizer)
@@ -300,17 +331,26 @@ class VLEvaluator:
         results = []
 
         for sample in tqdm(dataloader):
-            inputs = model.build_conversation_input_ids(tokenizer, query=sample['question'], images=[sample['image']])
-
-            prediction = tokenizer.decode(
-                model.generate(
-                    input_ids=inputs['input_ids'].unsqueeze(0).to('cuda'),
-                    token_type_ids=inputs['token_type_ids'].unsqueeze(0).to('cuda'),
-                    attention_mask=inputs['attention_mask'].unsqueeze(0).to('cuda'),
-                    images=[[inputs['image'][0].to('cuda').to(torch.bfloat16)]],
-                )
+            inputs = model.build_conversation_input_ids(
+                tokenizer, query=sample['question'], images=[sample['image']]
             )
-            
+
+            with torch.inference_mode():
+                prediction = (
+                    tokenizer.decode(
+                        model.generate(
+                            input_ids=inputs['input_ids'].unsqueeze(0).to('cuda'),
+                            token_type_ids=inputs['token_type_ids'].unsqueeze(0).to('cuda'),
+                            attention_mask=inputs['attention_mask'].unsqueeze(0).to('cuda'),
+                            images=[[inputs['images'][0].to('cuda').to(torch.bfloat16)]],
+                            max_new_tokens=256,
+                        )[0],
+                        skip_special_tokens=True,
+                    )
+                    .split('Answer: ')[1]
+                    .strip()
+                )
+
             results.append(
                 {
                     'question': sample['question'],
@@ -324,7 +364,104 @@ class VLEvaluator:
             print(sample['answer'])
             print(prediction)
 
-        dump_results(results, self.output_dir, self.task, self.dataset.name, 'cogvlm', self.setting)
+        dump_results(
+            results,
+            self.output_dir,
+            self.task,
+            self.dataset.name,
+            'cogvlm',
+            self.setting,
+        )
+
+    def llavanext(self):
+        sys.path.append('third-party/LLaVA')
+        from llava.constants import (
+            IMAGE_TOKEN_INDEX,
+            DEFAULT_IMAGE_TOKEN,
+            DEFAULT_IM_START_TOKEN,
+            DEFAULT_IM_END_TOKEN,
+            IMAGE_PLACEHOLDER,
+        )
+        from llava.conversation import conv_templates
+        from llava.mm_utils import process_images, tokenizer_image_token
+        
+        tokenizer, model, image_processor, context_len = setup_llavanext(
+            self.checkpoint, self.tokenizer
+        )
+
+        dataloader = DataLoader(
+            self.dataset,
+            batch_size=1,
+            num_workers=self.num_workers,
+            pin_memory=True,
+            collate_fn=llavanext_collate_fn,
+        )
+
+        results = []
+
+        for sample in tqdm(dataloader):
+            question = sample['question']
+            image_token_se = DEFAULT_IM_START_TOKEN + DEFAULT_IMAGE_TOKEN + DEFAULT_IM_END_TOKEN
+            if IMAGE_PLACEHOLDER in question:
+                if model.config.mm_use_im_start_end:
+                    question = re.sub(IMAGE_PLACEHOLDER, image_token_se, question)
+                else:
+                    question = re.sub(IMAGE_PLACEHOLDER, DEFAULT_IMAGE_TOKEN, question)
+            else:
+                if model.config.mm_use_im_start_end:
+                    question = image_token_se + '\n' + question
+                else:
+                    question = DEFAULT_IMAGE_TOKEN + '\n' + question
+
+            conv = conv_templates['llava_v1'].copy()
+            conv.append_message(conv.roles[0], question)
+            conv.append_message(conv.roles[1], None)
+            prompt = conv.get_prompt()
+            language = (
+                tokenizer_image_token(prompt, tokenizer, IMAGE_TOKEN_INDEX, return_tensors='pt')
+                .unsqueeze(0)
+                .to('cuda')
+            )
+
+            image_sizes = [sample['image'].size]
+            images_tensor = process_images(
+                [sample['image']],
+                image_processor,
+                model.config,
+            ).to('cuda', dtype=torch.float16)
+
+            with torch.inference_mode():
+                prediction = tokenizer.decode(
+                    model.generate(
+                        language,
+                        images=images_tensor,
+                        image_sizes=image_sizes,
+                        max_new_tokens=256,
+                    )[0],
+                    skip_special_tokens=True,
+                ).strip()
+
+            results.append(
+                {
+                    'question': sample['question'],
+                    'answer': sample['answer'],
+                    'prediction': prediction,
+                    **self.metrics.compute(prediction, sample['answer']),
+                },
+            )
+
+            print(sample['question'])
+            print(sample['answer'])
+            print(prediction)
+
+        dump_results(
+            results,
+            self.output_dir,
+            self.task,
+            self.dataset.name,
+            'llavanext',
+            self.setting,
+        )
 
 
 if __name__ == '__main__':
