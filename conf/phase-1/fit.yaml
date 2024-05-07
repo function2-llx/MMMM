@@ -14,6 +14,7 @@ trainer:
     init_args:
       broadcast_buffers: false
       gradient_as_bucket_view: true
+#      timeout: 0:10:0
 #     `static_graph` seems to make DDP with gradient accumulation crash
 #      static_graph: true
   callbacks:
