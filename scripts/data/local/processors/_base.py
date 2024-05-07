@@ -175,7 +175,8 @@ class Processor(ABC):
         raise NotImplementedError
 
     def _ensure_binary_mask(self, mask: torch.Tensor):
-        assert ((mask == 0) | (mask == 1)).all()
+        assert not mask.is_floating_point()
+        assert (0 <= mask).all() and (mask <= 1).all()
         return mask.bool()
 
     def _check_affine(self, affine1: torch.Tensor, affine2: torch.Tensor, atol: float | None = None):
@@ -350,7 +351,12 @@ class Processor(ABC):
                 mask_sizes = None
             else:
                 target_masks = masks[indexes]
-                mask_sizes = einops.reduce(target_masks, 'n ... -> n', 'sum').cpu().numpy()
+                mask_sizes = target_masks.new_empty((target_masks.shape[0], ), dtype=torch.int64)
+                for i in range(0, target_masks.shape[0], self.mask_batch_size):
+                    mask_sizes[i:i + self.mask_batch_size] = (
+                        einops.reduce(target_masks[i:i + self.mask_batch_size], 'n ... -> n', 'sum')
+                    )
+                mask_sizes = mask_sizes.cpu().numpy()
                 merged_mask = einops.reduce(target_masks, 'n ... -> ...', 'any')
                 positions = merged_mask.nonzero()
             if positions.shape[0] > self.max_class_positions:
