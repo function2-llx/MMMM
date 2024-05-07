@@ -25,6 +25,8 @@ class TargetClass:
 
     def _update(self, info: pd.Series, classes: dict[str, TargetClass]):
         self.synonyms = _split_items(info['synonyms'])
+        if self.name not in self.synonyms:
+            self.synonyms.insert(0, self.name)
         self.parents = [
             classes[parent_name]
             for parent_name in _split_items(info['parents'])
@@ -33,7 +35,7 @@ class TargetClass:
             parent.children.append(self)
 
 @cache
-def load_target_tax() -> dict[str, TargetClass]:
+def get_target_tax() -> dict[str, TargetClass]:
     tax_dict = pd.read_excel(ORIGIN_DATA_ROOT / 'target-tax.xlsx', ['anatomy', 'anomaly'])
     ret = {}
     for category, tax in tax_dict.items():
@@ -46,3 +48,5 @@ def load_target_tax() -> dict[str, TargetClass]:
         for name, row in tax.iterrows():
             ret[name]._update(row, ret)
     return ret
+
+load_target_tax = get_target_tax

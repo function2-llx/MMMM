@@ -749,7 +749,14 @@ class CogVLMForCausalLM(CogVLMPreTrainedModel):
         return torch.ones(inputs.shape[:2], dtype=torch.long, device=inputs.device)  # type: ignore
 
     def prepare_inputs_for_generation(
-            self, input_ids, token_type_ids, images=None, past_key_values=None, attention_mask=None, inputs_embeds=None, **kwargs
+        self,
+        input_ids,
+        token_type_ids,
+        images=None,
+        past_key_values=None,
+        attention_mask=None,
+        inputs_embeds=None,
+        **kwargs,
     ):
         # build position_ids if needed
         position_ids = kwargs.get("position_ids", None)
@@ -769,12 +776,12 @@ class CogVLMForCausalLM(CogVLMPreTrainedModel):
 
         model_inputs.update(
             {
-                "token_type_ids": token_type_ids,
                 "images": images,
+                "token_type_ids": token_type_ids,
                 "position_ids": position_ids,
                 "past_key_values": past_key_values,
-                "use_cache": kwargs.get("use_cache"),
                 "attention_mask": attention_mask,
+                "use_cache": kwargs.get("use_cache"),
             }
         )
         return model_inputs

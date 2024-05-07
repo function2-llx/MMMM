@@ -1,34 +1,24 @@
-from collections import Counter
-
 import torch
 
-from luolib.utils import get_cuda_device
 from monai.data import MetaTensor
 
-from mmmm.data.defs import ORIGIN_SEG_DATA_ROOT
+from mmmm.data.defs import ORIGIN_LOCAL_DATA_ROOT
 from ._base import DefaultImageLoaderMixin, DefaultMaskLoaderMixin, MultiClassDataPoint, Processor
 
 class PENGWINProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor):
+    mask_dtype = torch.int32
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.targets = ['sacrum', 'left hip bone', 'right hip bone']
-        self.bbox_ignore_targets = set(self.targets)
 
     @property
     def dataset_root(self):
-        return ORIGIN_SEG_DATA_ROOT / 'PENGWIN'
+        return ORIGIN_LOCAL_DATA_ROOT / 'PENGWIN'
 
-class PENGWINT1Processor(PENGWINProcessor):
-    name = 'PENGWIN-T1'
-    orientation = 'SRA'
-
-    @property
-    def dataset_root(self):
-        return super().dataset_root / 'Task-1'
-
-    def load_masks(self, data_point: MultiClassDataPoint) -> tuple[MetaTensor, list[str]]:
-        label: MetaTensor = self.mask_loader(data_point.label).to(device=get_cuda_device())
-        masks: MetaTensor = label.new_empty((3, *label.shape[1:]), dtype=torch.bool)
+    def load_masks(self, data_point: MultiClassDataPoint, *args, **kwargs):
+        label: MetaTensor = self.mask_loader(data_point.label).to(device=self.device)
+        masks: MetaTensor = label.new_empty((len(self.targets), *label.shape[1:]), dtype=torch.bool)
         masks.affine = label.affine
         fragments = {}
         unique_labels = label.unique()
@@ -37,7 +27,15 @@ class PENGWINT1Processor(PENGWINProcessor):
             masks[i] = (low <= label) & (label <= high)
             fragments[name] = ((low <= unique_labels) & (unique_labels <= high)).sum().item()
         data_point.extra = {'fragments': fragments}
-        return masks, self.targets
+        return self.targets, masks
+
+class PENGWINT1Processor(PENGWINProcessor):
+    name = 'PENGWIN-T1'
+    orientation = 'SRA'
+
+    @property
+    def dataset_root(self):
+        return super().dataset_root / 'Task-1'
 
     def get_data_points(self):
         ret = []
@@ -58,27 +56,10 @@ class PENGWINT2Processor(PENGWINProcessor):
     image_reader = 'pilreader'
     assert_gray_scale = True
     mask_reader = 'pilreader'
-    mask_dtype = torch.int32
 
     @property
     def dataset_root(self):
         return super().dataset_root / 'Task-2'
-
-    def load_masks(self, data_point: MultiClassDataPoint) -> tuple[MetaTensor, list[str]]:
-        label: MetaTensor = self.mask_loader(data_point.label)
-        assert label.shape[0] == 1
-        label = label[0]
-        masks: MetaTensor = label.new_empty((3, *label.shape), dtype=torch.bool)
-        masks.affine = label.affine
-        fragments = Counter()
-        for i, name in enumerate(self.targets):
-            for j in range(i * 10 + 1, (i + 1) * 10 + 1):
-                mask = (label >> j & 1).bool()
-                masks[i] |= mask
-                if mask.any():
-                    fragments[name] += 1
-        data_point.extra = {'fragments': fragments}
-        return masks, self.targets
 
     def get_data_points(self):
         ret = []

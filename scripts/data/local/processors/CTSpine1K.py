@@ -2,7 +2,7 @@ from pathlib import Path
 
 import cytoolz
 
-from mmmm.data.defs import ORIGIN_SEG_DATA_ROOT
+from mmmm.data.defs import ORIGIN_LOCAL_DATA_ROOT
 from ._base import DefaultImageLoaderMixin, DefaultMaskLoaderMixin, MultiClassDataPoint, Processor
 from .VerSe import VerSeProcessor
 
@@ -22,18 +22,18 @@ class CTSpine1KProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Proces
     def get_image_info(self, origin_key: str) -> tuple[Path, str]:
         if origin_key.startswith('HN'):
             dataset = 'HNSCC-3DCT-RT'
-            path = ORIGIN_SEG_DATA_ROOT / 'HNSCC-3DCT-RT/download/HNSCC-3DCT-RT' / self.path_mapping[origin_key]
+            path = ORIGIN_LOCAL_DATA_ROOT / 'HNSCC-3DCT-RT/download/HNSCC-3DCT-RT' / self.path_mapping[origin_key]
         elif origin_key.startswith('liver'):
             dataset = 'MSD_T10'
-            path = cytoolz.first((ORIGIN_SEG_DATA_ROOT / 'MSD/Task03_Liver').glob(f'images*/{origin_key}.nii.gz'))
+            path = cytoolz.first((ORIGIN_LOCAL_DATA_ROOT / 'MSD/Task03_Liver').glob(f'images*/{origin_key}.nii.gz'))
         elif origin_key.startswith('volume-covid19'):
             dataset = 'COVID-19'
             assert origin_key.endswith('_ct')
             origin_key = origin_key[:-len('_ct')]
-            path = cytoolz.first((ORIGIN_SEG_DATA_ROOT / f'CT-COVID-19').glob(f'*/*/{origin_key}.nii.gz'))
+            path = cytoolz.first((ORIGIN_LOCAL_DATA_ROOT / f'CT-COVID-19').glob(f'*/*/{origin_key}.nii.gz'))
         else:
             dataset = 'COLONOG'
-            path = ORIGIN_SEG_DATA_ROOT / 'CT-COLONOGRAPHY/download/CT COLONOGRAPHY' / self.path_mapping[origin_key]
+            path = ORIGIN_LOCAL_DATA_ROOT / 'CT-COLONOGRAPHY/download/CT COLONOGRAPHY' / self.path_mapping[origin_key]
         return path, f'{dataset}-{origin_key}'
 
     def get_data_points(self):

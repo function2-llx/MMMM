@@ -3,92 +3,90 @@ init_args:
   dataset:
     datasets:
     - name: ACDC
-      type: seg
+      type: local
     - name: AMOS22
-      type: seg
+      type: local
     - name: ATLAS
-      type: seg
+      type: local
     - name: ATM22
-      type: seg
+      type: local
     - name: autoPET-III
-      type: seg
+      type: local
     - name: BraTS2023-GLI
-      type: seg
+      type: local
     - name: BraTS2023-MEN
-      type: seg
+      type: local
     - name: BraTS2023-MET
-      type: seg
+      type: local
     - name: BraTS2023-PED
-      type: seg
+      type: local
     - name: BraTS2023-SSA
-      type: seg
+      type: local
     - name: BTCV-Abdomen
-      type: seg
+      type: local
     - name: BTCV-Cervix
-      type: seg
+      type: local
     - name: BUSI
-      type: seg
+      type: local
     - name: CHAOS
-      type: seg
+      type: local
     - name: CT-ORG
-      type: seg
+      type: local
     - name: CTPelvic1K
-      type: seg
+      type: local
     - name: CTSpine1K
-      type: seg
+      type: local
     - name: HaN-Seg
-      type: seg
+      type: local
     - name: ISLES22
-      type: seg
+      type: local
     - name: LiTS
-      type: seg
+      type: local
     - name: LNQ2023
-      type: seg
+      type: local
     - name: MRSpineSeg
-      type: seg
+      type: local
     - name: MSD-Task02_Heart
-      type: seg
+      type: local
     - name: MSD-Task03_Liver
-      type: seg
+      type: local
     - name: MSD-Task04_Hippocampus
-      type: seg
+      type: local
     - name: MSD-Task05_Prostate
-      type: seg
+      type: local
     - name: MSD-Task06_Lung
-      type: seg
+      type: local
     - name: MSD-Task07_Pancreas
-      type: seg
+      type: local
     - name: MSD-Task08_HepaticVessel
-      type: seg
+      type: local
     - name: MSD-Task09_Spleen
-      type: seg
+      type: local
     - name: MSD-Task10_Colon
-      type: seg
+      type: local
     - name: PARSE2022
-      type: seg
+      type: local
     - name: PENGWIN-T1
-      type: seg
-    - name: PENGWIN-T2
-      type: seg
-      weight: 0.04
-    - name: PI-CAI
-      type: seg
+      type: local
     - name: Prostate158
-      type: seg
+      type: local
     - name: RibFrac
-      type: seg
+      type: local
     - name: SEG.A.2023
-      type: seg
+      type: local
     - name: SegRap2023
-      type: seg
+      type: local
     - name: SegTHOR
-      type: seg
+      type: local
     - name: TotalSegmentator
-      type: seg
+      type: local
     - name: VerSe
-      type: seg
+      type: local
+    - name: VinDr-CXR
+      type: local
+      weight: 0.1
     - name: WORD
-      type: seg
+      type: local
     - name: MIMIC-CXR
       type: vl
       weight: 0.02
@@ -98,20 +96,22 @@ init_args:
     - name: PMC-OA
       type: vl
       weight: 0.0012
-    max_seq_len: 768
+    base_vit_patch_size_z: 16
+    vit_patch_size_xy: 16
     pool_size_xy: 2
     base_pool_size_z: 2
+    max_seq_len: 768
     seg_trans:
-      max_vision_tokens: 100
-      scale_z: [0.5, 2]
-      scale_z_p: 0.2
+      max_vision_tokens: 144
+      scale_z: [1, 2]
+      scale_z_p: 0.5
       max_tokens_z: 4
-      scale_xy: [0.5, 3]
-      scale_xy_p: 0.75
+      scale_xy: [0.9, 3]
+      scale_xy_p: 0.9
       num_pos: 32
       num_neg: 8
     vl_trans:
-      max_tokens: 100
+      max_tokens: 144
       max_tokens_z: 4
   dataloader:
     train_batch_size: 4

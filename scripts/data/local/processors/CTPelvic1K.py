@@ -1,7 +1,7 @@
 from pathlib import Path
 import re
 
-from mmmm.data.defs import ORIGIN_SEG_DATA_ROOT
+from mmmm.data.defs import ORIGIN_LOCAL_DATA_ROOT
 
 from ._base import DefaultImageLoaderMixin, DefaultMaskLoaderMixin, MultiClassDataPoint, Processor
 
@@ -16,7 +16,7 @@ class CTPelvic1KProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Proce
             case 1 | 5:
                 # BTCV
                 btcv_task = 'Abdomen' if dataset_idx == 1 else 'Cervix'
-                data_dir = ORIGIN_SEG_DATA_ROOT / 'BTCV' / btcv_task / 'RawData'
+                data_dir = ORIGIN_LOCAL_DATA_ROOT / 'BTCV' / btcv_task / 'RawData'
                 if btcv_task == 'Cervix':
                     origin_key = origin_key.replace('_', '-')
                 sub_path = f'img/{origin_key}.nii.gz'
@@ -26,7 +26,7 @@ class CTPelvic1KProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Proce
             case 2:
                 # CT COLONOGRAPHY
                 subject_id, series_idx, *_ = origin_key.split('_')
-                data_dir = ORIGIN_SEG_DATA_ROOT / 'CT-COLONOGRAPHY/download/CT COLONOGRAPHY' / subject_id
+                data_dir = ORIGIN_LOCAL_DATA_ROOT / 'CT-COLONOGRAPHY/download/CT COLONOGRAPHY' / subject_id
                 series_dirs = [*data_dir.glob(f'*/{series_idx}.*')]
                 if len(series_dirs) != 1:
                     # about 4 cases are ambiguous here, but they seem to be the same
@@ -34,13 +34,13 @@ class CTPelvic1KProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Proce
                 return series_dirs[0], f'COLONOG-{origin_key}'
             case 3:
                 # MSD Task10_Colon
-                data_dir = ORIGIN_SEG_DATA_ROOT / 'MSD/Task10_Colon'
+                data_dir = ORIGIN_LOCAL_DATA_ROOT / 'MSD/Task10_Colon'
                 if not (img_path := data_dir / 'imagesTr' / f'{origin_key}.nii.gz').exists():
                     img_path = data_dir / 'imagesTs' / f'{origin_key}.nii.gz'
                 return img_path, f'MSD-T10-{origin_key}'
             case 4:
                 # KiTS19
-                data_dir = ORIGIN_SEG_DATA_ROOT / 'KiTS19/data'
+                data_dir = ORIGIN_LOCAL_DATA_ROOT / 'KiTS19/data'
                 img_path = data_dir / f'{origin_key}/imaging.nii.gz'
                 return img_path, f'KiTS19-{origin_key}'
             case 6 | 7:

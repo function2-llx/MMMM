@@ -16,6 +16,7 @@ class VerSeProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor)
             for i in range(20, 26)
         },
     }
+    mask_batch_size = 4
 
     def get_data_points(self):
         ret = []

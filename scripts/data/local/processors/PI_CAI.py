@@ -6,6 +6,7 @@ from ._base import DefaultImageLoaderMixin, DefaultMaskLoaderMixin, MultiLabelMu
 class PI_CAIProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor):
     name = 'PI-CAI'
     orientation = 'SRA'
+    semantic_targets = {'prostate cancer'}
 
     def _ensure_binary_mask(self, mask: torch.Tensor):
         assert mask.shape[0] == 1

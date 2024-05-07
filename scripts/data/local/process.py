@@ -1,8 +1,14 @@
 #! /bin/env python
 
+import os
 import importlib
 import inspect
 import logging
+
+os.environ['MKL_NUM_THREADS'] = '1'
+os.environ['NUMEXPR_NUM_THREADS'] = '1'
+
+import torch
 
 from mmmm.data.defs import PROCESSED_DATA_ROOT
 
@@ -67,6 +73,8 @@ def main():
         datasets = args.datasets
     setup_logging()
     logger.info(datasets)
+    torch.set_num_threads(1)
+    torch.set_num_interop_threads(1)
     for dataset in datasets:
         processor_cls = processors[dataset]
         processor = processor_cls(logger, max_workers=args.max_workers, chunksize=args.chunksize, override=args.override)

@@ -19,22 +19,19 @@ __all__ = [
 from .defs import CE_IGNORE_INDEX, DataPoint
 
 def _collate_fn(batch: list[DataPoint]):
-    # maybe TODO: can we follow the type annotation of Batch?
-    list_keys = ['image', 'grounding_image', 'patch_size', 'pool_size', 'mask', 'mask_index', 'bbox', 'bbox_index']
-    list_data = {key: [] for key in list_keys}
     batch_vlm_inputs: list[dict] = []
+    list_data = {}
     for x in batch:
-        for key, data in list_data.items():
-            data.append(x.pop(key))
         batch_vlm_inputs.append(x.pop('vlm_inputs'))
+        for key, value in x.items():
+            list_data.setdefault(key, []).append(value)
     ret = {
-        **list_data_collate(batch),
         **list_data,
         'vlm_inputs': {
             key: pad_sequence(
                 [x[key] for x in batch_vlm_inputs],
                 batch_first=True,
-                padding_value=CE_IGNORE_INDEX if key == 'lm_targets' else 0,
+                padding_value=CE_IGNORE_INDEX if key == 'labels' else 0,
             )
             for key in batch_vlm_inputs[0].keys()
         }
