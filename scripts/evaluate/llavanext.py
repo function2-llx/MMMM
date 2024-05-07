@@ -17,7 +17,7 @@ def setup_llavanext(checkpoint: str, tokenizer: str):
 
     return model, processor
 
-def llavanext_collate_fn(batch):
+def llavanext_collate_fn(batch: list[dict]):
     assert len(batch) == 1
 
     return {

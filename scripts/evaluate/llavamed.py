@@ -72,7 +72,7 @@ def setup_llavamed(checkpoint: str, tokenizer: str):
     return model, tokenizer, image_processor, image_token_len
 
 
-def llavamed_collate_fn(batch):
+def llavamed_collate_fn(batch: list[dict]):
     assert len(batch) == 1
 
     return {

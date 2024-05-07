@@ -9,6 +9,7 @@ from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
 
 from cogvlm import cogvlm_collate_fn, cogvlm_setup
+from instructblip import instructblip_collate_fn, setup_instructblip
 from llavamed import llavamed_collate_fn, setup_llavamed, KeywordsStoppingCriteria
 from llavanext import llavanext_collate_fn, setup_llavanext
 from m3d import m3d_collate_fn, setup_m3d
@@ -420,6 +421,55 @@ class VLEvaluator:
             self.task,
             self.dataset.name,
             'llavanext',
+            self.setting,
+        )
+
+    def instructblip(self):
+        model, processor = setup_instructblip(
+            self.checkpoint, self.tokenizer
+        )
+
+        dataloader = DataLoader(
+            self.dataset,
+            batch_size=1,
+            num_workers=self.num_workers,
+            pin_memory=True,
+            collate_fn=instructblip_collate_fn,
+        )
+
+        results = []
+
+        for sample in tqdm(dataloader):
+            inputs = processor(sample['question'], sample['image'], return_tensors='pt').to('cuda')
+
+            with torch.inference_mode():
+                prediction = processor.decode(
+                    model.generate(
+                        **inputs,
+                        max_new_tokens=256,
+                    )[0],
+                    skip_special_tokens=True,
+                )
+
+            results.append(
+                {
+                    'question': sample['question'],
+                    'answer': sample['answer'],
+                    'prediction': prediction,
+                    **self.metrics.compute(prediction, sample['answer']),
+                },
+            )
+
+            print(sample['question'])
+            print(sample['answer'])
+            print(prediction)
+
+        dump_results(
+            results,
+            self.output_dir,
+            self.task,
+            self.dataset.name,
+            'instructblip',
             self.setting,
         )
 
