@@ -351,7 +351,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             dim=1,
         )
         cost = mask_cost + box_cost + disc_cost
-        row, col = linear_sum_assignment(cost.cpu().numpy())
+        row, col = linear_sum_assignment(cost.float().cpu().numpy())
         match = torch.empty(num_queries, dtype=torch.int64)
         match[row] = torch.from_numpy(col)
         match[match >= num_pos] = MATCH_NEGATIVE
