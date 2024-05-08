@@ -22,8 +22,7 @@ def setup_radfm(checkpoint: str, tokenizer: str):
 
     tokenizer = LlamaTokenizer.from_pretrained(tokenizer)
     special_tokens = {
-        'additional_special_tokens': [f'<image{i}>' for i in range(32)]
-        + ['<image>', '</image>']
+        'additional_special_tokens': [f'<image{i}>' for i in range(32)] + ['<image>', '</image>']
     }
     tokenizer.add_special_tokens(special_tokens)
     tokenizer.pad_token_id = 0
@@ -39,15 +38,7 @@ def radfm_collate_fn(batch: list[dict]):
         image = torch.load(batch[0]['image']).float()
         image = (image - image.min()) / (image.max() - image.min())
     else:
-        transform = transforms.Compose(
-            [
-                transforms.RandomResizedCrop(
-                    [512, 512],
-                    scale=(0.8, 1.0),
-                    interpolation=transforms.InterpolationMode.BICUBIC,
-                ),
-                transforms.ToTensor(),
-            ]
+        transform = transforms.Compose([transforms.ToTensor()]
         )
         image = transform(Image.open(batch[0]['image']).convert('RGB'))
     target_d, max_d = 4, 4
@@ -76,29 +67,11 @@ def radfm_vl_evaluate(model, tokenizer, dataloader, metrics):
     results = []
 
     for sample in tqdm(dataloader):
-        question_list = [False for _ in range(len(str(sample['question'])))]
-        question = ''
-        if random.random() < 0.5:
-            position = 0
-        else:
-            position = len(question_list) - 1
-        question_list[position] = True
-        for i in range(len(question_list)):
-            if question_list[i]:
-                question += (
-                    '<image>'
-                    + ''.join([f'<image{i}>' for i in range(32)])
-                    + '</image>'
-                    + sample['question'][i]
-                )
-            else:
-                question += sample['question'][i]
+        question = '<image>' + ''.join([f'<image{i}>' for i in range(32)]) + '</image>' + sample['question']
         language = tokenizer(
             question,
             return_tensors='pt',
-        )[
-            'input_ids'
-        ].to('cuda')
+        )['input_ids'].to('cuda')
         vision = sample['image'].to('cuda')
 
         with torch.inference_mode():

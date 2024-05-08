@@ -103,7 +103,7 @@ class NLPMetrics:
         }
 
         for _, row in df.iterrows():
-            score = self.compute(row['prediction'] if pd.notna(row['prediction']) else '', row['answer'])
+            score = self.compute(str(row['prediction']) if pd.notna(row['prediction']) else '', str(row['answer']))
             for key in results.keys():
                 results[key].append(score[key])
 
@@ -126,6 +126,9 @@ class LlamaMetric:
         )
 
     def compute(self, question: str, prediction: str, reference: str):
+        if not prediction:
+            return 0
+
         messages = [
             {"role": "system", "content": LLAMA_SYSTEM_PROMPT},
             {"role": "user", "content": LLAMA_USER_PROMPT.format(question=question, answer=reference, prediction=prediction)},
@@ -166,7 +169,7 @@ class LlamaMetric:
         llama = []
 
         for _, row in df.iterrows():
-            score = self.compute(row['question'], row['prediction'], row['answer'])['llama']
+            score = self.compute(str(row['prediction']) if pd.notna(row['prediction']) else '', str(row['answer']))['llama']
             llama.append(score)
 
         df['llama'] = llama
