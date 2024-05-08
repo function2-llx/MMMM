@@ -23,7 +23,6 @@ optim:
     prefix: [model, lm_head]
     optimizer:
       class_path: torch.optim.AdamW
-#      class_path: deepspeed.ops.adam.FusedAdam
       init_args:
         lr: 5e-5
         weight_decay: 5e-2
@@ -41,7 +40,6 @@ optim:
     prefix: sam_model
     optimizer:
       class_path: torch.optim.AdamW
-#      class_path: deepspeed.ops.adam.FusedAdam
       init_args:
         lr: 1e-4
         weight_decay: 5e-2
@@ -58,7 +56,6 @@ optim:
   new:
     optimizer:
       class_path: torch.optim.AdamW
-#      class_path: deepspeed.ops.adam.FusedAdam
       init_args:
         lr: 1e-4
         weight_decay: 5e-2

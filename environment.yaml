@@ -15,7 +15,7 @@ dependencies:
 - einops
 - lightning
 - torchmetrics
-- transformers=4.31.0
+- transformers
 - peft
 - sentencepiece
 - timm
@@ -38,6 +38,5 @@ dependencies:
 # comment out since we do not need bitsandbytes currently, and it can cause trouble: https://github.com/huggingface/peft/issues/1665
 #  - bitsandbytes  # bitsandbytes plays strangely with conda, it still depends on cudatoolkit=11.8
   - xformers -i https://download.pytorch.org/whl/cu121
-  - deepspeed
   - pynrrd
   - pylidc  # for LIDC data
