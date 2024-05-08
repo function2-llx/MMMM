@@ -116,7 +116,7 @@ class CommonMetrics:
             json.dump(summary, f, indent=4)
 
 
-class LlamaMetric:
+class LlamaMetrics:
     def __init__(self):
         self.llama = transformers.pipeline(
             'text-generation',

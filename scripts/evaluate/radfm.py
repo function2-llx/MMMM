@@ -58,7 +58,7 @@ def radfm_collate_fn(batch: list[dict]):
         else:
             image = torch.nn.functional.interpolate(
                 repeat(image, 'c h w d -> 1 c h w d'), size=(512, 512, target_d)
-            )
+            ).unsqueeze(0)
 
     return {
         'image': image,
