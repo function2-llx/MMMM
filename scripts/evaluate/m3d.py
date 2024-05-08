@@ -1,6 +1,7 @@
 from einops import repeat, reduce
 from PIL import Image
 import torch
+from tqdm import tqdm
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import torchvision.transforms as transforms
 
@@ -44,3 +45,35 @@ def m3d_collate_fn(batch: list[dict]):
         'question': batch[0]['question'],
         'answer': batch[0]['answer'],
     }
+
+
+def m3d_vl_evaluate(model, tokenizer, dataloader, metrics):
+    results = []
+
+    for sample in tqdm(dataloader):
+        language = tokenizer(
+            '<im_patch>' * 256 + ' ' + sample['question'],
+            return_tensors='pt',
+        )['input_ids'].to('cuda')
+        vision = sample['image'].to(device='cuda', dtype=torch.bfloat16)
+        
+        with torch.inference_mode():
+            prediction = tokenizer.decode(
+                model.generate(vision, language, max_new_tokens=256)[0],
+                skip_special_tokens=True,
+            ).strip()
+
+        results.append(
+            {
+                'question': sample['question'],
+                'answer': sample['answer'],
+                'prediction': prediction,
+                **metrics.compute(prediction, sample['answer']),
+            },
+        )
+
+        print(sample['question'])
+        print(sample['answer'])
+        print(prediction)
+
+    return results

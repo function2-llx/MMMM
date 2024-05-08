@@ -1,5 +1,7 @@
 from PIL import Image
+from einops import repeat
 import torch
+from tqdm import tqdm
 from transformers import AutoTokenizer, AutoConfig, CLIPImageProcessor, StoppingCriteria
 import sys
 
@@ -80,3 +82,69 @@ def llavamed_collate_fn(batch: list[dict]):
         'question': batch[0]['question'],
         'answer': batch[0]['answer'],
     }
+
+
+def llavamed_vl_evaluate(model, tokenizer, processor, image_token_len, dataloader, metrics):
+    sys.path.append('third-party/LLaVA-Med')
+    from llava.conversation import conv_templates
+
+    results = []
+
+    for sample in tqdm(dataloader):
+        question = sample['question']
+        if getattr(model.config, 'mm_use_im_start_end', False):
+            question = (
+                question
+                + '\n'
+                + '<im_start>'
+                + '<im_patch>' * image_token_len
+                + '<im_end>'
+            )
+        else:
+            question = question + '\n' + '<im_patch>' * image_token_len
+        conv = conv_templates['simple'].copy()
+        conv.append_message(conv.roles[0], question)
+        prompt = conv.get_prompt()
+        language = torch.as_tensor(tokenizer([prompt]).input_ids).to('cuda')
+        stopping_criteria = KeywordsStoppingCriteria(['###'], tokenizer, language)
+
+        vision = processor.preprocess(sample['image'], return_tensors='pt')[
+            'pixel_values'
+        ][0]
+        vision = repeat(vision, 'c h w -> 1 c h w').half().to('cuda')
+
+        with torch.inference_mode():
+            prediction = tokenizer.decode(
+                model.generate(
+                    language,
+                    images=vision,
+                    do_sample=True,
+                    temperature=0.7,
+                    stopping_criteria=[stopping_criteria],
+                    max_new_tokens=256,
+                )[0, language.shape[1] :],
+                skip_special_tokens=True,
+            )
+
+        try:
+            index = prediction.index(conv.sep)
+        except ValueError:
+            prediction += conv.sep
+            index = prediction.index(conv.sep)
+
+        prediction = prediction[:index].split('Assistant: ')[1].strip()
+
+        results.append(
+            {
+                'question': sample['question'],
+                'answer': sample['answer'],
+                'prediction': prediction,
+                **metrics.compute(prediction, sample['answer']),
+            },
+        )
+
+        print(sample['question'])
+        print(sample['answer'])
+        print(prediction)
+
+    return results

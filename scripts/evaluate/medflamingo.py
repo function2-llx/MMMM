@@ -1,5 +1,7 @@
 from PIL import Image
+from einops import repeat
 import torch
+from tqdm import tqdm
 
 
 def setup_medflamingo(checkpoint: str, tokenizer: str):
@@ -61,3 +63,47 @@ class FlamingoProcessor:
         vision_x = [self.vision_processor(im).unsqueeze(0) for im in images]
         vision_x = torch.cat(vision_x, dim=0)
         return vision_x
+
+
+def medflamingo_vl_evaluate(model, processor, dataloader, metrics):
+    results = []
+
+    for sample in tqdm(dataloader):
+        language = processor.encode_text(
+            'You are a helpful medical assistant. You are being provided with images and a question about the image, please answer the question. <image>Question:'
+            + sample['question']
+            + ' Answer:'
+        )
+        vision = processor.preprocess_images([sample['image']])
+        vision = repeat(vision, '1 c h w -> 1 1 1 c h w')
+        
+        with torch.inference_mode():
+            prediction = (
+                processor.tokenizer.decode(
+                    model.generate(
+                        vision_x=vision.to('cuda'),
+                        lang_x=language['input_ids'].to('cuda'),
+                        attention_mask=language['attention_mask'].to('cuda'),
+                        max_new_tokens=50,
+                    )[0]
+                )
+                .replace('<unk> ', '')
+                .split('Answer:')[1]
+                .strip()
+                .split('\n')[0]
+            )
+
+        results.append(
+            {
+                'question': sample['question'],
+                'answer': sample['answer'],
+                'prediction': prediction,
+                **metrics.compute(prediction, sample['answer']),
+            },
+        )
+
+        print(sample['question'])
+        print(sample['answer'])
+        print(prediction)
+
+    return results

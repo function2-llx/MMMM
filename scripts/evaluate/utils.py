@@ -59,21 +59,24 @@ class NLPMetrics:
         self.exact_match = evaluate.load('exact_match')
 
     def compute(self, prediction: str, reference: str):
+        prediction = prediction.lower()
+        reference = reference.lower()
+
         return {
             'bleu': (
                 self.bleu.compute(
-                    predictions=[prediction.lower()],
-                    references=[[reference.lower()]],
+                    predictions=[prediction],
+                    references=[[reference]],
                     max_order=1,
                 )['bleu']
                 if prediction.strip()
                 else 0.0
             ),
             'rouge': self.rouge.compute(
-                predictions=[prediction.lower()], references=[reference.lower()]
+                predictions=[prediction], references=[reference]
             )['rouge1'],
             'meteor': self.meteor.compute(
-                predictions=[prediction.lower()], references=[reference.lower()]
+                predictions=[prediction], references=[reference]
             )['meteor'],
             'bertscore': self.bertscore.compute(
                 predictions=[prediction],
@@ -81,7 +84,7 @@ class NLPMetrics:
                 model_type='microsoft/deberta-xlarge-mnli',
             )['f1'][0],
             'exact_match': self.exact_match.compute(
-                predictions=[prediction.lower()], references=[reference.lower()]
+                predictions=[prediction], references=[reference]
             )['exact_match'],
         }
 

@@ -4,6 +4,7 @@ import random
 import sys
 import torch
 from torchvision import transforms
+from tqdm import tqdm
 from transformers import LlamaTokenizer
 
 
@@ -69,3 +70,53 @@ def radfm_collate_fn(batch: list[dict]):
         'question': batch[0]['question'],
         'answer': batch[0]['answer'],
     }
+
+
+def radfm_vl_evaluate(model, tokenizer, dataloader, metrics):
+    results = []
+
+    for sample in tqdm(dataloader):
+        question_list = [False for _ in range(len(str(sample['question'])))]
+        question = ''
+        if random.random() < 0.5:
+            position = 0
+        else:
+            position = len(question_list) - 1
+        question_list[position] = True
+        for i in range(len(question_list)):
+            if question_list[i]:
+                question += (
+                    '<image>'
+                    + ''.join([f'<image{i}>' for i in range(32)])
+                    + '</image>'
+                    + sample['question'][i]
+                )
+            else:
+                question += sample['question'][i]
+        language = tokenizer(
+            question,
+            return_tensors='pt',
+        )[
+            'input_ids'
+        ].to('cuda')
+        vision = sample['image'].to('cuda')
+
+        with torch.inference_mode():
+            prediction = tokenizer.decode(
+                model.generate(language, vision)[0], skip_special_tokens=True
+            ).strip()
+
+        results.append(
+            {
+                'question': sample['question'],
+                'answer': sample['answer'],
+                'prediction': prediction,
+                **metrics.compute(prediction, sample['answer']),
+            },
+        )
+
+        print(sample['question'])
+        print(sample['answer'])
+        print(prediction)
+    
+    return results
