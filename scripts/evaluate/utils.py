@@ -1,9 +1,11 @@
+import os
 import evaluate
 import json
 import numpy as np
 import pandas as pd
 import random
 import torch
+from tqdm import tqdm
 import transformers
 
 
@@ -101,7 +103,7 @@ class NLPMetrics:
         }
 
         for _, row in df.iterrows():
-            score = self.compute(row['prediction'], row['answer'])
+            score = self.compute(row['prediction'] if pd.notna(row['prediction']) else '', row['answer'])
             for key in results.keys():
                 results[key].append(score[key])
 
@@ -111,7 +113,7 @@ class NLPMetrics:
 
         df.to_csv(run + '.csv')
         with open(run + '.json', 'w') as f:
-            json.dump(summary, f)
+            json.dump(summary, f, indent=4)
 
 
 class LlamaMetric:
@@ -172,9 +174,12 @@ class LlamaMetric:
 
         df.to_csv(run + '.csv')
         with open(run + '.json', 'w') as f:
-            json.dump(summary, f)
+            json.dump(summary, f, indent=4)
 
 
 if __name__ == '__main__':
-    llama_metric = LlamaMetric()
-    llama_metric.process('results/vqa_VQA-RAD_m3d_zeroshot')
+    nlp_metrics = NLPMetrics()
+    for run in tqdm(os.listdir('results')):
+        if run.endswith('.csv'):
+            print(run)
+            nlp_metrics.process('results/' + run.replace('.csv', ''))
