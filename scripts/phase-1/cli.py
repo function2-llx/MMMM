@@ -1,7 +1,15 @@
+from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
 
 from lightning.pytorch.cli import LightningArgumentParser
+from lightning.pytorch.plugins import FSDPPrecision
+from lightning.pytorch.strategies import FSDPStrategy
 from peft import LoraConfig, get_peft_model
+from peft.tuners import lora
+from torch import nn
+from torch.distributed.fsdp import FullyShardedDataParallel
+from torch.nn import Module
 
 from luolib.lightning.cli import LightningCLI, OptimDict as OptimDictBase
 from luolib.lightning.trainer import PeftTrainer
@@ -18,6 +26,43 @@ class OptimDict(OptimDictBase):
     vlm: OptimConf
     sam: OptimConf
     new: OptimConf
+
+def wrap_lora_linear(model: nn.Module, fsdp_fn: Callable[[nn.Module], FullyShardedDataParallel]) -> FullyShardedDataParallel:
+    vis = set()
+    def dfs_wrap(module: nn.Module):
+        if module in vis:
+            return
+        vis.add(module)
+        if isinstance(module, lora.Linear):
+            # only wrap the base layer for LoRA Linear
+            module.base_layer = fsdp_fn(module.base_layer)
+            return
+        for child in module.children():
+            dfs_wrap(child)
+    dfs_wrap(model)
+    model = fsdp_fn(model)
+    return model
+
+class MyFSDPStrategy(FSDPStrategy):
+    def _setup_model(self, model: Module):
+        model = wrap_lora_linear(
+            model,
+            partial(
+                FullyShardedDataParallel,
+                cpu_offload=self.cpu_offload,
+                mixed_precision=self.mixed_precision_config,
+                sharding_strategy=self.sharding_strategy,
+                device_id=self.root_device.index,
+                **self.kwargs,
+            ),
+        )
+        return super()._setup_model(model)
+
+def _FSDP_convert_module(self: FSDPPrecision, module: nn.Module) -> nn.Module:
+    # fix https://github.com/Lightning-AI/pytorch-lightning/issues/19721, humor
+    return module.to(self._desired_input_dtype)
+
+FSDPPrecision.convert_module = _FSDP_convert_module
 
 class CLI(LightningCLI):
     model: MMMMForCausalLM

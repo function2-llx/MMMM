@@ -1,6 +1,6 @@
 """largely copy from llama and adapt for cogvlm"""
+from typing import Any, Dict, List, Literal, Optional, TYPE_CHECKING, Tuple, Union
 import warnings
-from typing import TYPE_CHECKING, Optional, Tuple, List, Union, Literal, Dict, Any
 
 import math
 import torch
