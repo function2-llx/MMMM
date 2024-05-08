@@ -4,8 +4,10 @@ from pathlib import Path
 from typing import Any, Literal
 
 import einops
+import einops.layers.torch as elt
 from jsonargparse import class_from_function
 from lightning_utilities.core.rank_zero import rank_prefixed_message
+from peft.tuners import lora
 from scipy.optimize import linear_sum_assignment
 import torch
 from torch import Tensor, nn
@@ -69,8 +71,16 @@ class SlidingWindow:
 MATCH_NEGATIVE = -1
 MATCH_UNCERTAIN = -2
 
+EPS = 1e-8
+
 def _optional_index(x: torch.Tensor | None, index: ...):
     return None if x is None else x[index]
+
+def _dice_metric(x: torch.BoolTensor, y: torch.BoolTensor):
+    reduce = elt.Reduce('c ... -> c', 'sum')
+    nominator = 2 * reduce(x & y)
+    denominator = reduce(x) + reduce(y)
+    return nominator / (denominator + EPS)
 
 class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
     tokenizer: MMMMTokenizer
@@ -133,11 +143,20 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         self.disc_head = nn.Linear(self.sam_model.mask_embed_dim, 1)
         self.model.config.lora_lang = lora_lang
         self.model.tokenizer = tokenizer
-        # call self.eval() to make the `from_pretrained` interface consistent,
-        # since `resize_token_embeddings` will create new modules without preserving original attributes.
-        # although we're not in `from_pretrained anymore`? whatever
-        self.eval()
+        self.sam_model.requires_grad_(False)
+        self.vg_proj.requires_grad_(False)
+        self.box_head.requires_grad_(False)
+        self.disc_head.requires_grad_(False)
+        self.check_grad = False
+        self.train()
+        for module in self.modules():
+            if isinstance(module, lora.Linear):
+                module.base_layer.eval()
         return self
+
+    @property
+    def dice_loss_weight(self):
+        return self.mask_loss.lambda_dice
 
     def _init_weights(self, module):
         """Let's happily do nothing (necessary to make SAM pre-trained weights survive)"""
@@ -237,12 +256,8 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
 
     def on_fit_start(self) -> None:
         super().on_fit_start()
-        # model.train() will not be called anymore in fit loop: https://github.com/Lightning-AI/pytorch-lightning/pull/18951
-        # and from_pretrained call .eval() by default https://github.com/huggingface/transformers/blob/v4.38.2/src/transformers/modeling_utils.py#L3523-L3524
-        # also see: https://huggingface.co/docs/transformers/v4.38.2/en/main_classes/model#transformers.PreTrainedModel (search "model.eval()")
-        self.train()
-        # self.model will be adapted by LoRA; FIXME: but what about LoRA?
-        self.model.eval()
+        # TODO: replace with checkpoint wrapper
+        # https://github.com/pytorch/pytorch/blob/main/torch/distributed/algorithms/_checkpoint/checkpoint_wrapper.py
         self.gradient_checkpointing_enable({'use_reentrant': False})
 
     def training_step(self, batch: Batch, *args, **kwargs):
@@ -257,6 +272,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             return_dict=True,
             output_hidden_states=True,
         )
+        return vlm_output.loss
         vg_output = self.visual_grounding(
             # shift as suggested by GLaMM: https://github.com/mbzuai-oryx/groundingLMM/issues/16
             input_ids[:, 1:],
@@ -292,7 +308,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
                 **vg_log_dict,
                 **token_log_dict,
             },
-            # the logging keys are inconsistent, setting sync_dist=True will make DDP hang
+            # the logging keys can be inconsistent, setting sync_dist=True can make DDP hang
             # sync_dist=True,
         )
         return loss
@@ -305,14 +321,14 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
     @torch.no_grad()
     def _match_instances(
         self,
-        masks_logits: torch.Tensor,
+        masks_pred: torch.BoolTensor,
         boxes_reg: torch.Tensor,
         disc_logit: torch.Tensor,
         masks_label: torch.BoolTensor | None,
         boxes_label: torch.Tensor,
         num_uncertain: int,
     ) -> torch.LongTensor:
-        num_queries = masks_logits.shape[0]
+        num_queries = masks_pred.shape[0]
         num_pos = boxes_label.shape[0]
         num_uncertain = min(max(num_queries - num_pos, 0), num_uncertain)
         num_neg = max(num_queries - num_pos - num_uncertain, 0)
@@ -335,29 +351,13 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             dim=1,
         )
         if masks_label is None:
-            mask_cost_pos = box_cost.new_zeros(num_queries, num_pos)
+            dice_cost = box_cost.new_zeros(num_queries, num_pos)
         else:
-            mask_cost_pos = pairwise_forward(
-                self.mask_loss, masks_logits[:, None], masks_label[:, None], reduce_batch=False,
-            )
-        if self.neg_mask_loss:
-            mask_cost_neg = pairwise_forward(
-                self.mask_loss,
-                masks_logits[:, None],
-                masks_logits.new_zeros(1, 1, masks_logits.shape[1:]),
-                reduce_batch=False,
-            )
-        else:
-            mask_cost_neg = mask_cost_pos.new_zeros(num_queries, 1)
-        mask_cost = torch.cat(
-            [
-                mask_cost_pos,
-                einops.repeat(mask_cost_neg, 'n 1 -> n m', m=num_neg),
-                mask_cost_pos.new_zeros(num_queries, num_uncertain),
-            ],
-            dim=1,
+            dice_cost = 1 - pairwise_forward(_dice_metric, masks_pred, masks_label)
+        dice_cost = torch.cat(
+            [dice_cost, dice_cost.new_zeros(num_queries, num_neg + num_uncertain)], dim=1,
         )
-        cost = mask_cost + box_cost + disc_cost
+        cost = self.dice_loss_weight * dice_cost + box_cost + disc_cost
         row, col = linear_sum_assignment(cost.float().cpu().numpy())
         match = torch.empty(num_queries, dtype=torch.int64)
         match[row] = torch.from_numpy(col)
@@ -465,10 +465,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         loss = zero_loss(masks_logits_ds, boxes_reg, disc_logit)
         semantic_dict = {}
         instance_dict = {}
-
         if num_targets > 0:
-            sem_masks = sem_masks[:num_targets]
-            sem_boxes = sem_boxes[:num_targets]
             index_offsets = index_offsets[:num_targets]
             semantic = semantic[:num_targets]
             num_uncertain = num_uncertain[:num_targets]
@@ -501,13 +498,14 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             if masks_label is None:
                 masks_label_ds = None
             else:
-                with torch.no_grad():
-                    masks_label_ds = nnf.interpolate(
-                        masks_label[None].byte(), masks_logits_ds.shape[2:], mode='nearest-exact',
-                    )[0].bool()
+                masks_label_ds = nnf.interpolate(
+                    masks_label[None].byte(), masks_logits_ds.shape[2:], mode='nearest-exact',
+                )[0].bool()
+            with torch.no_grad():
+                masks_pred_ds: torch.BoolTensor = masks_logits_ds[:, 1:].sigmoid().round().bool()  # type: ignore
+
             num_uncertain_list = num_uncertain.tolist()
             _loss_list = []
-            index_offsets = index_offsets[:num_targets]
             for i in range(num_targets):
                 if semantic[i] or (_num_uncertain := num_uncertain_list[i]) == -1:
                     # we know that the target presents on the image, but no localized information available, skip
@@ -518,7 +516,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
                 label_slice = slice(*index_offsets[i])
                 _boxes_label = boxes_label[label_slice]
                 match = self._match_instances(
-                    masks_logits_ds[i, 1:],
+                    masks_pred_ds[i],
                     _boxes_reg,
                     _disc_logit,
                     None if masks_label_ds is None else masks_label_ds[label_slice],

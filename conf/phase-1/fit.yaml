@@ -8,15 +8,8 @@ trainer:
   gradient_clip_val: 1
   gradient_clip_algorithm: norm
   save_embedding_layers: true
-  strategy: deepspeed_stage_3
-#  strategy:
-#    class_path: lightning.pytorch.strategies.DDPStrategy
-#    init_args:
-#      broadcast_buffers: false
-#      gradient_as_bucket_view: true
-#      timeout: 0:3:0
-#     `static_graph` seems to make DDP with gradient accumulation crash
-#      static_graph: true
+  strategy:
+    class_path: MyFSDPStrategy
   callbacks:
   - class_path: luolib.lightning.callbacks.ModelCheckpoint
     init_args:
