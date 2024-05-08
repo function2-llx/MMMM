@@ -52,7 +52,7 @@ def dump_results(results: list[dict], output_dir, task: str, dataset: str, model
         )
 
 
-class NLPMetrics:
+class CommonMetrics:
     def __init__(self):
         self.bleu = evaluate.load('bleu')
         self.rouge = evaluate.load('rouge')
@@ -181,7 +181,7 @@ class LlamaMetric:
 
 
 if __name__ == '__main__':
-    nlp_metrics = NLPMetrics()
+    nlp_metrics = CommonMetrics()
     for run in tqdm(os.listdir('results')):
         if run.endswith('.csv'):
             print(run)

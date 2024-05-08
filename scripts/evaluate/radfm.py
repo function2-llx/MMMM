@@ -1,6 +1,5 @@
-from einops import repeat
+from einops import rearrange, repeat
 from PIL import Image
-import random
 import sys
 import torch
 from torchvision import transforms
@@ -34,12 +33,12 @@ def setup_radfm(checkpoint: str, tokenizer: str):
 
 def radfm_collate_fn(batch: list[dict]):
     assert len(batch) == 1
+
     if batch[0]['image'].endswith('.pt'):
-        image = torch.load(batch[0]['image']).float()
+        image = rearrange(torch.load(batch[0]['image']).float(), 'c d h w -> c h w d')
         image = (image - image.min()) / (image.max() - image.min())
     else:
-        transform = transforms.Compose([transforms.ToTensor()]
-        )
+        transform = transforms.Compose([transforms.ToTensor()])
         image = transform(Image.open(batch[0]['image']).convert('RGB'))
     target_d, max_d = 4, 4
     if len(image.shape) == 4:
@@ -53,7 +52,7 @@ def radfm_collate_fn(batch: list[dict]):
         ).unsqueeze(0)
     else:
         image = torch.nn.functional.interpolate(
-            repeat(image, 'c h w d -> 1 c h w d'), size=(512, 512, target_d)
+            repeat(image, '1 h w d -> 1 3 h w d'), size=(512, 512, target_d)
         ).unsqueeze(0)
 
     return {

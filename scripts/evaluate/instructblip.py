@@ -33,7 +33,7 @@ def instructblip_vl_evaluate(model, processor, dataloader, metrics):
     results = []
 
     for sample in tqdm(dataloader):
-        inputs = processor(sample['question'], sample['image'], return_tensors='pt').to('cuda')
+        inputs = processor(images=sample['image'], text=sample['question'], return_tensors='pt').to('cuda')
 
         with torch.inference_mode():
             prediction = processor.decode(
@@ -56,3 +56,5 @@ def instructblip_vl_evaluate(model, processor, dataloader, metrics):
         print(sample['question'])
         print(sample['answer'])
         print(prediction)
+
+    return results

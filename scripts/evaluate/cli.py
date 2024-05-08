@@ -17,7 +17,7 @@ from radfm import radfm_collate_fn, setup_radfm, radfm_vl_evaluate
 from utils import (
     dump_results,
     setup_seed,
-    NLPMetrics,
+    CommonMetrics,
 )
 
 
@@ -61,7 +61,7 @@ class Evaluator:
         self.num_workers = num_workers
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.metrics = NLPMetrics()
+        self.metrics = CommonMetrics()
         setup_seed(seed)
 
     def radfm(self):
