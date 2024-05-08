@@ -8,13 +8,13 @@ trainer:
   gradient_clip_val: 1
   gradient_clip_algorithm: norm
   save_embedding_layers: true
-#  strategy: deepspeed_stage_3
-  strategy:
-    class_path: lightning.pytorch.strategies.DDPStrategy
-    init_args:
-      broadcast_buffers: false
-      gradient_as_bucket_view: true
-#      timeout: 0:10:0
+  strategy: deepspeed_stage_3
+#  strategy:
+#    class_path: lightning.pytorch.strategies.DDPStrategy
+#    init_args:
+#      broadcast_buffers: false
+#      gradient_as_bucket_view: true
+#      timeout: 0:3:0
 #     `static_graph` seems to make DDP with gradient accumulation crash
 #      static_graph: true
   callbacks:
@@ -27,7 +27,7 @@ trainer:
       verbose: true
 optim:
   vlm:
-    prefix: model
+    prefix: [model, lm_head]
     optimizer:
       class_path: torch.optim.AdamW
 #      class_path: deepspeed.ops.adam.FusedAdam
