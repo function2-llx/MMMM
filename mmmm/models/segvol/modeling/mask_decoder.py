@@ -39,8 +39,6 @@ class MaskDecoder(nn.Module):
         transformer: TwoWayTransformer,
         num_instances: int = 3,
         activation: Type[nn.Module] = nn.GELU,
-        iou_head_depth: int = 3,
-        iou_head_hidden_dim: int = 256,
         text_sim: bool = False,
     ) -> None:
         """
