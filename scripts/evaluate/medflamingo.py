@@ -84,7 +84,7 @@ def medflamingo_vl_evaluate(model, processor, dataloader):
                         vision_x=vision.to('cuda'),
                         lang_x=language['input_ids'].to('cuda'),
                         attention_mask=language['attention_mask'].to('cuda'),
-                        max_new_tokens=50,
+                        max_new_tokens=512,
                     )[0]
                 )
                 .replace('<unk> ', '')

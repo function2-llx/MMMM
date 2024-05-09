@@ -16,7 +16,7 @@ from transformers import BertTokenizer
 
 
 from mmmm.data.defs import PROCESSED_VL_DATA_ROOT
-from mmmm.data.dataset.vl import REPORT_PROMPTS, FINDINGS_PROMPT, COMPLETE_REFERRINGS
+from mmmm.data.dataset.vl import REPORT_PROMPTS, FINDINGS_PROMPTS, COMPLETE_REFERRINGS
 
 
 LLAMA3_PATH = '/data/llama3/Meta-Llama-3-8B-Instruct-hf'
