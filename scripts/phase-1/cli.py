@@ -1,5 +1,4 @@
 from collections.abc import Callable
-from dataclasses import dataclass
 from functools import partial
 
 from lightning.pytorch.cli import LightningArgumentParser
@@ -11,21 +10,14 @@ from torch import nn
 from torch.distributed.fsdp import FullyShardedDataParallel
 from torch.nn import Module
 
-from luolib.lightning.cli import LightningCLI, OptimDict as OptimDictBase
+from luolib.lightning.cli import LightningCLI
 from luolib.lightning.trainer import PeftTrainer
-from luolib.lightning.utils import OptimConf
 
 from mmmm.data import MMMMDataModule
 from mmmm.models import MMMMForCausalLM
 from mmmm.models.loss import DiceFocalLoss
 from mmmm.tokenizer import MMMMTokenizer
 from mmmm.utils import get_lora_modules_default
-
-@dataclass
-class OptimDict(OptimDictBase):
-    vlm: OptimConf
-    sam: OptimConf
-    new: OptimConf
 
 def wrap_lora_linear(model: nn.Module, fsdp_fn: Callable[[nn.Module], FullyShardedDataParallel]) -> FullyShardedDataParallel:
     vis = set()
@@ -91,7 +83,6 @@ def main():
         model_class=MMMMForCausalLM,
         datamodule_class=MMMMDataModule,
         trainer_class=PeftTrainer,
-        optim_dict_class=OptimDict,
     )
 
 if __name__ == '__main__':
