@@ -174,7 +174,7 @@ class VLTransform(mt.RandomizableTransform):
                     f"Findings: {findings}\nImpression: {impression}",
                 ),
             )
-        elif findings := data.get('findings'):
+        elif findings:
             conversation.append(
                 ConvTurn(
                     self.R.choice(FINDINGS_PROMPTS).format(referring),
