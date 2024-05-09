@@ -143,10 +143,6 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         self.disc_head = nn.Linear(self.sam_model.mask_embed_dim, 1)
         self.model.config.lora_lang = lora_lang
         self.model.tokenizer = tokenizer
-        self.sam_model.requires_grad_(False)
-        self.vg_proj.requires_grad_(False)
-        self.box_head.requires_grad_(False)
-        self.disc_head.requires_grad_(False)
         self.check_grad = False
         return self
 
@@ -272,7 +268,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             output_hidden_states=True,
         )
         self.log('train/lm_loss', vlm_output.loss)
-        return vlm_output.loss
+        # return vlm_output.loss
         vg_output = self.visual_grounding(
             # shift as suggested by GLaMM: https://github.com/mbzuai-oryx/groundingLMM/issues/16
             input_ids[:, 1:],
@@ -312,11 +308,6 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             # sync_dist=True,
         )
         return loss
-
-    def backward(self, loss: Tensor, *args: Any, **kwargs: Any) -> None:
-        print(rank_prefixed_message(f'on before backward {self.global_step}', self.global_rank))
-        super().backward(loss, *args, **kwargs)
-        print(rank_prefixed_message(f'on after backward {self.global_step}', self.global_rank))
 
     @torch.no_grad()
     def _match_instances(
@@ -363,7 +354,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         match[row] = torch.from_numpy(col)
         match[match >= num_pos] = MATCH_NEGATIVE
         match[match >= num_pos + num_neg] = MATCH_UNCERTAIN
-        return match
+        return match.to(self.device)
 
     def box_loss(
         self, input: torch.Tensor, target: torch.Tensor, reduce_batch: bool = True, return_dict: bool = False,
@@ -506,7 +497,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
 
             num_uncertain_list = num_uncertain.tolist()
             _loss_list = []
-            match = torch.empty(masks_logits.shape[:2], dtype=torch.long)
+            # match = torch.empty(masks_logits.shape[:2], dtype=torch.long)
             for i in range(num_targets):
                 if semantic[i] or (_num_uncertain := num_uncertain_list[i]) == -1:
                     # we know that the target presents on the image, but no localized information available, skip
@@ -516,14 +507,16 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
                 _disc_logit = disc_logit[i]
                 label_slice = slice(*index_offsets[i])
                 _boxes_label = boxes_label[label_slice]
-                match[i] = self._match_instances(
+                # match[i] = self._match_instances(
+                match = self._match_instances(
                     masks_pred_ds[i],
                     _boxes_reg,
                     _disc_logit,
                     None if masks_label_ds is None else masks_label_ds[label_slice],
                     _boxes_label,
                     _num_uncertain,
-                ) + index_offsets[i, 0]
+                )
+                # ) + index_offsets[i, 0]
                 match_pos_mask: torch.BoolTensor = match >= 0  # type: ignore
                 match_pos = match[match_pos_mask]
                 match_neg_mask: torch.BoolTensor = match == MATCH_NEGATIVE  # type: ignore
