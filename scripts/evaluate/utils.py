@@ -6,8 +6,8 @@ import evaluate
 import json
 import numpy as np
 import pandas as pd
+from radgraph import F1RadGraph
 import random
-import re
 import torch
 from torch.utils.data import Dataset
 from tqdm import tqdm
@@ -264,6 +264,7 @@ class CXRMetrics:
 
     def __init__(self):
         self.setup_chexbert()
+        self.radgraph = F1RadGraph(reward_level='partial', cuda=0, model_type='radgraph')
 
     def compute_chexbert(self, prediction: str, reference: str):
         sys.path.append('third-party/CXR-Report-Metric/CXRMetric/')
@@ -295,91 +296,50 @@ class CXRMetrics:
 
         return ((prediction * reference).sum() / (torch.linalg.norm(prediction) * torch.linalg.norm(reference))).item()
 
+    @staticmethod
+    def exact_entity_token_if_rel_exists_reward(hypothesis_annotation_list, reference_annotation_list):
+        candidates = []
+        for annotation_list in [hypothesis_annotation_list, reference_annotation_list]:
+            candidate = []
+            for entity in annotation_list["entities"].values():
+                if not entity["relations"]:
+                    candidate.append((entity["tokens"], entity["label"]))
+                if entity["relations"]:
+                    candidate.append((entity["tokens"], entity["label"], True))
+
+            candidate = set(candidate)
+            candidates.append(candidate)
+
+        hypothesis_relation_token_list, reference_relation_token_list = candidates
+
+        precision = (
+            sum([1 for x in hypothesis_relation_token_list if (x in reference_relation_token_list)])
+            / len(hypothesis_relation_token_list)
+            if len(hypothesis_relation_token_list) > 0
+            else 0.0
+        )
+        recall = (
+            sum([1 for x in reference_relation_token_list if (x in hypothesis_relation_token_list)])
+            / len(reference_relation_token_list)
+            if len(reference_relation_token_list) > 0
+            else 0.0
+        )
+        f1_score = (2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
+
+        return f1_score
 
     def compute_radgraph(self, prediction: str, reference: str):
-        pass
+        _, _, hyp_annotation_lists, ref_annotation_lists = self.radgraph(hyps=[prediction], refs=[reference])
+        return CXRMetrics.exact_entity_token_if_rel_exists_reward(hyp_annotation_lists[0], ref_annotation_lists[0])
+
     
     def compute(self, prediction: str, reference: str):
         return {
             'chexbert': self.compute_chexbert(prediction, reference),
+            'radgraph': self.compute_radgraph(prediction, reference),
         }
-    
-    @staticmethod
-    def preprocess_radgraph(run: Path):
-        sys.path.append('third-party/CXR-Report-Metric/CXRMetric/radgraph_inference')
-        from inference import get_entity
-
-        if os.path.exists(str(run) + '_gt_radgraph.json') and os.path.exists(str(run) + '_pred_radgraph.json'):
-            return
-        df = pd.read_csv(str(run) + '.csv')
-        gt = []
-        for i, row in df.iterrows():
-            sen = re.sub('(?<! )(?=[/,-,:,.,!?()])|(?<=[/,-,:,.,!?()])(?! )', r' ', row['answer']).split()
-            gt.append({
-                'doc_key': str(i),
-                'sentences': [sen],
-            })
-        with open(str(run) + '_gt_radgraph.in.json', 'w') as f:
-            json.dump(gt, f, indent=4)
-        pred = []
-        for i, row in df.iterrows():
-            sen = re.sub('(?<! )(?=[/,-,:,.,!?()])|(?<=[/,-,:,.,!?()])(?! )', r' ', row['prediction']).split()
-            pred.append({
-                'doc_key': str(i),
-                'sentences': [sen],
-            })
-        with open(str(run) + '_pred_radgraph.in.json', 'w') as f:
-            json.dump(pred, f, indent=4)
-
-        os.system(
-            f"allennlp predict {RADGRAPH_PATH} {str(run) + '_gt_radgraph.in.json'} \
-            --predictor dygie --include-package dygie \
-            --use-dataset-reader \
-            --output-file {str(run) + '_gt_radgraph.json'} \
-            --cuda-device 0"
-        )
-        os.system(
-            f"allennlp predict {RADGRAPH_PATH} {str(run) + '_pred_radgraph.in.json'} \
-            --predictor dygie --include-package dygie \
-            --use-dataset-reader \
-            --output-file {str(run) + '_pred_radgraph.json'} \
-            --cuda-device 0"
-        )
-
-        gt = {}
-        data = []
-        with open(str(run) + '_gt_radgraph.json', 'r') as f:
-            for line in f:
-                data.append(json.loads(line))
-
-        for sample in data:
-            item = {}
-
-            item['text'] = ' '.join(sample['sentences'][0])
-            ner = sample['predicted_ner'][0]
-            relations = sample['predicted_relations'][0]
-            sentences = sample['sentences'][0]
-            sample['entities'] = get_entity(ner, relations, sentences)
-            gt[sample['doc_key']] = item
-
-        pred = {}
-        data = []
-        with open(str(run) + '_pred_radgraph.json', 'r') as f:
-            for line in f:
-                data.append(json.loads(line))
-            
-        for sample in data:
-            item = {}
-
-            item['text'] = ' '.join(sample['sentences'][0])
-            ner = sample['predicted_ner'][0]
-            relations = sample['predicted_relations'][0]
-            sentences = sample['sentences'][0]
-            sample['entities'] = get_entity(ner, relations, sentences)
-            pred[sample['doc_key']] = item
 
     def process(self, run: Path):
-        # self.preprocess_radgraph(run)
         df = pd.read_csv(str(run) + '.csv')
         if os.path.exists(str(run) + '.json'):
             with open(str(run) + '.json', 'r') as f:
@@ -389,6 +349,7 @@ class CXRMetrics:
 
         results = {
             'chexbert': [],
+            'radgraph': [],
         }
 
         for _, row in tqdm(df.iterrows()):
