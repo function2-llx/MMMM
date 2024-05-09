@@ -148,10 +148,6 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         self.box_head.requires_grad_(False)
         self.disc_head.requires_grad_(False)
         self.check_grad = False
-        self.train()
-        for module in self.modules():
-            if isinstance(module, lora.Linear):
-                module.base_layer.eval()
         return self
 
     @property
@@ -259,6 +255,9 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         # TODO: replace with checkpoint wrapper
         # https://github.com/pytorch/pytorch/blob/main/torch/distributed/algorithms/_checkpoint/checkpoint_wrapper.py
         self.gradient_checkpointing_enable({'use_reentrant': False})
+        # NOTE: there may be some code setting lora.Linear.base_layer.eval(),
+        #  however, let's keep it "training" to make DeepSpeed work, since it is just a linear layer
+        #  and is not affected by the mode
 
     def training_step(self, batch: Batch, *args, **kwargs):
         vlm_inputs = batch['vlm_inputs']
