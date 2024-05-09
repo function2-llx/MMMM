@@ -21,6 +21,7 @@ from mmmm.data.dataset.vl import REPORT_PROMPTS, FINDINGS_PROMPT, COMPLETE_REFER
 
 LLAMA3_PATH = '/data/llama3/Meta-Llama-3-8B-Instruct-hf'
 CHEXBERT_PATH = '/data/chexbert/chexbert.pth'
+RADGRAPH_PATH = '/data/MMMM/RadGraph/models/model_checkpoint'
 
 
 LLAMA_SYSTEM_PROMPT = '''
@@ -305,8 +306,78 @@ class CXRMetrics:
     
     @staticmethod
     def preprocess_radgraph(run: Path):
-        pass
-    
+        sys.path.append('third-party/CXR-Report-Metric/CXRMetric/radgraph_inference')
+        from inference import get_entity
+
+        if os.path.exists(str(run) + '_gt_radgraph.json') and os.path.exists(str(run) + '_pred_radgraph.json'):
+            return
+        df = pd.read_csv(str(run) + '.csv')
+        gt = []
+        for i, row in df.iterrows():
+            sen = re.sub('(?<! )(?=[/,-,:,.,!?()])|(?<=[/,-,:,.,!?()])(?! )', r' ', row['answer']).split()
+            gt.append({
+                'doc_key': str(i),
+                'sentences': [sen],
+            })
+        with open(str(run) + '_gt_radgraph.in.json', 'w') as f:
+            json.dump(gt, f, indent=4)
+        pred = []
+        for i, row in df.iterrows():
+            sen = re.sub('(?<! )(?=[/,-,:,.,!?()])|(?<=[/,-,:,.,!?()])(?! )', r' ', row['prediction']).split()
+            pred.append({
+                'doc_key': str(i),
+                'sentences': [sen],
+            })
+        with open(str(run) + '_pred_radgraph.in.json', 'w') as f:
+            json.dump(pred, f, indent=4)
+
+        os.system(
+            f"allennlp predict {RADGRAPH_PATH} {str(run) + '_gt_radgraph.in.json'} \
+            --predictor dygie --include-package dygie \
+            --use-dataset-reader \
+            --output-file {str(run) + '_gt_radgraph.json'} \
+            --cuda-device 0"
+        )
+        os.system(
+            f"allennlp predict {RADGRAPH_PATH} {str(run) + '_pred_radgraph.in.json'} \
+            --predictor dygie --include-package dygie \
+            --use-dataset-reader \
+            --output-file {str(run) + '_pred_radgraph.json'} \
+            --cuda-device 0"
+        )
+
+        gt = {}
+        data = []
+        with open(str(run) + '_gt_radgraph.json', 'r') as f:
+            for line in f:
+                data.append(json.loads(line))
+
+        for sample in data:
+            item = {}
+
+            item['text'] = ' '.join(sample['sentences'][0])
+            ner = sample['predicted_ner'][0]
+            relations = sample['predicted_relations'][0]
+            sentences = sample['sentences'][0]
+            sample['entities'] = get_entity(ner, relations, sentences)
+            gt[sample['doc_key']] = item
+
+        pred = {}
+        data = []
+        with open(str(run) + '_pred_radgraph.json', 'r') as f:
+            for line in f:
+                data.append(json.loads(line))
+            
+        for sample in data:
+            item = {}
+
+            item['text'] = ' '.join(sample['sentences'][0])
+            ner = sample['predicted_ner'][0]
+            relations = sample['predicted_relations'][0]
+            sentences = sample['sentences'][0]
+            sample['entities'] = get_entity(ner, relations, sentences)
+            pred[sample['doc_key']] = item
+
     def process(self, run: Path):
         # self.preprocess_radgraph(run)
         df = pd.read_csv(str(run) + '.csv')
