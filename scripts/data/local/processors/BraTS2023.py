@@ -1,6 +1,6 @@
 import torch
 
-from ._base import DataPoint, DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor, MultiClassDataPoint
+from ._base import DataPoint, DefaultImageLoaderMixin, DefaultMaskLoaderMixin, MultiClassDataPoint, Processor
 
 class BraTS2023SegmentationProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor):
     orientation = 'SRA'
@@ -9,8 +9,8 @@ class BraTS2023SegmentationProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderM
     def output_name(self):
         return f"BraTS2023-{self.name.split('-')[-1]}"
 
-    def load_masks(self, data_point: DataPoint) -> tuple[torch.BoolTensor, list[str]]:
-        masks, targets = super().load_masks(data_point)
+    def load_masks(self, data_point: MultiClassDataPoint, *args, **kwargs):
+        targets, masks = super().load_masks(data_point, *args, **kwargs)
         mask_map = {target: mask for mask, target in zip(masks, targets)}
         masks = torch.stack([
             mask_map['necrotic tumor core'],
@@ -18,7 +18,7 @@ class BraTS2023SegmentationProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderM
             mask_map['necrotic tumor core'] | mask_map['enhancing tumor'],
         ])
         targets = ['necrotic tumor core', 'peritumoral edema', 'glioma']
-        return masks, targets
+        return targets, masks
 
     def get_data_points(self) -> list[DataPoint]:
         modality_map = {
@@ -40,15 +40,17 @@ class BraTS2023SegmentationProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderM
             label_path = subject_dir / f'{key}-seg.nii.gz'
             if not label_path.exists():
                 continue
-            ret.append(MultiClassDataPoint(
-                key=key,
-                images={
-                    modality: subject_dir / f'{key}-{modality_suffix}.nii.gz'
-                    for modality_suffix, modality in modality_map.items()
-                },
-                label=label_path,
-                class_mapping=class_mapping,
-            ))
+            ret.append(
+                MultiClassDataPoint(
+                    key=key,
+                    images={
+                        modality: subject_dir / f'{key}-{modality_suffix}.nii.gz'
+                        for modality_suffix, modality in modality_map.items()
+                    },
+                    label=label_path,
+                    class_mapping=class_mapping,
+                ),
+            )
         return ret
 
 class BraTS2023GLIProcessor(BraTS2023SegmentationProcessor):

@@ -3,6 +3,7 @@ from ._base import DefaultMaskLoaderMixin, DefaultImageLoaderMixin, MultiLabelMu
 class ISLES22Processor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor):
     name = 'ISLES22'
     orientation = 'SRA'
+    semantic_targets = {'stroke lesion'}
 
     @property
     def dataset_root(self):

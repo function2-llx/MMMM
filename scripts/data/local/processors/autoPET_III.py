@@ -3,7 +3,7 @@ from ._base import DefaultImageLoaderMixin, DefaultMaskLoaderMixin, MultiLabelMu
 class AutoPETIIIProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor):
     name = 'autoPET-III'
     orientation = 'SRA'
-    bbox_ignore_targets = ['tumor']
+    semantic_targets = ['tumor']
 
     @property
     def dataset_root(self):

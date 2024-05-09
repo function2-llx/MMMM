@@ -8,7 +8,7 @@ from monai.transforms import apply_transform
 
 from mmmm.tokenizer import MMMMTokenizer
 from ..defs import split_t
-from .seg import SegTransConf, get_seg_data_list, get_seg_transform
+from .local import LocalTransConf, get_local_data_list, get_local_transform
 from .vl import VLTransConf, VLTransform, get_vl_data_list
 
 @dataclass(kw_only=True)
@@ -18,13 +18,13 @@ class DatasetSpec:
         weight: scale factor of the dataset weight
     """
     name: str
-    type: Literal['seg', 'vl']
+    type: Literal['local', 'vl']
     weight: float = 1.
 
     def get_data_list(self, split: Literal['train', 'validate', 'test']) -> list:
         match self.type:
-            case 'seg':
-                return get_seg_data_list(self.name, split)
+            case 'local':
+                return get_local_data_list(self.name, split)
             case 'vl':
                 return get_vl_data_list(self.name, split)
             case _:
@@ -36,11 +36,11 @@ def _is_power_of_2(x: int):
 @dataclass(kw_only=True)
 class DatasetConf:
     datasets: list[DatasetSpec]
-    base_vit_patch_size_z: int = 16
-    vit_patch_size_xy: int = 16
-    pool_size_xy: int = 1
-    base_pool_size_z: int = 1
-    seg_trans: SegTransConf
+    base_vit_patch_size_z: int
+    vit_patch_size_xy: int
+    pool_size_xy: int
+    base_pool_size_z: int
+    seg_trans: LocalTransConf
     vl_trans: VLTransConf
     max_seq_len: int | None = None
 
@@ -67,7 +67,7 @@ class MMMMDataset(Dataset):
             for dataset in conf.datasets
         ]
         # NOTE: use attributes instead of storing in a dict to make MONAI's set_rnd work
-        self.seg_transform = get_seg_transform(conf, tokenizer, False)
+        self.local_transform = get_local_transform(conf, tokenizer, False)
         self.vl_transform = VLTransform(conf, tokenizer, False)
 
     @property

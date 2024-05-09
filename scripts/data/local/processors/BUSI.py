@@ -1,15 +1,26 @@
+from pathlib import Path
+
 import einops
 import torch
 
+from monai.data import MetaTensor
 from ._base import DataPoint, DefaultMaskLoaderMixin, MultiLabelMultiFileDataPoint, NaturalImageLoaderMixin, Processor
 
 class BUSIProcessor(NaturalImageLoaderMixin, DefaultMaskLoaderMixin, Processor):
     name = 'BUSI'
     mask_dtype = torch.bool
+    assert_gray_scale = False
 
-    def load_masks(self, data_point: DataPoint) -> tuple[torch.BoolTensor, list[str]]:
-        masks, targets = super().load_masks(data_point)
-        return einops.reduce(masks, 'c 1 h w -> 1 1 h w', 'any'), ['breast cancer']
+    def mask_loader(self, path: Path) -> MetaTensor:
+        mask = super().mask_loader(path)
+        if mask.shape[0] in (2, 4):
+            # handle the alpha channel
+            assert mask[-1].all() or not mask[-1].any()
+            mask = mask[:-1]
+        assert mask.shape[0] in (1, 3)
+        for i in range(1, mask.shape[0]):
+            assert (mask[0] == mask[i]).all()
+        return mask[0:1]
 
     def get_data_points(self) -> list[DataPoint]:
         ret = []

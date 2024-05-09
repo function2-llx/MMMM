@@ -15,9 +15,9 @@ from mmmm.utils import get_lora_modules_default
 
 @dataclass
 class OptimDict(OptimDictBase):
+    vlm: OptimConf
     sam: OptimConf
-    seg_proj: OptimConf
-    default: OptimConf
+    new: OptimConf
 
 class CLI(LightningCLI):
     model: MMMMForCausalLM

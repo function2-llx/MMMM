@@ -8,7 +8,7 @@ dependencies:
 - python=3.11
 - numpy
 - scikit-learn
-- pytorch::pytorch=2.2.2
+- pytorch::pytorch=2.3
 - pytorch::pytorch-cuda=12.1
 - pytorch::torchvision
 - ocl-icd-system  # https://github.com/conda-forge/openvino-feedstock/pull/73
@@ -22,6 +22,7 @@ dependencies:
 - wandb
 - cytoolz
 - llvm-openmp<16  # https://github.com/pytorch/pytorch/issues/99625
+- ninja  # to load C++ extensions
 - pandas
 - pyarrow  # https://github.com/pandas-dev/pandas/issues/54466
 - openpyxl
@@ -34,8 +35,9 @@ dependencies:
 - pip:
   - jsonargparse[signatures, omegaconf]
   - mashumaro[orjson]
-  - pynrrd
 # comment out since we do not need bitsandbytes currently, and it can cause trouble: https://github.com/huggingface/peft/issues/1665
 #  - bitsandbytes  # bitsandbytes plays strangely with conda, it still depends on cudatoolkit=11.8
   - xformers -i https://download.pytorch.org/whl/cu121
-#  - pylidc  # for LIDC data
+  - deepspeed
+  - pynrrd
+  - pylidc  # for LIDC data

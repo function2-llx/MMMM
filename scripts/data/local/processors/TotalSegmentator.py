@@ -27,7 +27,7 @@ class TotalSegmentatorProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin,
     def get_orientation(self, images: MetaTensor):
         codes = ['RAS', 'ASR', 'SRA']
         diff = np.empty(len(codes))
-        shape_diff = np.empty(len(codes), dtype=np.int32)
+        shape_diff = np.empty(len(codes), dtype=np.int64)
         dummy = MetaTensor(torch.empty(1, *images.shape[1:], device=images.device), images.affine)
         for i, code in enumerate(codes):
             orientation = mt.Orientation(code)

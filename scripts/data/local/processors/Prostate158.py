@@ -6,10 +6,10 @@ import torch
 
 from monai.data import MetaTensor
 
-from ._base import DataPoint, DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor
+from ._base import DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor, SegDataPoint
 
 @dataclass(kw_only=True)
-class Prostate158DataPoint(DataPoint):
+class Prostate158DataPoint(SegDataPoint):
     anatomy: Path
     tumor: Path | None = None
 
@@ -21,7 +21,7 @@ class Prostate158Processor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Proc
     def dataset_root(self):
         return super().dataset_root / 'prostate158_train'
 
-    def load_masks(self, data_point: Prostate158DataPoint) -> tuple[MetaTensor, list[str]]:
+    def load_masks(self, data_point: Prostate158DataPoint, images: MetaTensor):
         anatomy: MetaTensor = self.mask_loader(data_point.anatomy)
         anatomy_masks = torch.cat([anatomy == 1, anatomy == 2])
         targets = ['transition zone of prostate', 'peripheral zone of prostate']
@@ -32,7 +32,7 @@ class Prostate158Processor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Proc
             self._check_affine(anatomy.affine, tumor_mask.affine)
             masks = torch.cat([anatomy_masks, tumor_mask == 3])
             targets.append('prostate cancer')
-        return masks, targets
+        return targets, masks
 
     def get_data_points(self):
         df = pd.concat([

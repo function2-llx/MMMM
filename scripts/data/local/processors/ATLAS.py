@@ -3,6 +3,7 @@ from ._base import DefaultImageLoaderMixin, DefaultMaskLoaderMixin, MultiLabelMu
 class ATLASProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor):
     name = 'ATLAS'
     orientation = 'SRA'
+    semantic_targets = {'stroke lesion'}
 
     @property
     def dataset_root(self):

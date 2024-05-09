@@ -5,7 +5,7 @@ import pandas as pd
 
 from monai.data import MetaTensor
 
-from mmmm.data.defs import ORIGIN_SEG_DATA_ROOT
+from mmmm.data.defs import ORIGIN_LOCAL_DATA_ROOT
 
 from ._base import DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor, MultiClassDataPoint
 
@@ -43,7 +43,7 @@ class WORDProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor):
                 key = label_path.name[:-len('.nii.gz')]
                 if key.endswith('_word_label'):
                     key = key[:-len('_word_label')]
-                    image_path = ORIGIN_SEG_DATA_ROOT / f'MSD/Task03_Liver/imagesTr/{key}.nii.gz'
+                    image_path = ORIGIN_LOCAL_DATA_ROOT / f'MSD/Task03_Liver/imagesTr/{key}.nii.gz'
                 else:
                     image_path = label_dir.parent / label_dir.name.replace('labels', 'images') / f'{key}.nii.gz'
                 ret.append(

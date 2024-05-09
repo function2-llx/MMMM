@@ -10,7 +10,6 @@ import torch
 from torchvision.io import read_image
 from torchvision.transforms import v2 as tvt
 
-from luolib.types import tuple2_t
 from luolib.utils.misc import ensure_rgb
 from monai import transforms as mt
 from monai.utils import InterpolateMode, convert_to_tensor
@@ -19,7 +18,7 @@ import mmmm.data.dataset._dataset as _dataset
 from mmmm.tokenizer import MMMMTokenizer
 from ..defs import ConvTurn, DataPoint, PROCESSED_VL_DATA_ROOT, split_t
 from ..utils import prepare_vlm_inputs
-from .misc import gen_modality_conversation, intensity_norm, toss
+from .misc import get_max_resize, gen_modality_conv, intensity_norm, toss
 
 CAPTION_PROMPTS = [
     'Describe the following image in detail.',
@@ -29,21 +28,15 @@ CAPTION_PROMPTS = [
     'Explain the various aspects of the image before you.',
     'Clarify the contents of the displayed image with great detail.',
     'Characterize the image using a well-detailed description.',
-    'Break down the elements of the image in a detailed manner.',
-    'Walk through the important details of the image.',
     'Portray the image with a rich, descriptive narrative.',
     'Narrate the contents of the image with precision.',
     'Illustrate the image through a descriptive explanation.',
     'Examine the image closely and share its details.',
     'Write an exhaustive depiction of the given image.',
-    'What can you infer from this picture?',
     'Please caption this image.',
-    'What are the key features of the image you see?',
     'What can you observe in this image?',
     'Please provide a detailed description of the image.',
     'What do you see in this image?',
-    'Caption this image, highlighting its scientific or medical importance.',
-    'What are the key features of the image you see?',
     'What can you observe in this image?',
     'Offer a thorough and descriptive summary of the image.',
 ]
@@ -64,31 +57,35 @@ REPORT_PROMPTS = [
     'Based on your analysis, what would be an accurate report for this {}, including both findings and impression?',
     'What is the most appropriate report for this {}, detailing both the findings and impression?',
     'Can you provide a radiology report for this {}?',
-    'Please diagnosis this {}.',
     'Please write a radiology report for this {}.',
     'Please generate a radiology report for this {}.',
     'Please provide a report for this {}.',
-    'Please write a radiology report for this {}.',
     'Please generate a detailed radiology report for this {}, including a description of the findings and your impression.',
     'Evaluate the {} and generate a detailed report.',
-    'Interpret this {} and produce a detailed diagnostic report.',
     'Review the {} and provide a thorough clinical report.',
-    'Diagnose this {}.',
     'Report on this {}.',
     'Detail findings and impression from this {}.',
-    'Offer a thorough analysis of the {}.',
     'Analyze the {} with findings and impression.',
     'Generate a detailed radiology report for the given {}.',
-    'Please provide a detailed radiological interpretation of this {}.',
-    'Construct a detailed report with diagnostic findings and clinical impressions for this {}.',
-    'What is the diagnostic significance of this {}?',
-    "What is the indication of this {}?",
     "Create a detailed report for this {}.",
     "Give a detailed radiology report for this {}.",
 ]
 
-FINDINGS_PROMPT = [
-    'What are the findings presented in this {}?'
+FINDINGS_PROMPTS = [
+    'What are the findings presented in this {}?',
+    'Can you provide the findings for this {}?',
+    'Please report on this {} with findings.',
+    'Describe this {} with findings.',
+    'Please write a report consists of findings for this {}.',
+    'Please provide a findings section of the report for this {}.',
+    'Can you provide a summary consists of findings of this {}?',
+    'Please write findings for this {}.',
+    'Can you provide a description consists of findings of this {}?',
+    'Please report on this {} with finding.',
+    'Analyze this {} and provide a detailed findings section.',
+    'Examine the {} and construct a findings section in the report.',
+    'Based on your analysis, what would be the findings for this {}?',
+    'What are the findings presented in this {}?',
 ]
 
 COMPLETE_REFERRINGS = ['image', 'medical image', 'radiograph', 'scan', 'radiology image', 'radiology scan', 'medical scan']
@@ -106,28 +103,6 @@ class VLTransConf:
     max_tokens: int
     max_tokens_z: int
     log2_patch_size_z_std: float = 0.5
-
-@np.vectorize
-def _solve(a: float, M: int):
-    """find max integer t s.t. t⌈at⌉ ≤ M"""
-    aM = a * M
-    n = math.ceil(math.sqrt(aM))
-    if aM > (n - 1) * n:
-        t = math.floor(M / n)
-    else:
-        t = math.floor((n - 1) / a)
-    return t
-
-def _get_resize(size: tuple2_t[int], stride: int, max_tokens: int) -> tuple2_t[int]:
-    size = np.array(size)
-    gcd = np.gcd(size, stride)
-    size_p = size // gcd
-    stride //= gcd
-    ps = stride * np.flip(size_p)
-    t = _solve(ps / np.flip(ps), max_tokens)
-    scale = (t * stride / size_p).max()
-    resize = (size * scale).round().astype(np.int64)
-    return tuple(resize.tolist())
 
 class VLTransform(mt.RandomizableTransform):
     def __init__(
@@ -175,7 +150,7 @@ class VLTransform(mt.RandomizableTransform):
         stride = (stride_z, conf.stride_xy, conf.stride_xy)
         resize_shape = (
             min(size_z, tokens_z * stride_z),  # do not resize z if unnecessary
-            *_get_resize(
+            *get_max_resize(
                 image.shape[2:],
                 conf.stride_xy,
                 trans_conf.max_tokens // tokens_z,
@@ -202,7 +177,7 @@ class VLTransform(mt.RandomizableTransform):
         elif findings := data.get('findings'):
             conversation.append(
                 ConvTurn(
-                    self.R.choice(FINDINGS_PROMPT).format(referring),
+                    self.R.choice(FINDINGS_PROMPTS).format(referring),
                     findings,
                 ),
             )
@@ -211,7 +186,7 @@ class VLTransform(mt.RandomizableTransform):
         self.R.shuffle(conversation)
         if modality is not None and toss(self.R, 0.5):
             # prepend the modality conversation
-            conversation = gen_modality_conversation(modality, self.R) + conversation
+            conversation = gen_modality_conv(modality, self.R) + conversation
         vlm_inputs, conversation_text = prepare_vlm_inputs(
             conversation,
             self.tokenizer,

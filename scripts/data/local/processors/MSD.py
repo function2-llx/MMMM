@@ -1,10 +1,8 @@
 from pathlib import Path
 
-import torch
-
-from luolib.utils import get_cuda_device
 from monai.data import MetaTensor
-from ._base import DataPoint, DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor, MultiClassDataPoint
+
+from ._base import DataPoint, DefaultImageLoaderMixin, DefaultMaskLoaderMixin, MultiClassDataPoint, Processor
 
 class MSDProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor):
     class_mapping: dict[int, str]
@@ -19,10 +17,10 @@ class MSDProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor):
         modality = meta['modality']
         return [modality[str(i)] for i in range(len(modality))]
 
-    def load_images(self, data_point: DataPoint) -> tuple[list[str], MetaTensor, bool]:
+    def load_images(self, data_point: DataPoint) -> tuple[list[str], MetaTensor]:
         modalities = self.get_modalities()
         images = self.image_loader(data_point.images['_all'])
-        return modalities, images.to(device=get_cuda_device())
+        return modalities, images.to(device=self.device)
 
     def get_data_points(self) -> list[DataPoint]:
         ret = []
@@ -47,6 +45,7 @@ class MSDLiverProcessor(MSDProcessor):
     name = 'MSD/Task03_Liver'
     orientation = 'SRA'
     class_mapping = {1: 'liver', 2: 'liver tumor'}
+    semantic_targets = {'liver tumor'}
 
 class MSDHippocampusProcessor(MSDProcessor):
     name = 'MSD/Task04_Hippocampus'
@@ -74,16 +73,19 @@ class MSDLungProcessor(MSDProcessor):
     name = 'MSD/Task06_Lung'
     orientation = 'SRA'
     class_mapping = {1: 'lung cancer'}
+    semantic_targets = {'lung cancer'}
 
 class MSDPancreasProcessor(MSDProcessor):
     name = 'MSD/Task07_Pancreas'
     orientation = 'SRA'
     class_mapping = {1: 'pancreas', 2: 'pancreatic cancer'}
+    semantic_targets = {'pancreatic cancer'}
 
 class MSDHepaticVesselProcessor(MSDProcessor):
     name = 'MSD/Task08_HepaticVessel'
     orientation = 'SRA'
     class_mapping = {1: 'hepatic vessel', 2: 'liver tumor'}
+    semantic_targets = {'liver tumor'}
 
 class MSDSpleenProcessor(MSDProcessor):
     name = 'MSD/Task09_Spleen'
@@ -93,3 +95,4 @@ class MSDSpleenProcessor(MSDProcessor):
 class MSDColonProcessor(MSDProcessor):
     name = 'MSD/Task10_Colon'
     class_mapping = {1: 'colon cancer'}
+    semantic_targets = {'colon cancer'}
