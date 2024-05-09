@@ -6,7 +6,7 @@ from functools import cache
 import pandas as pd
 
 from monai.utils import StrEnum
-from .defs import ORIGIN_DATA_ROOT
+from .defs import DATA_ROOT
 
 def _split_items(items_str: str, sep: str = '; ') -> list[str]:
     return [] if pd.isna(items_str) else items_str.split(sep)
@@ -36,7 +36,7 @@ class TargetClass:
 
 @cache
 def get_target_tax() -> dict[str, TargetClass]:
-    tax_dict = pd.read_excel(ORIGIN_DATA_ROOT / 'target-tax.xlsx', ['anatomy', 'anomaly'])
+    tax_dict = pd.read_excel(DATA_ROOT / 'target-tax.xlsx', ['anatomy', 'anomaly'])
     ret = {}
     for category, tax in tax_dict.items():
         tax.set_index('name', inplace=True)
