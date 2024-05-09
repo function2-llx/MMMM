@@ -4,7 +4,7 @@ from tqdm import tqdm
 from transformers import AutoModelForCausalLM, LlamaTokenizer
 
 
-def cogvlm_setup(checkpoint: str, tokenizer: str):
+def setup_cogvlm(checkpoint: str, tokenizer: str):
     model = AutoModelForCausalLM.from_pretrained(
         checkpoint,
         torch_dtype=torch.bfloat16,
@@ -29,7 +29,7 @@ def cogvlm_collate_fn(batch: list[dict]):
     }
 
 
-def cogvlm_vl_evaluate(model, tokenizer, dataloader, metrics):
+def cogvlm_vl_evaluate(model, tokenizer, dataloader):
     results = []
 
     for sample in tqdm(dataloader):
@@ -58,7 +58,6 @@ def cogvlm_vl_evaluate(model, tokenizer, dataloader, metrics):
                 'question': sample['question'],
                 'answer': sample['answer'],
                 'prediction': prediction,
-                **metrics.compute(prediction, sample['answer']),
             },
         )
 

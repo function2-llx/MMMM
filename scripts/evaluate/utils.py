@@ -1,12 +1,26 @@
 import os
+from pathlib import Path
+import sys
+from typing import OrderedDict
 import evaluate
 import json
 import numpy as np
 import pandas as pd
 import random
+import re
 import torch
+from torch.utils.data import Dataset
 from tqdm import tqdm
 import transformers
+from transformers import BertTokenizer
+
+
+from mmmm.data.defs import PROCESSED_VL_DATA_ROOT
+from mmmm.data.dataset.vl import REPORT_PROMPTS, FINDINGS_PROMPT, COMPLETE_REFERRINGS
+
+
+LLAMA3_PATH = '/data/llama3/Meta-Llama-3-8B-Instruct-hf'
+CHEXBERT_PATH = '/data/chexbert/chexbert.pth'
 
 
 LLAMA_SYSTEM_PROMPT = '''
@@ -35,24 +49,62 @@ def dump_results(results: list[dict], output_dir, task: str, dataset: str, model
     results.to_csv(
         output_dir / f'{task}_{dataset}_{model}_{setting}.csv'
     )
-    with open(
-        output_dir / f'{task}_{dataset}_{model}_{setting}.json',
-        'w',
-    ) as f:
-        json.dump(
-            {
-                'bleu': results['bleu'].mean(),
-                'rouge': results['rouge'].mean(),
-                'meteor': results['meteor'].mean(),
-                'bertscore': results['bertscore'].mean(),
-                'exact_match': results['exact_match'].mean(),
-            },
-            f,
-            indent=4,
-        )
 
 
-class CommonMetrics:
+class VQATestDataset(Dataset):
+    def __init__(self, dataset: str):
+        super().__init__()
+        self.name = dataset
+        with open(PROCESSED_VL_DATA_ROOT / dataset / 'test.json') as f:
+            self.dataset = [
+                {'image': image, **vqa}
+                for x in json.load(f)
+                for vqa in x['vqa']
+                for image in x['image']
+            ]
+
+    def __getitem__(self, index: int):
+        return self.dataset[index]
+
+    def __len__(self):
+        return len(self.dataset)
+
+
+class ReportTestDataset(Dataset):
+    def __init__(self, dataset: str):
+        super().__init__()
+        self.name = dataset
+        with open(PROCESSED_VL_DATA_ROOT / dataset / 'test.json') as f:
+            self.dataset = [
+                {
+                    'image': image,
+                    'question': (
+                        random.choice(REPORT_PROMPTS).format(
+                            random.choice(COMPLETE_REFERRINGS)
+                        )
+                        if x.get('impression')
+                        else random.choice(FINDINGS_PROMPT).format(
+                            random.choice(COMPLETE_REFERRINGS)
+                        )
+                    ),
+                    'answer': (
+                        f'Findings: {x["findings"]}\nImpression: {x["impression"]}'
+                        if x.get('impression')
+                        else x['findings']
+                    ),
+                }
+                for x in json.load(f)
+                for image in x['image']
+            ]
+
+    def __getitem__(self, index: int):
+        return self.dataset[index]
+
+    def __len__(self):
+        return len(self.dataset)
+
+
+class GenericMetrics:
     def __init__(self):
         self.bleu = evaluate.load('bleu')
         self.rouge = evaluate.load('rouge')
@@ -90,10 +142,14 @@ class CommonMetrics:
             )['exact_match'],
         }
 
-    def process(self, run: str):
-        df = pd.read_csv(run + '.csv')
-        with open(run + '.json', 'r') as f:
-            summary = json.load(f)
+    def process(self, run: Path):
+        df = pd.read_csv(str(run) + '.csv')
+        if os.path.exists(str(run) + '.json'):
+            with open(str(run) + '.json', 'r') as f:
+                summary = json.load(f)
+        else:
+            summary = {}
+
         results = {
             'bleu': [],
             'rouge': [],
@@ -111,8 +167,8 @@ class CommonMetrics:
             df[key] = results[key]
             summary[key] = sum(results[key]) / len(results[key])
 
-        df.to_csv(run + '.csv')
-        with open(run + '.json', 'w') as f:
+        df.to_csv(str(run) + '.csv')
+        with open(str(run) + '.json', 'w') as f:
             json.dump(summary, f, indent=4)
 
 
@@ -120,18 +176,20 @@ class LlamaMetrics:
     def __init__(self):
         self.llama = transformers.pipeline(
             'text-generation',
-            model='/data/llama3/Meta-Llama-3-70B-Instruct-hf',
+            model=LLAMA3_PATH,
             model_kwargs={'torch_dtype': torch.bfloat16},
             device_map='auto',
         )
 
     def compute(self, question: str, prediction: str, reference: str):
         if not prediction:
-            return 0
+            return {
+                'llama': 0
+            }
 
         messages = [
-            {"role": "system", "content": LLAMA_SYSTEM_PROMPT},
-            {"role": "user", "content": LLAMA_USER_PROMPT.format(question=question, answer=reference, prediction=prediction)},
+            {'role': 'system', 'content': LLAMA_SYSTEM_PROMPT},
+            {'role': 'user', 'content': LLAMA_USER_PROMPT.format(question=question, answer=reference, prediction=prediction)},
         ]
 
         prompt = self.llama.tokenizer.apply_chat_template(
@@ -142,7 +200,7 @@ class LlamaMetrics:
 
         terminators = [
             self.llama.tokenizer.eos_token_id,
-            self.llama.tokenizer.convert_tokens_to_ids("<|eot_id|>")
+            self.llama.tokenizer.convert_tokens_to_ids('<|eot_id|>')
         ]
 
         while True:
@@ -155,34 +213,122 @@ class LlamaMetrics:
                     eos_token_id=terminators,
                     pad_token_id=self.llama.tokenizer.eos_token_id,
                 )[0]['generated_text'][len(prompt):]
-                print(response)
                 return {
                     'llama': int(response.split('score: ')[1].strip()),
                 }
             except:
                 continue
 
-    def process(self, run: str):
-        df = pd.read_csv(run + '.csv')
-        with open(run + '.json', 'r') as f:
-            summary = json.load(f)
+    def process(self, run: Path):
+        df = pd.read_csv(str(run) + '.csv')
+        if os.path.exists(str(run) + '.json'):
+            with open(str(run) + '.json', 'r') as f:
+                summary = json.load(f)
+        else:
+            summary = {}
+
         llama = []
 
-        for _, row in df.iterrows():
-            score = self.compute(str(row['prediction']) if pd.notna(row['prediction']) else '', str(row['answer']))['llama']
+        for _, row in tqdm(df.iterrows()):
+            score = self.compute(row['question'], str(row['prediction']) if pd.notna(row['prediction']) else '', str(row['answer']))['llama']
             llama.append(score)
 
         df['llama'] = llama
         summary['llama'] = sum(llama) / len(llama)
 
-        df.to_csv(run + '.csv')
-        with open(run + '.json', 'w') as f:
+        df.to_csv(str(run) + '.csv')
+        with open(str(run) + '.json', 'w') as f:
             json.dump(summary, f, indent=4)
 
 
-if __name__ == '__main__':
-    nlp_metrics = CommonMetrics()
-    for run in tqdm(os.listdir('results')):
-        if run.endswith('.csv'):
-            print(run)
-            nlp_metrics.process('results/' + run.replace('.csv', ''))
+class CXRMetrics:
+    def setup_chexbert(self):
+        sys.path.append('third-party/CXR-Report-Metric/CXRMetric/')
+        sys.path.append('third-party/CXR-Report-Metric/CXRMetric/CheXbert/src')
+        from CheXbert.src.models.bert_encoder import bert_encoder
+
+        model = bert_encoder(False)
+
+        checkpoint = torch.load(CHEXBERT_PATH, map_location='cpu')
+        state_dict = OrderedDict()
+        for key in checkpoint['model_state_dict']:
+            state_dict[key[7:]] = checkpoint['model_state_dict'][key]
+        model.load_state_dict(state_dict)
+
+        model = model.to('cuda')
+        model.eval()
+
+        self.chexbert_model = model
+        self.chexbert_tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+
+    def __init__(self):
+        self.setup_chexbert()
+
+    def compute_chexbert(self, prediction: str, reference: str):
+        sys.path.append('third-party/CXR-Report-Metric/CXRMetric/')
+        sys.path.append('third-party/CXR-Report-Metric/CXRMetric/CheXbert/src')
+        from CheXbert.src.utils import generate_attention_masks
+
+        with torch.inference_mode():
+            prediction = self.chexbert_tokenizer.tokenize(prediction)
+            if prediction:
+                prediction = self.chexbert_tokenizer.encode_plus(prediction)['input_ids']
+                if len(prediction) > 512:
+                    prediction = prediction[:511] + [self.chexbert_tokenizer.sep_token_id]
+            else:
+                prediction = [self.chexbert_tokenizer.cls_token_id + self.chexbert_tokenizer.sep_token_id]
+            prediction = torch.LongTensor(prediction).unsqueeze(0).to('cuda')
+            attention_mask = torch.ones(1, prediction.shape[1]).to('cuda')
+            prediction = self.chexbert_model(prediction, attention_mask).squeeze(0).to('cpu')
+
+            reference = self.chexbert_tokenizer.tokenize(reference)
+            if reference:
+                reference = self.chexbert_tokenizer.encode_plus(reference)['input_ids']
+                if len(reference) > 512:
+                    reference = reference[:511] + [self.chexbert_tokenizer.sep_token_id]
+            else:
+                reference = [self.chexbert_tokenizer.cls_token_id + self.chexbert_tokenizer.sep_token_id]
+            reference = torch.LongTensor(reference).unsqueeze(0).to('cuda')
+            attention_mask = torch.ones(1, reference.shape[1]).to('cuda')
+            reference = self.chexbert_model(reference, attention_mask).squeeze(0).to('cpu')
+
+        return ((prediction * reference).sum() / (torch.linalg.norm(prediction) * torch.linalg.norm(reference))).item()
+
+
+    def compute_radgraph(self, prediction: str, reference: str):
+        pass
+    
+    def compute(self, prediction: str, reference: str):
+        return {
+            'chexbert': self.compute_chexbert(prediction, reference),
+        }
+    
+    @staticmethod
+    def preprocess_radgraph(run: Path):
+        pass
+    
+    def process(self, run: Path):
+        # self.preprocess_radgraph(run)
+        df = pd.read_csv(str(run) + '.csv')
+        if os.path.exists(str(run) + '.json'):
+            with open(str(run) + '.json', 'r') as f:
+                summary = json.load(f)
+        else:
+            summary = {}
+
+        results = {
+            'chexbert': [],
+        }
+
+        for _, row in tqdm(df.iterrows()):
+            score = self.compute(str(row['prediction']) if pd.notna(row['prediction']) else '', str(row['answer']))
+            for key in results.keys():
+                results[key].append(score[key])
+
+        for key in results.keys():
+            df[key] = results[key]
+            summary[key] = sum(results[key]) / len(results[key])
+
+        df.to_csv(str(run) + '.csv')
+        with open(str(run) + '.json', 'w') as f:
+            json.dump(summary, f, indent=4)
