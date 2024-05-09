@@ -102,21 +102,22 @@ class MaskDecoder(nn.Module):
                 pt_num_instances = max(int(match.group(1)), pt_num_instances)
             if key.startswith(f'{prefix}iou_prediction_head'):
                 state_dict.pop(key)
-        hyper_prefix = f'{prefix}output_hypernetworks_mlps.'
-        for i in range(1 + pt_num_instances, self.num_mask_tokens):
-            ref = 1 + (i - 1) % pt_num_instances
-            for key, _ in self.output_hypernetworks_mlps[i].named_parameters():
-                state_dict[f'{hyper_prefix}{i}.{key}'] = state_dict[f'{hyper_prefix}{ref}.{key}']
-        pt_mask_tokens_weight = state_dict[f'{prefix}mask_tokens.weight']
-        mask_tokens_weight_pad = torch.cat([
-            pt_mask_tokens_weight[0:1],
-            einops.repeat(
-                pt_mask_tokens_weight[1:],
-                'n ... -> (q n) ...',
-                q=ceil_divide(self.num_instances, pt_num_instances),
-            ),
-        ])
-        state_dict[f'{prefix}mask_tokens.weight'] = mask_tokens_weight_pad[:self.num_mask_tokens]
+        if pt_num_instances > 0:
+            hyper_prefix = f'{prefix}output_hypernetworks_mlps.'
+            for i in range(1 + pt_num_instances, self.num_mask_tokens):
+                ref = 1 + (i - 1) % pt_num_instances
+                for key, _ in self.output_hypernetworks_mlps[i].named_parameters():
+                    state_dict[f'{hyper_prefix}{i}.{key}'] = state_dict[f'{hyper_prefix}{ref}.{key}']
+            pt_mask_tokens_weight = state_dict[f'{prefix}mask_tokens.weight']
+            mask_tokens_weight_pad = torch.cat([
+                pt_mask_tokens_weight[0:1],
+                einops.repeat(
+                    pt_mask_tokens_weight[1:],
+                    'n ... -> (q n) ...',
+                    q=ceil_divide(self.num_instances, pt_num_instances),
+                ),
+            ])
+            state_dict[f'{prefix}mask_tokens.weight'] = mask_tokens_weight_pad[:self.num_mask_tokens]
         return super()._load_from_state_dict(state_dict, prefix, *args, **kwargs)
 
     def forward(
