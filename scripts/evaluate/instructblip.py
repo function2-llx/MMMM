@@ -29,7 +29,7 @@ def instructblip_collate_fn(batch: list[dict]):
     }
 
 
-def instructblip_vl_evaluate(model, processor, dataloader, metrics):
+def instructblip_vl_evaluate(model, processor, dataloader):
     results = []
 
     for sample in tqdm(dataloader):
@@ -49,7 +49,6 @@ def instructblip_vl_evaluate(model, processor, dataloader, metrics):
                 'question': sample['question'],
                 'answer': sample['answer'],
                 'prediction': prediction,
-                **metrics.compute(prediction, sample['answer']),
             },
         )
 

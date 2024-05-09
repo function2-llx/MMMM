@@ -84,7 +84,7 @@ def llavamed_collate_fn(batch: list[dict]):
     }
 
 
-def llavamed_vl_evaluate(model, tokenizer, processor, image_token_len, dataloader, metrics):
+def llavamed_vl_evaluate(model, tokenizer, processor, image_token_len, dataloader):
     sys.path.append('third-party/LLaVA-Med')
     from llava.conversation import conv_templates
 
@@ -139,7 +139,6 @@ def llavamed_vl_evaluate(model, tokenizer, processor, image_token_len, dataloade
                 'question': sample['question'],
                 'answer': sample['answer'],
                 'prediction': prediction,
-                **metrics.compute(prediction, sample['answer']),
             },
         )
 

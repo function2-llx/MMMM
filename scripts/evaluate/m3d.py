@@ -47,7 +47,7 @@ def m3d_collate_fn(batch: list[dict]):
     }
 
 
-def m3d_vl_evaluate(model, tokenizer, dataloader, metrics):
+def m3d_vl_evaluate(model, tokenizer, dataloader):
     results = []
 
     for sample in tqdm(dataloader):
@@ -68,7 +68,6 @@ def m3d_vl_evaluate(model, tokenizer, dataloader, metrics):
                 'question': sample['question'],
                 'answer': sample['answer'],
                 'prediction': prediction,
-                **metrics.compute(prediction, sample['answer']),
             },
         )
 

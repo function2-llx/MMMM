@@ -67,7 +67,7 @@ def radfm_collate_fn(batch: list[dict]):
     }
 
 
-def radfm_vl_evaluate(model, tokenizer, dataloader, metrics):
+def radfm_vl_evaluate(model, tokenizer, dataloader):
     results = []
 
     for sample in tqdm(dataloader):
@@ -88,7 +88,6 @@ def radfm_vl_evaluate(model, tokenizer, dataloader, metrics):
                 'question': sample['question'],
                 'answer': sample['answer'],
                 'prediction': prediction,
-                **metrics.compute(prediction, sample['answer']),
             },
         )
 

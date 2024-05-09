@@ -65,7 +65,7 @@ class FlamingoProcessor:
         return vision_x
 
 
-def medflamingo_vl_evaluate(model, processor, dataloader, metrics):
+def medflamingo_vl_evaluate(model, processor, dataloader):
     results = []
 
     for sample in tqdm(dataloader):
@@ -98,7 +98,6 @@ def medflamingo_vl_evaluate(model, processor, dataloader, metrics):
                 'question': sample['question'],
                 'answer': sample['answer'],
                 'prediction': prediction,
-                **metrics.compute(prediction, sample['answer']),
             },
         )
 
