@@ -28,21 +28,15 @@ CAPTION_PROMPTS = [
     'Explain the various aspects of the image before you.',
     'Clarify the contents of the displayed image with great detail.',
     'Characterize the image using a well-detailed description.',
-    'Break down the elements of the image in a detailed manner.',
-    'Walk through the important details of the image.',
     'Portray the image with a rich, descriptive narrative.',
     'Narrate the contents of the image with precision.',
     'Illustrate the image through a descriptive explanation.',
     'Examine the image closely and share its details.',
     'Write an exhaustive depiction of the given image.',
-    'What can you infer from this picture?',
     'Please caption this image.',
-    'What are the key features of the image you see?',
     'What can you observe in this image?',
     'Please provide a detailed description of the image.',
     'What do you see in this image?',
-    'Caption this image, highlighting its scientific or medical importance.',
-    'What are the key features of the image you see?',
     'What can you observe in this image?',
     'Offer a thorough and descriptive summary of the image.',
 ]
@@ -63,31 +57,35 @@ REPORT_PROMPTS = [
     'Based on your analysis, what would be an accurate report for this {}, including both findings and impression?',
     'What is the most appropriate report for this {}, detailing both the findings and impression?',
     'Can you provide a radiology report for this {}?',
-    'Please diagnosis this {}.',
     'Please write a radiology report for this {}.',
     'Please generate a radiology report for this {}.',
     'Please provide a report for this {}.',
-    'Please write a radiology report for this {}.',
     'Please generate a detailed radiology report for this {}, including a description of the findings and your impression.',
     'Evaluate the {} and generate a detailed report.',
-    'Interpret this {} and produce a detailed diagnostic report.',
     'Review the {} and provide a thorough clinical report.',
-    'Diagnose this {}.',
     'Report on this {}.',
     'Detail findings and impression from this {}.',
-    'Offer a thorough analysis of the {}.',
     'Analyze the {} with findings and impression.',
     'Generate a detailed radiology report for the given {}.',
-    'Please provide a detailed radiological interpretation of this {}.',
-    'Construct a detailed report with diagnostic findings and clinical impressions for this {}.',
-    'What is the diagnostic significance of this {}?',
-    "What is the indication of this {}?",
     "Create a detailed report for this {}.",
     "Give a detailed radiology report for this {}.",
 ]
 
-FINDINGS_PROMPT = [
-    'What are the findings presented in this {}?'
+FINDINGS_PROMPTS = [
+    'What are the findings presented in this {}?',
+    'Can you provide the findings for this {}?',
+    'Please report on this {} with findings.',
+    'Describe this {} with findings.',
+    'Please write a report consists of findings for this {}.',
+    'Please provide a findings section of the report for this {}.',
+    'Can you provide a summary consists of findings of this {}?',
+    'Please write findings for this {}.',
+    'Can you provide a description consists of findings of this {}?',
+    'Please report on this {} with finding.',
+    'Analyze this {} and provide a detailed findings section.',
+    'Examine the {} and construct a findings section in the report.',
+    'Based on your analysis, what would be the findings for this {}?',
+    'What are the findings presented in this {}?',
 ]
 
 COMPLETE_REFERRINGS = ['image', 'medical image', 'radiograph', 'scan', 'radiology image', 'radiology scan', 'medical scan']
@@ -179,7 +177,7 @@ class VLTransform(mt.RandomizableTransform):
         elif findings := data.get('findings'):
             conversation.append(
                 ConvTurn(
-                    self.R.choice(FINDINGS_PROMPT).format(referring),
+                    self.R.choice(FINDINGS_PROMPTS).format(referring),
                     findings,
                 ),
             )
