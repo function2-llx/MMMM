@@ -42,6 +42,8 @@ init_args:
       type: local
     - name: LiTS
       type: local
+    - name: LIDR-IDRI
+      type: local
     - name: LNQ2023
       type: local
     - name: MRSpineSeg

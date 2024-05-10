@@ -24,7 +24,10 @@ from .MSD import (
     MSDLungProcessor, MSDPancreasProcessor, MSDProstateProcessor, MSDSpleenProcessor,
 )
 from .PARSE2022 import PARSE2022Processor
-from .PENGWIN import PENGWINT1Processor, PENGWINT2Processor
+from .PENGWIN import (
+    PENGWINT1Processor,
+    # PENGWINT2Processor,
+)
 # from .PI_CAI import PI_CAIProcessor
 from .Prostate158 import Prostate158Processor
 from .RibFrac import RibFracProcessor
