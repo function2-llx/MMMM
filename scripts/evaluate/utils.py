@@ -13,15 +13,15 @@ from torch.utils.data import Dataset
 from tqdm import tqdm
 import transformers
 from transformers import BertTokenizer
+from vllm import LLM, SamplingParams
 
 
 from mmmm.data.defs import PROCESSED_VL_DATA_ROOT
 from mmmm.data.dataset.vl import REPORT_PROMPTS, FINDINGS_PROMPTS, COMPLETE_REFERRINGS
 
 
-LLAMA3_PATH = '/data/llama3/Meta-Llama-3-8B-Instruct-hf'
+LLAMA3_PATH = '/data/llama3/Meta-Llama-3-70B-Instruct-hf'
 CHEXBERT_PATH = '/data/chexbert/chexbert.pth'
-RADGRAPH_PATH = '/data/MMMM/RadGraph/models/model_checkpoint'
 
 
 LLAMA_SYSTEM_PROMPT = '''
@@ -45,11 +45,11 @@ def setup_seed(seed):
     torch.backends.cudnn.benchmark = False
 
 
-def dump_results(results: list[dict], output_dir, task: str, dataset: str, model: str, setting: str):
+def dump_results(
+    results: list[dict], output_dir, task: str, dataset: str, model: str, setting: str
+):
     results = pd.DataFrame(results)
-    results.to_csv(
-        output_dir / f'{task}_{dataset}_{model}_{setting}.csv'
-    )
+    results.to_csv(output_dir / f'{task}_{dataset}_{model}_{setting}.csv')
 
 
 class VQATestDataset(Dataset):
@@ -84,7 +84,7 @@ class ReportTestDataset(Dataset):
                             random.choice(COMPLETE_REFERRINGS)
                         )
                         if x.get('impression')
-                        else random.choice(FINDINGS_PROMPT).format(
+                        else random.choice(FINDINGS_PROMPTS).format(
                             random.choice(COMPLETE_REFERRINGS)
                         )
                     ),
@@ -160,7 +160,10 @@ class GenericMetrics:
         }
 
         for _, row in df.iterrows():
-            score = self.compute(str(row['prediction']) if pd.notna(row['prediction']) else '', str(row['answer']))
+            score = self.compute(
+                str(row['prediction']) if pd.notna(row['prediction']) else '',
+                str(row['answer']),
+            )
             for key in results.keys():
                 results[key].append(score[key])
 
@@ -175,50 +178,9 @@ class GenericMetrics:
 
 class LlamaMetrics:
     def __init__(self):
-        self.llama = transformers.pipeline(
-            'text-generation',
-            model=LLAMA3_PATH,
-            model_kwargs={'torch_dtype': torch.bfloat16},
-            device_map='auto',
+        self.llama = LLM(
+            model=LLAMA3_PATH, dtype='bfloat16', gpu_memory_utilization=0.75
         )
-
-    def compute(self, question: str, prediction: str, reference: str):
-        if not prediction:
-            return {
-                'llama': 0
-            }
-
-        messages = [
-            {'role': 'system', 'content': LLAMA_SYSTEM_PROMPT},
-            {'role': 'user', 'content': LLAMA_USER_PROMPT.format(question=question, answer=reference, prediction=prediction)},
-        ]
-
-        prompt = self.llama.tokenizer.apply_chat_template(
-            messages, 
-            tokenize=False, 
-            add_generation_prompt=True
-        )
-
-        terminators = [
-            self.llama.tokenizer.eos_token_id,
-            self.llama.tokenizer.convert_tokens_to_ids('<|eot_id|>')
-        ]
-
-        while True:
-            try:
-                response = self.llama(
-                    prompt,
-                    max_new_tokens=50,
-                    do_sample=True,
-                    temperature=0.2,
-                    eos_token_id=terminators,
-                    pad_token_id=self.llama.tokenizer.eos_token_id,
-                )[0]['generated_text'][len(prompt):]
-                return {
-                    'llama': int(response.split('score: ')[1].strip()),
-                }
-            except:
-                continue
 
     def process(self, run: Path):
         df = pd.read_csv(str(run) + '.csv')
@@ -228,14 +190,60 @@ class LlamaMetrics:
         else:
             summary = {}
 
-        llama = []
+        tokenizer = self.llama.get_tokenizer()
+        conversations = [
+            tokenizer.apply_chat_template(
+                [
+                    {'role': 'system', 'content': LLAMA_SYSTEM_PROMPT},
+                    {
+                        'role': 'user',
+                        'content': LLAMA_USER_PROMPT.format(
+                            question=str(row['question']),
+                            answer=str(row['answer']),
+                            prediction=(
+                                str(row['prediction'])
+                                if pd.notna(row['prediction'])
+                                else ''
+                            ),
+                        ),
+                    },
+                ],
+                tokenize=False,
+            )
+            for _, row in df.iterrows()
+        ]
 
-        for _, row in tqdm(df.iterrows()):
-            score = self.compute(row['question'], str(row['prediction']) if pd.notna(row['prediction']) else '', str(row['answer']))['llama']
-            llama.append(score)
+        sampling_params = SamplingParams(
+            max_tokens=10,
+            min_tokens=1,
+            temperature=0.1,
+            stop_token_ids=[
+                tokenizer.eos_token_id,
+                tokenizer.convert_tokens_to_ids('<|eot_id|>'),
+            ],
+        )
 
-        df['llama'] = llama
-        summary['llama'] = sum(llama) / len(llama)
+        responses = self.llama.generate(
+            prompts=conversations,
+            sampling_params=sampling_params,
+        )
+
+        scores = []
+        for i, response in enumerate(responses):
+            while True:
+                try:
+                    score = int(response.outputs[0].text.split('score: ')[1].strip())
+                    scores.append(score)
+                    break
+                except:
+                    print(response.outputs[0].text)
+                    response = self.llama.generate(
+                        prompts=[conversations[i]],
+                        sampling_params=sampling_params,
+                    )
+
+        df['llama'] = scores
+        summary['llama'] = sum(scores) / len(scores)
 
         df.to_csv(str(run) + '.csv')
         with open(str(run) + '.json', 'w') as f:
@@ -264,7 +272,9 @@ class CXRMetrics:
 
     def __init__(self):
         self.setup_chexbert()
-        self.radgraph = F1RadGraph(reward_level='partial', cuda=0, model_type='radgraph')
+        self.radgraph = F1RadGraph(
+            reward_level='partial', cuda=0, model_type='radgraph'
+        )
 
     def compute_chexbert(self, prediction: str, reference: str):
         sys.path.append('third-party/CXR-Report-Metric/CXRMetric/')
@@ -274,14 +284,23 @@ class CXRMetrics:
         with torch.inference_mode():
             prediction = self.chexbert_tokenizer.tokenize(prediction)
             if prediction:
-                prediction = self.chexbert_tokenizer.encode_plus(prediction)['input_ids']
+                prediction = self.chexbert_tokenizer.encode_plus(prediction)[
+                    'input_ids'
+                ]
                 if len(prediction) > 512:
-                    prediction = prediction[:511] + [self.chexbert_tokenizer.sep_token_id]
+                    prediction = prediction[:511] + [
+                        self.chexbert_tokenizer.sep_token_id
+                    ]
             else:
-                prediction = [self.chexbert_tokenizer.cls_token_id + self.chexbert_tokenizer.sep_token_id]
+                prediction = [
+                    self.chexbert_tokenizer.cls_token_id
+                    + self.chexbert_tokenizer.sep_token_id
+                ]
             prediction = torch.LongTensor(prediction).unsqueeze(0).to('cuda')
             attention_mask = torch.ones(1, prediction.shape[1]).to('cuda')
-            prediction = self.chexbert_model(prediction, attention_mask).squeeze(0).to('cpu')
+            prediction = (
+                self.chexbert_model(prediction, attention_mask).squeeze(0).to('cpu')
+            )
 
             reference = self.chexbert_tokenizer.tokenize(reference)
             if reference:
@@ -289,23 +308,33 @@ class CXRMetrics:
                 if len(reference) > 512:
                     reference = reference[:511] + [self.chexbert_tokenizer.sep_token_id]
             else:
-                reference = [self.chexbert_tokenizer.cls_token_id + self.chexbert_tokenizer.sep_token_id]
+                reference = [
+                    self.chexbert_tokenizer.cls_token_id
+                    + self.chexbert_tokenizer.sep_token_id
+                ]
             reference = torch.LongTensor(reference).unsqueeze(0).to('cuda')
             attention_mask = torch.ones(1, reference.shape[1]).to('cuda')
-            reference = self.chexbert_model(reference, attention_mask).squeeze(0).to('cpu')
+            reference = (
+                self.chexbert_model(reference, attention_mask).squeeze(0).to('cpu')
+            )
 
-        return ((prediction * reference).sum() / (torch.linalg.norm(prediction) * torch.linalg.norm(reference))).item()
+        return (
+            (prediction * reference).sum()
+            / (torch.linalg.norm(prediction) * torch.linalg.norm(reference))
+        ).item()
 
     @staticmethod
-    def exact_entity_token_if_rel_exists_reward(hypothesis_annotation_list, reference_annotation_list):
+    def exact_entity_token_if_rel_exists_reward(
+        hypothesis_annotation_list, reference_annotation_list
+    ):
         candidates = []
         for annotation_list in [hypothesis_annotation_list, reference_annotation_list]:
             candidate = []
-            for entity in annotation_list["entities"].values():
-                if not entity["relations"]:
-                    candidate.append((entity["tokens"], entity["label"]))
-                if entity["relations"]:
-                    candidate.append((entity["tokens"], entity["label"], True))
+            for entity in annotation_list['entities'].values():
+                if not entity['relations']:
+                    candidate.append((entity['tokens'], entity['label']))
+                if entity['relations']:
+                    candidate.append((entity['tokens'], entity['label'], True))
 
             candidate = set(candidate)
             candidates.append(candidate)
@@ -313,26 +342,45 @@ class CXRMetrics:
         hypothesis_relation_token_list, reference_relation_token_list = candidates
 
         precision = (
-            sum([1 for x in hypothesis_relation_token_list if (x in reference_relation_token_list)])
+            sum(
+                [
+                    1
+                    for x in hypothesis_relation_token_list
+                    if (x in reference_relation_token_list)
+                ]
+            )
             / len(hypothesis_relation_token_list)
             if len(hypothesis_relation_token_list) > 0
             else 0.0
         )
         recall = (
-            sum([1 for x in reference_relation_token_list if (x in hypothesis_relation_token_list)])
+            sum(
+                [
+                    1
+                    for x in reference_relation_token_list
+                    if (x in hypothesis_relation_token_list)
+                ]
+            )
             / len(reference_relation_token_list)
             if len(reference_relation_token_list) > 0
             else 0.0
         )
-        f1_score = (2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
+        f1_score = (
+            (2 * precision * recall / (precision + recall))
+            if (precision + recall) > 0
+            else 0.0
+        )
 
         return f1_score
 
     def compute_radgraph(self, prediction: str, reference: str):
-        _, _, hyp_annotation_lists, ref_annotation_lists = self.radgraph(hyps=[prediction], refs=[reference])
-        return CXRMetrics.exact_entity_token_if_rel_exists_reward(hyp_annotation_lists[0], ref_annotation_lists[0])
+        _, _, hyp_annotation_lists, ref_annotation_lists = self.radgraph(
+            hyps=[prediction], refs=[reference]
+        )
+        return CXRMetrics.exact_entity_token_if_rel_exists_reward(
+            hyp_annotation_lists[0], ref_annotation_lists[0]
+        )
 
-    
     def compute(self, prediction: str, reference: str):
         return {
             'chexbert': self.compute_chexbert(prediction, reference),
@@ -353,7 +401,10 @@ class CXRMetrics:
         }
 
         for _, row in tqdm(df.iterrows()):
-            score = self.compute(str(row['prediction']) if pd.notna(row['prediction']) else '', str(row['answer']))
+            score = self.compute(
+                str(row['prediction']) if pd.notna(row['prediction']) else '',
+                str(row['answer']),
+            )
             for key in results.keys():
                 results[key].append(score[key])
 
