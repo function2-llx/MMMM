@@ -150,10 +150,6 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         self.check_grad = False
         return self
 
-    @property
-    def dice_loss_weight(self):
-        return self.mask_loss.lambda_dice
-
     def _init_weights(self, module):
         """Let's happily do nothing (necessary to make SAM pre-trained weights survive)"""
 
@@ -313,7 +309,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
     @torch.no_grad()
     def _match_instances(
         self,
-        masks_pred: torch.BoolTensor,
+        masks_logits: torch.Tensor,
         boxes_reg: torch.Tensor,
         disc_logit: torch.Tensor,
         masks_label: torch.BoolTensor | None,
@@ -321,7 +317,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         num_uncertain: int,
         offset: int,
     ) -> torch.LongTensor:
-        num_queries = masks_pred.shape[0]
+        num_queries = masks_logits.shape[0]
         num_pos = boxes_label.shape[0]
         num_uncertain = min(max(num_queries - num_pos, 0), num_uncertain)
         num_neg = max(num_queries - num_pos - num_uncertain, 0)
@@ -344,13 +340,14 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             dim=1,
         )
         if masks_label is None:
-            dice_cost = box_cost.new_zeros(num_queries, num_pos)
+            mask_cost = box_cost.new_zeros(num_queries, num_pos)
         else:
-            dice_cost = 1 - pairwise_forward(_dice_metric, masks_pred, masks_label)
-        dice_cost = torch.cat(
-            [dice_cost, dice_cost.new_zeros(num_queries, num_neg + num_uncertain)], dim=1,
+            from functools import partial
+            mask_cost = pairwise_forward(partial(self.mask_loss, return_batch=False), masks_logits, masks_label)
+        mask_cost = torch.cat(
+            [mask_cost, mask_cost.new_zeros(num_queries, num_neg + num_uncertain)], dim=1,
         )
-        cost = self.dice_loss_weight * dice_cost + box_cost + disc_cost
+        cost = mask_cost + box_cost + disc_cost
         row, col = linear_sum_assignment(cost.float().cpu().numpy())
         match = torch.empty(num_queries, dtype=torch.int64, device=self.device)
         match[row] = torch.as_tensor(col, device=self.device)
@@ -486,8 +483,6 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
                 masks_label_ds = nnf.interpolate(
                     masks_label[None].byte(), masks_logits_ds.shape[2:], mode='nearest-exact',
                 )[0].bool()
-            with torch.no_grad():
-                masks_pred_ds: torch.BoolTensor = masks_logits_ds[:, 1:].sigmoid().round().bool()  # type: ignore
 
             num_uncertain_list = num_uncertain.tolist()
             offset_list = index_offsets[:, 0].tolist()
@@ -498,7 +493,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
                     continue
                 label_slice = slice(*index_offsets[i])
                 match[i] = self._match_instances(
-                    masks_pred_ds[i],
+                    masks_logits[i],
                     boxes_reg[i, 1:],
                     disc_logit[i],
                     None if masks_label_ds is None else masks_label_ds[label_slice],
