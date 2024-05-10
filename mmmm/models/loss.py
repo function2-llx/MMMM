@@ -2,24 +2,33 @@ import einops
 import torch
 from torch import nn
 
+from luolib.losses import bce_with_binary_label
 from monai.losses.focal_loss import sigmoid_focal_loss
 
 __all__ = [
     'DiceFocalLoss',
 ]
 
+_EPS = 1e-8
+
 class DiceFocalLoss(nn.Module):
-    """fix smooth issue of dice"""
+    """
+    fix smooth issue of dice
+    use BCE by default
+    """
     def __init__(
         self,
         dice_weight: float = 1.,
         focal_weight: float = 1.,
+        focal_gamma: float = 0.,
         smooth_dr: float = 1e-8,
     ):
         super().__init__()
         self.dice_weight = dice_weight
-        self.focal_weight = focal_weight
         self.smooth_dr = smooth_dr
+        self.focal_gamma = focal_gamma
+        assert focal_gamma >= 0
+        self.focal_weight = focal_weight
 
     def dice(self, input: torch.Tensor, target: torch.Tensor):
         """
@@ -36,10 +45,18 @@ class DiceFocalLoss(nn.Module):
 
     def focal(self, input: torch.Tensor, target: torch.Tensor):
         # let's be happy
-        return sigmoid_focal_loss(input, target)
+        if self.focal_gamma < _EPS:
+            return bce_with_binary_label(input, target)
+        else:
+            return sigmoid_focal_loss(input, target)
 
     def forward(
-        self, input: torch.Tensor, target: torch.Tensor, *, reduce_batch: bool = True, return_dict: bool = False,
+        self,
+        input: torch.Tensor,
+        target: torch.BoolTensor,
+        *,
+        reduce_batch: bool = True,
+        return_dict: bool = False,
     ) -> torch.Tensor | dict[str, torch.Tensor]:
         dice_loss = self.dice(input, target)
         focal_loss = self.focal(input, target)
@@ -53,7 +70,7 @@ class DiceFocalLoss(nn.Module):
         if return_dict:
             return {
                 'dice': dice_loss,
-                'focal': focal_loss,
+                f'focal-{self.focal_gamma:.1f}': focal_loss,
                 'total': total_loss,
             }
         else:

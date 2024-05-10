@@ -650,11 +650,7 @@ def _history_to_prompt(signal_type, history, query):
     prompt += 'Question: {} {}'.format(query, answer_format)
     return prompt
 
-def _sample_weighted_ce(
-    logits: torch.Tensor,
-    labels: torch.LongTensor,
-    weight: torch.Tensor | None,
-):
+def _sample_weighted_ce(logits: torch.FloatTensor, labels: torch.LongTensor, weight: torch.Tensor | None):
     """
     Args:
         weight: weight for each sample, not for class
@@ -665,7 +661,12 @@ def _sample_weighted_ce(
         return F.cross_entropy(logits, labels)
     mask: torch.BoolTensor = labels != CE_IGNORE_INDEX
     ce = F.cross_entropy(logits, labels, reduction='none')
-    ret = torch.dot(ce[mask], weight.view(-1)[mask]) / mask.sum()
+    # the life of weight:
+    # 0. constructed as fp32 in DataModule
+    # 1. converted to bf16 by precision plugin
+    # 2. convert back to fp32 here
+    # stupid and meaningless? yes
+    ret = torch.dot(ce[mask], weight.float().view(-1)[mask]) / mask.sum()
     return ret
 
 class CogVLMForCausalLM(CogVLMPreTrainedModel):
@@ -742,7 +743,7 @@ class CogVLMForCausalLM(CogVLMPreTrainedModel):
             return_dict=True,
         )
 
-        logits = self.lm_head(output.last_hidden_state)
+        logits = self.lm_head(output.last_hidden_state).float()
 
         loss = None
         if labels is not None:

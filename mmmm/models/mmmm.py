@@ -13,12 +13,11 @@ from torch.nn import functional as nnf
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
 from luolib.lightning import LightningModule
-from luolib.losses import zero_loss
+from luolib.losses import bce_neg, bce_pos, bce_with_binary_label, zero_loss
 from luolib.types import param3_t, tuple2_t, tuple3_t
 from luolib.utils.misc import pairwise_forward
 from monai.data import box_pair_giou, convert_box_mode
 from monai.data.box_utils import CenterSizeMode
-from monai.losses.focal_loss import sigmoid_focal_loss
 
 from mmmm.data.defs import Batch
 from mmmm.tokenizer import MMMMTokenizer
@@ -57,8 +56,8 @@ class VisualGroundingOutput:
     """(batch size, num targets, num queries, ...)"""
     masks_logits: list[torch.Tensor] = field(default_factory=list)
     masks_logits_ds: list[torch.Tensor] = field(default_factory=list)
-    boxes: list[torch.Tensor] = field(default_factory=list)
-    disc_logit: list[torch.Tensor] = field(default_factory=list)
+    boxes: list[torch.FloatTensor] = field(default_factory=list)
+    disc_logit: list[torch.FloatTensor] = field(default_factory=list)
 
 @dataclass
 class SlidingWindow:
@@ -91,8 +90,8 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         pretrained_model_name_or_path: str | os.PathLike | None,
         *args,
         lm_loss_weight: float = 1.,
-        box_l1_loss_weight: float = 5.,
-        box_giou_loss_weight: float = 2.,
+        box_l1_loss_weight: float = 1.,
+        box_giou_loss_weight: float = 0.5,
         disc_loss_weight: float = 1.,
         neg_mask_loss: bool = False,
         vision_override: VisionArgs,
@@ -232,9 +231,9 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
                 vg_hidden_states[i], image_embeddings[i], patch_size[i][0],
             )
             masks_logits = nnf.interpolate(masks_logits_ds, image[i].shape[1:], mode='trilinear')
-            # calling sigmoid here to restrict range, following DETR
-            boxes = self.box_head(masks_embeds).sigmoid()
-            disc_logit = einops.rearrange(self.disc_head(masks_embeds[:, 1:]), 'nt nq 1 -> nt nq')
+            # calling sigmoid here to restrict range (CenterSizeMode), following DETR
+            boxes = self.box_head(masks_embeds).float().sigmoid()
+            disc_logit = einops.rearrange(self.disc_head(masks_embeds[:, 1:]).float(), 'nt nq 1 -> nt nq')
             ret.masks_logits.append(masks_logits)
             ret.masks_logits_ds.append(masks_logits_ds)
             ret.boxes.append(boxes)
@@ -316,8 +315,8 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         num_pos = boxes_label.shape[0]
         num_uncertain = min(max(num_queries - num_pos, 0), num_uncertain)
         num_neg = max(num_queries - num_pos - num_uncertain, 0)
-        disc_cost_pos = self.disc_loss(disc_logit, torch.ones_like(disc_logit), reduce_batch=False)
-        disc_cost_neg = self.disc_loss(disc_logit, torch.zeros_like(disc_logit), reduce_batch=False)
+        disc_cost_pos = bce_pos(disc_logit)
+        disc_cost_neg = bce_neg(disc_logit)
         # label order: pos, neg, uncertain,
         disc_cost = torch.cat(
             [
@@ -338,9 +337,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             mask_cost = box_cost.new_zeros(num_queries, num_pos)
         else:
             mask_cost = pairwise_forward(self.mask_loss, masks_logits, masks_label, reduce_batch=False)
-        mask_cost = torch.cat(
-            [mask_cost, mask_cost.new_zeros(num_queries, num_neg + num_uncertain)], dim=1,
-        )
+        mask_cost = torch.cat([mask_cost, mask_cost.new_zeros(num_queries, num_neg + num_uncertain)], dim=1)
         cost = mask_cost + box_cost + disc_cost
         row, col = linear_sum_assignment(cost.float().cpu().numpy())
         match = torch.empty(num_queries, dtype=torch.int64, device=self.device)
@@ -351,7 +348,11 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         return match
 
     def box_loss(
-        self, input: torch.Tensor, target: torch.Tensor, reduce_batch: bool = True, return_dict: bool = False,
+        self,
+        input: torch.Tensor,
+        target: torch.Tensor,
+        reduce_batch: bool = True,
+        return_dict: bool = False,
     ):
         """input and target are in CenterSizeMode"""
         if reduce_batch:
@@ -376,9 +377,13 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             return total
 
     def disc_loss(
-        self, input: torch.Tensor, target: torch.Tensor, reduce_batch: bool = True, return_dict: bool = False,
+        self,
+        input: torch.Tensor,
+        pos: bool,
+        reduce_batch: bool = True,
+        return_dict: bool = False,
     ):
-        disc_loss = sigmoid_focal_loss(input, target)
+        disc_loss = (bce_pos if pos else bce_neg)(input)
         if reduce_batch:
             disc_loss = disc_loss.mean()
         total = self.disc_loss_weight * disc_loss
@@ -446,6 +451,8 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         loss = zero_loss(masks_logits_ds, boxes_reg, disc_logit)
         log_dict = {}
         if num_targets > 0:
+            # convert to float since it is used for loss calculation
+            masks_logits = masks_logits.float()
             index_offsets = index_offsets[:num_targets]
             semantic = semantic[:num_targets]
             num_uncertain = num_uncertain[:num_targets]
@@ -498,11 +505,9 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             match_pos_mask: torch.BoolTensor = match >= 0  # type: ignore
             match_pos = match[match_pos_mask]
             match_neg_mask: torch.BoolTensor = match == MATCH_NEGATIVE  # type: ignore
-            if (num_pos := match_pos.shape[0]) > 0:
+            if match_pos.shape[0] > 0:
                 loss += _accumulate(
-                    self.disc_loss(
-                        disc_logit[match_pos_mask], disc_logit.new_ones(num_pos), return_dict=True,
-                    ),
+                    self.disc_loss(disc_logit[match_pos_mask], True),
                     'instance', 'disc-pos',
                 )
                 loss += _accumulate(
@@ -520,9 +525,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
                     )
             if (num_neg := match_neg_mask.sum().item()) > 0:
                 loss += _accumulate(
-                    self.disc_loss(
-                        disc_logit[match_neg_mask], disc_logit.new_zeros(num_neg), return_dict=True,
-                    ),
+                    self.disc_loss(disc_logit[match_neg_mask], False, return_dict=True),
                     'instance', 'disc-neg',
                 )
                 if self.neg_mask_loss:
