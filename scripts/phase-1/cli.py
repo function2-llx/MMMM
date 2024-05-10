@@ -59,6 +59,7 @@ FSDPPrecision.convert_module = _FSDP_convert_module
 class CLI(LightningCLI):
     model: MMMMForCausalLM
     datamodule: MMMMDataModule
+    trainer: PeftTrainer
 
     def add_arguments_to_parser(self, parser: LightningArgumentParser):
         super().add_arguments_to_parser(parser)

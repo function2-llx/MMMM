@@ -342,8 +342,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         if masks_label is None:
             mask_cost = box_cost.new_zeros(num_queries, num_pos)
         else:
-            from functools import partial
-            mask_cost = pairwise_forward(partial(self.mask_loss, return_batch=False), masks_logits, masks_label)
+            mask_cost = pairwise_forward(self.mask_loss, masks_logits, masks_label, reduce_batch=False)
         mask_cost = torch.cat(
             [mask_cost, mask_cost.new_zeros(num_queries, num_neg + num_uncertain)], dim=1,
         )
@@ -493,7 +492,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
                     continue
                 label_slice = slice(*index_offsets[i])
                 match[i] = self._match_instances(
-                    masks_logits[i],
+                    masks_logits_ds[i, 1:],
                     boxes_reg[i, 1:],
                     disc_logit[i],
                     None if masks_label_ds is None else masks_label_ds[label_slice],
