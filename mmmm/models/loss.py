@@ -21,7 +21,6 @@ class DiceFocalLoss(nn.Module):
         dice_weight: float = 1.,
         focal_weight: float = 1.,
         focal_gamma: float = 0.,
-        smooth_dr: float = 1e-8,
     ):
         super().__init__()
         self.dice_weight = dice_weight
@@ -40,7 +39,7 @@ class DiceFocalLoss(nn.Module):
         pred_o = einops.reduce(input, 'n c ... -> n c', 'sum')
         denominator = ground_o + pred_o
         # NOTE: no smooth item for nominator, or it will become unfortunate
-        f: torch.Tensor = 1.0 - 2.0 * intersection / torch.clip(denominator + self.smooth_dr, min=1e-8)
+        f: torch.Tensor = 1.0 - 2.0 * intersection / torch.clip(denominator, min=_EPS)
         return f
 
     def focal(self, input: torch.Tensor, target: torch.Tensor):
@@ -68,9 +67,10 @@ class DiceFocalLoss(nn.Module):
             focal_loss = einops.reduce(focal_loss, 'n ... -> n', 'mean')
         total_loss: torch.Tensor = self.dice_weight * dice_loss + self.focal_weight * focal_loss
         if return_dict:
+            focal_key = 'ce' if self.focal_gamma < _EPS else f'focal-{self.focal_gamma:.1f}'
             return {
                 'dice': dice_loss,
-                f'focal-{self.focal_gamma:.1f}': focal_loss,
+                focal_key: focal_loss,
                 'total': total_loss,
             }
         else:

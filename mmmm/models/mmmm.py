@@ -334,10 +334,25 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             dim=1,
         )
         if masks_label is None:
-            mask_cost = box_cost.new_zeros(num_queries, num_pos)
+            mask_cost_pos = box_cost.new_zeros(num_queries, num_pos)
         else:
-            mask_cost = pairwise_forward(self.mask_loss, masks_logits, masks_label, reduce_batch=False)
-        mask_cost = torch.cat([mask_cost, mask_cost.new_zeros(num_queries, num_neg + num_uncertain)], dim=1)
+            mask_cost_pos = pairwise_forward(self.mask_loss, masks_logits, masks_label, reduce_batch=False)
+        if self.neg_mask_loss:
+            mask_cost_neg = pairwise_forward(
+                self.mask_loss, masks_logits, masks_label.new_zeros(1, 1, *masks_label.shape[2:]), reduce_batch=False,
+            )
+            mask_cost = torch.cat(
+                [
+                    mask_cost_pos,
+                    einops.repeat(mask_cost_neg, 'n 1 -> n m', m=num_neg),
+                    mask_cost_pos.new_zeros(num_queries, num_uncertain),
+                ],
+                dim=1,
+            )
+        else:
+            mask_cost = torch.cat(
+                [mask_cost_pos, mask_cost_pos.new_zeros(num_queries, num_neg + num_uncertain)], dim=1,
+            )
         cost = mask_cost + box_cost + disc_cost
         row, col = linear_sum_assignment(cost.float().cpu().numpy())
         match = torch.empty(num_queries, dtype=torch.int64, device=self.device)
@@ -347,13 +362,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         match[match >= 0] += offset
         return match
 
-    def box_loss(
-        self,
-        input: torch.Tensor,
-        target: torch.Tensor,
-        reduce_batch: bool = True,
-        return_dict: bool = False,
-    ):
+    def box_loss(self, input: torch.Tensor, target: torch.Tensor, reduce_batch: bool = True, return_dict: bool = False):
         """input and target are in CenterSizeMode"""
         if reduce_batch:
             l1 = nnf.l1_loss(input, target)
@@ -376,13 +385,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         else:
             return total
 
-    def disc_loss(
-        self,
-        input: torch.Tensor,
-        pos: bool,
-        reduce_batch: bool = True,
-        return_dict: bool = False,
-    ):
+    def disc_loss(self, input: torch.Tensor, pos: bool, reduce_batch: bool = True, return_dict: bool = False):
         disc_loss = (bce_pos if pos else bce_neg)(input)
         if reduce_batch:
             disc_loss = disc_loss.mean()
@@ -425,10 +428,11 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             for k, v in _vg_log_dict.items():
                 vg_log_dict.setdefault(k, []).append(v)
         vg_loss = torch.stack(vg_loss_list).mean()
-        vg_log_dict = {
-            f'{prefix}/vg/{k}': torch.stack(v).mean()
-            for k, v in vg_log_dict.items()
-        }
+        with torch.no_grad():
+            vg_log_dict = {
+                f'{prefix}/vg/{k}': torch.stack(v).mean()
+                for k, v in vg_log_dict.items()
+            }
         return vg_loss, vg_log_dict
 
     def _compute_vg_loss(
