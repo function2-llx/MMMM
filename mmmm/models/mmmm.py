@@ -140,7 +140,11 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             nn.ReLU(inplace=True),
             nn.Linear(self.sam_model.mask_embed_dim, 6),
         )
-        self.disc_head = nn.Linear(self.sam_model.mask_embed_dim, 1)
+        self.disc_head = nn.Sequential(
+            nn.Linear(self.sam_model.mask_embed_dim, self.sam_model.mask_embed_dim),
+            nn.ReLU(inplace=True),
+            nn.Linear(self.sam_model.mask_embed_dim, 1),
+        )
         self.model.config.lora_lang = lora_lang
         self.model.tokenizer = tokenizer
         self.check_grad = False
@@ -257,7 +261,6 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
 
     def training_step(self, batch: Batch, *args, **kwargs):
         vlm_inputs = batch['vlm_inputs']
-        print(rank_prefixed_message(f'training step {self.global_step}', self.global_rank))
         input_ids: torch.LongTensor = vlm_inputs['input_ids']  # type: ignore
         vlm_output: CausalLMOutputWithPast = self(
             **vlm_inputs,
@@ -267,8 +270,6 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             return_dict=True,
             output_hidden_states=True,
         )
-        self.log('train/lm_loss', vlm_output.loss)
-        # return vlm_output.loss
         vg_output = self.visual_grounding(
             # shift as suggested by GLaMM: https://github.com/mbzuai-oryx/groundingLMM/issues/16
             input_ids[:, 1:],
@@ -318,6 +319,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         masks_label: torch.BoolTensor | None,
         boxes_label: torch.Tensor,
         num_uncertain: int,
+        offset: int,
     ) -> torch.LongTensor:
         num_queries = masks_pred.shape[0]
         num_pos = boxes_label.shape[0]
@@ -350,11 +352,12 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         )
         cost = self.dice_loss_weight * dice_cost + box_cost + disc_cost
         row, col = linear_sum_assignment(cost.float().cpu().numpy())
-        match = torch.empty(num_queries, dtype=torch.int64)
-        match[row] = torch.from_numpy(col)
+        match = torch.empty(num_queries, dtype=torch.int64, device=self.device)
+        match[row] = torch.as_tensor(col, device=self.device)
         match[match >= num_pos] = MATCH_NEGATIVE
         match[match >= num_pos + num_neg] = MATCH_UNCERTAIN
-        return match.to(self.device)
+        match[match >= 0] += offset
+        return match
 
     def box_loss(
         self, input: torch.Tensor, target: torch.Tensor, reduce_batch: bool = True, return_dict: bool = False,
@@ -380,10 +383,6 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             }
         else:
             return total
-
-    # def weighted_mask_loss(self, input: torch.Tensor, target: torch.Tensor, reduce_batch: bool = True):
-    #     mask_loss = self.mask_loss(input, target, reduce_batch=reduce_batch)
-    #     return self.mask_loss_weight * mask_loss
 
     def disc_loss(
         self, input: torch.Tensor, target: torch.Tensor, reduce_batch: bool = True, return_dict: bool = False,
@@ -454,8 +453,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         # tokens for vg might be truncated by max_seq_len
         assert num_targets <= index_offsets.shape[0]
         loss = zero_loss(masks_logits_ds, boxes_reg, disc_logit)
-        semantic_dict = {}
-        instance_dict = {}
+        log_dict = {}
         if num_targets > 0:
             index_offsets = index_offsets[:num_targets]
             semantic = semantic[:num_targets]
@@ -464,11 +462,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             def _accumulate(loss_log_dict: dict[str, torch.Tensor], task: Literal['semantic', 'instance'], prefix: str):
                 ret = loss_log_dict.pop('total')
                 for k, v in loss_log_dict.items():
-                    log_key = f'{task}-{prefix}-{k}'
-                    if task == 'semantic':
-                        semantic_dict[log_key] = v
-                    else:
-                        instance_dict.setdefault(log_key, []).append(v)
+                    log_dict[f'{task}-{prefix}-{k}'] = v
                 return ret
 
             # 1. semantic part
@@ -496,77 +490,61 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
                 masks_pred_ds: torch.BoolTensor = masks_logits_ds[:, 1:].sigmoid().round().bool()  # type: ignore
 
             num_uncertain_list = num_uncertain.tolist()
-            _loss_list = []
-            # match = torch.empty(masks_logits.shape[:2], dtype=torch.long)
+            offset_list = index_offsets[:, 0].tolist()
+            match = torch.full((num_targets, masks_logits.shape[1] - 1), MATCH_UNCERTAIN, dtype=torch.long, device=self.device)
             for i in range(num_targets):
                 if semantic[i] or (_num_uncertain := num_uncertain_list[i]) == -1:
                     # we know that the target presents on the image, but no localized information available, skip
                     continue
-                _masks_logits = masks_logits[i, 1:]
-                _boxes_reg = boxes_reg[i, 1:]
-                _disc_logit = disc_logit[i]
                 label_slice = slice(*index_offsets[i])
-                _boxes_label = boxes_label[label_slice]
-                # match[i] = self._match_instances(
-                match = self._match_instances(
+                match[i] = self._match_instances(
                     masks_pred_ds[i],
-                    _boxes_reg,
-                    _disc_logit,
+                    boxes_reg[i, 1:],
+                    disc_logit[i],
                     None if masks_label_ds is None else masks_label_ds[label_slice],
-                    _boxes_label,
+                    boxes_label[label_slice],
                     _num_uncertain,
+                    offset_list[i],
                 )
-                # ) + index_offsets[i, 0]
-                match_pos_mask: torch.BoolTensor = match >= 0  # type: ignore
-                match_pos = match[match_pos_mask]
-                match_neg_mask: torch.BoolTensor = match == MATCH_NEGATIVE  # type: ignore
-                _loss = loss.new_tensor(0)
-                if (num_pos := match_pos.shape[0]) > 0:
-                    _loss += _accumulate(
-                        self.disc_loss(
-                            _disc_logit[match_pos_mask], disc_logit.new_ones(num_pos), return_dict=True,
+            match_pos_mask: torch.BoolTensor = match >= 0  # type: ignore
+            match_pos = match[match_pos_mask]
+            match_neg_mask: torch.BoolTensor = match == MATCH_NEGATIVE  # type: ignore
+            if (num_pos := match_pos.shape[0]) > 0:
+                loss += _accumulate(
+                    self.disc_loss(
+                        disc_logit[match_pos_mask], disc_logit.new_ones(num_pos), return_dict=True,
+                    ),
+                    'instance', 'disc-pos',
+                )
+                loss += _accumulate(
+                    self.box_loss(
+                        boxes_reg[:, 1:][match_pos_mask], boxes_label[match_pos], return_dict=True,
+                    ),
+                    'instance', 'box',
+                )
+                if masks_label is not None:
+                    loss += _accumulate(
+                        self.mask_loss(
+                            masks_logits[:, 1:][match_pos_mask], masks_label[match_pos], return_dict=True,
                         ),
-                        'instance', 'disc-pos',
+                        'instance', 'mask-pos',
                     )
-                    _loss += _accumulate(
-                        self.box_loss(
-                            _boxes_reg[match_pos_mask], _boxes_label[match_pos], return_dict=True,
+            if (num_neg := match_neg_mask.sum().item()) > 0:
+                loss += _accumulate(
+                    self.disc_loss(
+                        disc_logit[match_neg_mask], disc_logit.new_zeros(num_neg), return_dict=True,
+                    ),
+                    'instance', 'disc-neg',
+                )
+                if self.neg_mask_loss:
+                    loss += _accumulate(
+                        self.mask_loss(
+                            masks_logits[:, 1:][match_neg_mask, None],
+                            masks_logits.new_zeros(num_neg, 1, masks_logits.shape[2:]),
+                            return_dict=True,
                         ),
-                        'instance', 'box',
+                        'instance', 'mask-neg',
                     )
-                    if masks_label is not None:
-                        _loss += _accumulate(
-                            self.mask_loss(
-                                _masks_logits[match_pos_mask], masks_label[label_slice][match_pos], return_dict=True,
-                            ),
-                            'instance', 'mask-pos',
-                        )
-                if (num_neg := match_neg_mask.sum().item()) > 0:
-                    _loss += _accumulate(
-                        self.disc_loss(
-                            _disc_logit[match_neg_mask], disc_logit.new_zeros(num_neg), return_dict=True,
-                        ),
-                        'instance', 'disc-neg',
-                    )
-                    if self.neg_mask_loss:
-                        _loss += _accumulate(
-                            self.mask_loss(
-                                _masks_logits[match_neg_mask, None],
-                                masks_logits.new_zeros(num_neg, 1, masks_logits.shape[2:]),
-                                return_dict=True,
-                            ),
-                            'instance', 'mask-neg',
-                        )
-                _loss_list.append(_loss)
-            if len(_loss_list) > 0:
-                loss += torch.stack(_loss_list).mean()
-        log_dict = {
-            **semantic_dict,
-            **{
-                k: torch.stack(v).mean()
-                for k, v in instance_dict.items()
-            },
-        }
         return loss, log_dict
 
     # def sw_predictor(self, patch: torch.Tensor):
