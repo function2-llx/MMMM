@@ -315,8 +315,8 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         num_pos = boxes_label.shape[0]
         num_uncertain = min(max(num_queries - num_pos, 0), num_uncertain)
         num_neg = max(num_queries - num_pos - num_uncertain, 0)
-        disc_cost_pos = bce_pos(disc_logit)
-        disc_cost_neg = bce_neg(disc_logit)
+        disc_cost_pos = self.disc_loss(disc_logit, True, reduce_batch=False)
+        disc_cost_neg = self.disc_loss(disc_logit, False, reduce_batch=False)
         # label order: pos, neg, uncertain,
         disc_cost = torch.cat(
             [
@@ -389,7 +389,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         total = self.disc_loss_weight * disc_loss
         if return_dict:
             return {
-                'focal': disc_loss,
+                'ce': disc_loss,
                 'total': total,
             }
         else:

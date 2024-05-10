@@ -45,3 +45,7 @@ optim:
         warmup_prefix: true
     interval: step
     frequency: 500
+mask_loss:
+  dice_weight: 2
+  focal_weight: 2
+  focal_gamma: 0
