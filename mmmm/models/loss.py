@@ -24,7 +24,6 @@ class DiceFocalLoss(nn.Module):
     ):
         super().__init__()
         self.dice_weight = dice_weight
-        self.smooth_dr = smooth_dr
         self.focal_gamma = focal_gamma
         assert focal_gamma >= 0
         self.focal_weight = focal_weight
