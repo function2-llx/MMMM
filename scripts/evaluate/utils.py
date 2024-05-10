@@ -11,13 +11,11 @@ import random
 import torch
 from torch.utils.data import Dataset
 from tqdm import tqdm
-import transformers
 from transformers import BertTokenizer
 from vllm import LLM, SamplingParams
 
 
 from mmmm.data.defs import PROCESSED_VL_DATA_ROOT
-from mmmm.data.dataset.vl import REPORT_PROMPTS, FINDINGS_PROMPTS, COMPLETE_REFERRINGS
 
 
 LLAMA3_PATH = '/data/llama3/Meta-Llama-3-70B-Instruct-hf'
@@ -80,13 +78,9 @@ class ReportTestDataset(Dataset):
                 {
                     'image': image,
                     'question': (
-                        random.choice(REPORT_PROMPTS).format(
-                            random.choice(COMPLETE_REFERRINGS)
-                        )
+                        'Can you provide a radiology report for this medical image?'
                         if x.get('impression')
-                        else random.choice(FINDINGS_PROMPTS).format(
-                            random.choice(COMPLETE_REFERRINGS)
-                        )
+                        else 'Can you provide the findings for this medical image?'
                     ),
                     'answer': (
                         f'Findings: {x["findings"]}\nImpression: {x["impression"]}'
