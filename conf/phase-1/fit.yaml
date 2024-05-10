@@ -45,5 +45,3 @@ optim:
         warmup_prefix: true
     interval: step
     frequency: 500
-mask_loss:
-  lambda_focal: 1
