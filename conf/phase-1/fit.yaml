@@ -8,8 +8,7 @@ trainer:
   gradient_clip_val: 1
   gradient_clip_algorithm: norm
   save_embedding_layers: true
-  strategy:
-    class_path: MyFSDPStrategy
+  strategy: ddp
   callbacks:
   - class_path: luolib.lightning.callbacks.ModelCheckpoint
     init_args:
@@ -24,19 +23,18 @@ optim:
     kwargs:
       name: vlm
       lr: 5e-5
-      weight_decay: 5e-2
   - prefix: [sam_model]
     kwargs:
       name: sam
       lr: 1e-4
-      weight_decay: 5e-2
   - prefix: ['']
     kwargs:
       name: new
       lr: 1e-4
-      weight_decay: 5e-2
   optimizer:
     class_path: torch.optim.AdamW
+    init_args:
+      weight_decay: 5e-2
   lr_scheduler:
     scheduler:
       class_path: timm.scheduler.CosineLRScheduler
