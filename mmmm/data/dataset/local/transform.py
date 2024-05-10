@@ -394,6 +394,7 @@ class SamplePatch(mt.Randomizable):
             inference=self.inference,
             grounding=grounding,
             max_seq_len=conf.max_seq_len,
+            bop_weight=conf.bop_weight,
         )
 
         # 6. prepare the data point!

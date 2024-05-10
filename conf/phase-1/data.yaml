@@ -103,6 +103,7 @@ init_args:
     pool_size_xy: 2
     base_pool_size_z: 2
     max_seq_len: 512
+    bop_weight: 3
     seg_trans:
       max_vision_tokens: 100
       scale_z: [1, 2]

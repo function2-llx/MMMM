@@ -142,7 +142,7 @@ def _list_results(
         if pos_mask is not None:
             item += ': ' + ('no' if neg else 'yes')
         items.append(item)
-    ret = f'Results:{space}' + f',{space}'.join(items)
+    ret = f'Results:{space}' + f',{space}'.join(items) + '.'
     return ret
 
 def gen_general_conv(

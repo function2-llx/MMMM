@@ -30,7 +30,7 @@ optim:
   - prefix: ['']
     kwargs:
       name: new
-      lr: 1e-4
+      lr: 2e-4
   optimizer:
     class_path: torch.optim.AdamW
     init_args:
