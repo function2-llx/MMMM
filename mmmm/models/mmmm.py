@@ -216,9 +216,6 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         patch_size: list[tuple3_t[int]],
     ) -> VisualGroundingOutput:
         """
-        TODO:
-         - make it compatible with HF interface, e.g., adapt return_dict
-         - support cache for segmentation output
         Args:
             token_ids: generated token ids
             hidden_states: hidden states that generate tokens
