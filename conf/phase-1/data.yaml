@@ -42,7 +42,7 @@ init_args:
       type: local
     - name: LiTS
       type: local
-    - name: LIDR-IDRI
+    - name: LIDC-IDRI
       type: local
     - name: LNQ2023
       type: local
