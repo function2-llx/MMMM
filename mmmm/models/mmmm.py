@@ -13,7 +13,7 @@ from torch.nn import functional as nnf
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
 from luolib.lightning import LightningModule
-from luolib.losses import bce_neg, bce_pos, bce_with_binary_label, zero_loss
+from luolib.losses import bce_neg, bce_pos, zero_loss
 from luolib.types import param3_t, tuple2_t, tuple3_t
 from luolib.utils.misc import pairwise_forward
 from monai.data import box_pair_giou, convert_box_mode
@@ -507,7 +507,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             match_neg_mask: torch.BoolTensor = match == MATCH_NEGATIVE  # type: ignore
             if match_pos.shape[0] > 0:
                 loss += _accumulate(
-                    self.disc_loss(disc_logit[match_pos_mask], True),
+                    self.disc_loss(disc_logit[match_pos_mask], True, return_dict=True),
                     'instance', 'disc-pos',
                 )
                 loss += _accumulate(
