@@ -89,15 +89,15 @@ init_args:
       weight: 0.1
     - name: WORD
       type: local
-#    - name: MIMIC-CXR
-#      type: vl
-#      weight: 0.02
-#    - name: Radiopaedia
-#      type: vl
-#      weight: 0.02
-#    - name: PMC-OA
-#      type: vl
-#      weight: 0.0012
+    - name: MIMIC-CXR
+      type: vl
+      weight: 0.02
+    - name: Radiopaedia
+      type: vl
+      weight: 0.02
+    - name: PMC-OA
+      type: vl
+      weight: 0.0012
     base_vit_patch_size_z: 16
     vit_patch_size_xy: 16
     pool_size_xy: 2
