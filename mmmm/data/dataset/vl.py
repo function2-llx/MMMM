@@ -10,6 +10,7 @@ import torch
 from torchvision.io import read_image
 from torchvision.transforms import v2 as tvt
 
+from luolib.utils import load_pt_zst
 from luolib.utils.misc import ensure_rgb
 from monai import transforms as mt
 from monai.utils import InterpolateMode, convert_to_tensor
@@ -127,6 +128,8 @@ class VLTransform(mt.RandomizableTransform):
             modality = None
         if image_path.endswith('.pt'):
             image = torch.load(image_path)
+        elif image_path.endswith('.pt.zst'):
+            image = load_pt_zst(image_path)
         else:
             image = read_image(image_path)
             image = einops.rearrange(image, 'c h w -> c 1 h w')
@@ -194,16 +197,21 @@ class VLTransform(mt.RandomizableTransform):
             inference=self.inference,
             grounding=False,
             max_seq_len=conf.max_seq_len,
+            bop_weight=1.,
         )
         data: DataPoint = {
+            'src': ('?', str(image_path)),
             'image': image,
             'grounding_image': torch.zeros(3, *patch_size),
             'patch_size': patch_size,
             'pool_size': (pool_size_z, conf.pool_size_xy, conf.pool_size_xy),
             'vlm_inputs': vlm_inputs,
-            'mask': torch.zeros(0, *patch_size, dtype=torch.bool),
-            'mask_index': torch.empty(0, dtype=torch.bool),
-            'bbox': torch.empty(0, 2, 3),
-            'bbox_index': torch.zeros(0, dtype=torch.bool),
+            'masks': torch.zeros(0, *patch_size, dtype=torch.bool),
+            'boxes': torch.zeros(0, 6),
+            'semantic_masks': None,
+            'semantic_boxes': None,
+            'index_offsets': torch.empty(0, 2, dtype=torch.long),
+            'num_uncertain': torch.empty(0, dtype=torch.long),
+            'semantic': torch.empty(0, dtype=torch.bool),
         }
         return data
