@@ -524,7 +524,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
                 )
                 loss += _accumulate(
                     self.box_loss(
-                        boxes_reg[:, 1:][match_pos_mask], boxes_label[match_pos], return_dict=True,
+                        boxes_reg[match_pos_mask], boxes_label[match_pos], return_dict=True,
                     ),
                     'instance', 'box',
                 )
@@ -542,7 +542,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
                 )
                 if self.neg_mask_loss:
                     loss += _accumulate(
-                        self.mask_loss(masks_logits[:, 1:][match_neg_mask], return_dict=True),
+                        self.mask_loss(masks_logits[match_neg_mask][:, None], return_dict=True),
                         'instance', 'mask-neg',
                     )
         return loss, log_dict
