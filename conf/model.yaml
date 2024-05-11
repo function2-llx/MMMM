@@ -16,7 +16,7 @@ model:
       num_instances: 6
       checkpoint: pre-trained/SegVol_v1.pth
 lora:
-  r: 16
+  r: 64
   lora_alpha: 8
-  lora_dropout: 0.1
+  lora_dropout: 0.05
   use_rslora: true
