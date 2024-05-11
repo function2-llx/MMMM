@@ -507,7 +507,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
                 label_slice = slice(*index_offsets[i])
                 match[i] = self._match_instances(
                     masks_logits_ds[i, :, None],
-                    boxes_reg,
+                    boxes_reg[i],
                     disc_logit[i],
                     None if masks_label_ds is None else masks_label_ds[label_slice, None],
                     boxes_label[label_slice],
