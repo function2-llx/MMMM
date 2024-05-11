@@ -118,8 +118,6 @@ def llavamed_vl_evaluate(model, tokenizer, processor, image_token_len, dataloade
                 model.generate(
                     language,
                     images=vision,
-                    do_sample=True,
-                    temperature=0.7,
                     stopping_criteria=[stopping_criteria],
                     max_new_tokens=256,
                 )[0, language.shape[1] :],
