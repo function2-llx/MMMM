@@ -13,7 +13,6 @@ import torch
 from torch.utils.data import Dataset
 from tqdm import tqdm
 from transformers import BertTokenizer
-from vllm import LLM, SamplingParams
 
 
 from mmmm.data.defs import PROCESSED_VL_DATA_ROOT
@@ -174,11 +173,15 @@ class GenericMetrics:
 
 class LlamaMetrics:
     def __init__(self):
+        from vllm import LLM
+
         self.llama = LLM(
             model=LLAMA3_PATH, dtype='bfloat16', gpu_memory_utilization=0.75
         )
 
     def process(self, run: Path):
+        from vllm import SamplingParams
+
         df = pd.read_csv(str(run) + '.csv')
         if os.path.exists(str(run) + '.json'):
             with open(str(run) + '.json', 'r') as f:
