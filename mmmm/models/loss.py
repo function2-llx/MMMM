@@ -28,10 +28,12 @@ class DiceFocalLoss(nn.Module):
         assert focal_gamma >= 0
         self.focal_weight = focal_weight
 
-    def dice(self, input: torch.Tensor, target: torch.Tensor):
+    def dice(self, input: torch.Tensor, target: torch.Tensor | None):
         """
         copy from monai.losses.DiceLoss.forward, but fix the smooth issue, fix: https://github.com/MIC-DKFZ/nnUNet/issues/812
         """
+        if target is None:
+            return input.new_ones(input.shape[:2])
         input = torch.sigmoid(input)
         intersection = einops.reduce(target * input, 'n c ... -> n c', 'sum')
         ground_o = einops.reduce(target, 'n c ... -> n c ', 'sum')
@@ -41,21 +43,24 @@ class DiceFocalLoss(nn.Module):
         f: torch.Tensor = 1.0 - 2.0 * intersection / torch.clip(denominator, min=_EPS)
         return f
 
-    def focal(self, input: torch.Tensor, target: torch.Tensor):
+    def focal(self, input: torch.Tensor, target: torch.Tensor | None):
         # let's be happy
         if self.focal_gamma < _EPS:
             return bce_with_binary_label(input, target)
         else:
+            if target is None:
+                target = torch.zeros_like(input)
             return sigmoid_focal_loss(input, target)
 
     def forward(
         self,
         input: torch.Tensor,
-        target: torch.BoolTensor,
+        target: torch.BoolTensor | None = None,
         *,
         reduce_batch: bool = True,
         return_dict: bool = False,
     ) -> torch.Tensor | dict[str, torch.Tensor]:
+        assert input.ndim == 5
         dice_loss = self.dice(input, target)
         focal_loss = self.focal(input, target)
         if reduce_batch:

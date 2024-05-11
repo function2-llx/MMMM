@@ -93,7 +93,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         box_l1_loss_weight: float = 1.,
         box_giou_loss_weight: float = 0.5,
         disc_loss_weight: float = 1.,
-        neg_mask_loss: bool = False,
+        neg_mask_loss: bool = True,
         vision_override: VisionArgs,
         tokenizer: MMMMTokenizer,
         sam: SamArgs,
@@ -310,11 +310,13 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         boxes_label: torch.Tensor,
         num_uncertain: int,
         offset: int,
-    ) -> torch.LongTensor:
+    ) -> torch.LongTensor | int:
         num_queries = masks_logits.shape[0]
         num_pos = boxes_label.shape[0]
         num_uncertain = min(max(num_queries - num_pos, 0), num_uncertain)
         num_neg = max(num_queries - num_pos - num_uncertain, 0)
+        if num_queries == num_neg:
+            return MATCH_NEGATIVE
         disc_cost_pos = self.disc_loss(disc_logit, True, reduce_batch=False)
         disc_cost_neg = self.disc_loss(disc_logit, False, reduce_batch=False)
         # label order: pos, neg, uncertain,
@@ -326,16 +328,18 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             ],
             dim=1,
         )
-        box_cost = torch.cat(
-            [
-                pairwise_forward(self.box_loss, boxes_reg, boxes_label, reduce_batch=False),
-                disc_cost.new_zeros(num_queries, num_neg + num_uncertain)
-            ],
-            dim=1,
-        )
         if masks_label is None:
+            box_cost = torch.cat(
+                [
+                    pairwise_forward(self.box_loss, boxes_reg, boxes_label, reduce_batch=False),
+                    disc_cost.new_zeros(num_queries, num_neg + num_uncertain)
+                ],
+                dim=1,
+            )
             mask_cost_pos = box_cost.new_zeros(num_queries, num_pos)
         else:
+            # not using box for matching when mask is available
+            box_cost = disc_cost.new_zeros(num_queries, num_queries)
             mask_cost_pos = pairwise_forward(self.mask_loss, masks_logits, masks_label, reduce_batch=False)
         if self.neg_mask_loss:
             mask_cost_neg = pairwise_forward(
@@ -498,10 +502,10 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
                     continue
                 label_slice = slice(*index_offsets[i])
                 match[i] = self._match_instances(
-                    masks_logits_ds[i, 1:],
+                    masks_logits_ds[i, 1:, None],
                     boxes_reg[i, 1:],
                     disc_logit[i],
-                    None if masks_label_ds is None else masks_label_ds[label_slice],
+                    None if masks_label_ds is None else masks_label_ds[label_slice, None],
                     boxes_label[label_slice],
                     _num_uncertain,
                     offset_list[i],
@@ -527,18 +531,14 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
                         ),
                         'instance', 'mask-pos',
                     )
-            if (num_neg := match_neg_mask.sum().item()) > 0:
+            if match_neg_mask.any():
                 loss += _accumulate(
                     self.disc_loss(disc_logit[match_neg_mask], False, return_dict=True),
                     'instance', 'disc-neg',
                 )
                 if self.neg_mask_loss:
                     loss += _accumulate(
-                        self.mask_loss(
-                            masks_logits[:, 1:][match_neg_mask, None],
-                            masks_logits.new_zeros(num_neg, 1, masks_logits.shape[2:]),
-                            return_dict=True,
-                        ),
+                        self.mask_loss(masks_logits[:, 1:][match_neg_mask], return_dict=True),
                         'instance', 'mask-neg',
                     )
         return loss, log_dict
