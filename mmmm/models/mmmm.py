@@ -336,27 +336,29 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
                 ],
                 dim=1,
             )
-            mask_cost_pos = box_cost.new_zeros(num_queries, num_pos)
+            mask_cost = box_cost.new_zeros(num_queries, num_queries)
         else:
             # not using box for matching when mask is available
             box_cost = disc_cost.new_zeros(num_queries, num_queries)
             mask_cost_pos = pairwise_forward(self.mask_loss, masks_logits, masks_label, reduce_batch=False)
-        if self.neg_mask_loss:
-            mask_cost_neg = pairwise_forward(
-                self.mask_loss, masks_logits, masks_label.new_zeros(1, 1, *masks_label.shape[2:]), reduce_batch=False,
-            )
-            mask_cost = torch.cat(
-                [
-                    mask_cost_pos,
-                    einops.repeat(mask_cost_neg, 'n 1 -> n m', m=num_neg),
-                    mask_cost_pos.new_zeros(num_queries, num_uncertain),
-                ],
-                dim=1,
-            )
-        else:
-            mask_cost = torch.cat(
-                [mask_cost_pos, mask_cost_pos.new_zeros(num_queries, num_neg + num_uncertain)], dim=1,
-            )
+            if self.neg_mask_loss and masks_label is not None:
+                mask_cost_neg = self.mask_loss(masks_logits, reduce_batch=False)
+                mask_cost = torch.cat(
+                    [
+                        mask_cost_pos,
+                        einops.repeat(mask_cost_neg, 'n -> n m', m=num_neg),
+                        mask_cost_pos.new_zeros(num_queries, num_uncertain),
+                    ],
+                    dim=1,
+                )
+            else:
+                mask_cost = torch.cat(
+                    [
+                        mask_cost_pos,
+                        mask_cost_pos.new_zeros(num_queries, num_neg + num_uncertain)
+                    ],
+                    dim=1,
+                )
         cost = mask_cost + box_cost + disc_cost
         row, col = linear_sum_assignment(cost.float().cpu().numpy())
         match = torch.empty(num_queries, dtype=torch.int64, device=self.device)
