@@ -18,23 +18,12 @@ trainer:
       save_last: true
       verbose: true
 optim:
-  param_groups:
-  - prefix: [model, lm_head]
-    kwargs:
-      name: vlm
-      lr: 5e-5
-  - prefix: [sam_model]
-    kwargs:
-      name: sam
-      lr: 1e-4
-  - prefix: ['']
-    kwargs:
-      name: new
-      lr: 2e-4
+  param_groups: ['']
   optimizer:
     class_path: torch.optim.AdamW
     init_args:
-      weight_decay: 5e-2
+      lr: 1e-4
+      weight_decay: 0.01
   lr_scheduler:
     scheduler:
       class_path: timm.scheduler.CosineLRScheduler
