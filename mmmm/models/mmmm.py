@@ -499,7 +499,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
 
             num_uncertain_list = num_uncertain.tolist()
             offset_list = index_offsets[:, 0].tolist()
-            match = torch.full((num_targets, masks_logits.shape[1] - 1), MATCH_UNCERTAIN, dtype=torch.long, device=self.device)
+            match = torch.full((num_targets, masks_logits.shape[1]), MATCH_UNCERTAIN, dtype=torch.long, device=self.device)
             for i in range(num_targets):
                 if semantic[i] or (_num_uncertain := num_uncertain_list[i]) == -1:
                     # we know that the target presents on the image, but no localized information available, skip
