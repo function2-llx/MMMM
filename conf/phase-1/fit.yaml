@@ -18,7 +18,8 @@ trainer:
       save_last: true
       verbose: true
 optim:
-  param_groups: ['']
+  param_groups:
+  - prefix: ['']
   optimizer:
     class_path: torch.optim.AdamW
     init_args:
