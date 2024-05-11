@@ -1,5 +1,6 @@
 from collections.abc import Callable
 from functools import partial
+from pathlib import Path
 
 from lightning.pytorch.cli import LightningArgumentParser
 from lightning.pytorch.plugins import FSDPPrecision
@@ -70,6 +71,7 @@ class CLI(LightningCLI):
         parser.add_class_arguments(LoraConfig, 'lora')
         parser.add_class_arguments(DiceFocalLoss, 'mask_loss')
         parser.link_arguments('mask_loss', f'{self.model_prefix}.mask_loss', apply_on='instantiate')
+        parser.add_argument('--lora_adapter_path', type=Path | None, default=None)
 
     def instantiate_classes(self) -> None:
         super().instantiate_classes()
@@ -77,7 +79,11 @@ class CLI(LightningCLI):
         config = self.active_config_init
         lora_config: LoraConfig = config.lora
         lora_config.target_modules, lora_config.modules_to_save = get_lora_modules_default(model)
-        model.set_peft_model(get_peft_model(model, lora_config))
+        peft_model = get_peft_model(model, lora_config)
+        model.set_peft_model(peft_model)
+        if (lora_adapter_path := config.lora_adapter_path) is None:
+            peft_model.load_adapter(str(lora_adapter_path), 'default', is_trainable=self.subcommand == 'fit')
+            print(f'load adapter from {lora_adapter_path}')
 
 def main():
     CLI(
