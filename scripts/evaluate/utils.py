@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 import sys
 from typing import OrderedDict
+import evaluate
 import json
 import numpy as np
 import pandas as pd
@@ -10,7 +11,6 @@ from radgraph import F1RadGraph
 import random
 import torch
 from torch.utils.data import Dataset
-from torchmetrics.text import BLEUScore, ROUGEScore, BERTScore
 from tqdm import tqdm
 from transformers import BertTokenizer
 from vllm import LLM, SamplingParams
@@ -103,11 +103,41 @@ class ReportTestDataset(Dataset):
 
 class GenericMetrics:
     def __init__(self):
-        self.bleu1 = BLEUScore(n_gram=1)
-        self.bleu2 = BLEUScore(n_gram=2, weights=[1 / 2, 1 / 2])
-        self.bleu4 = BLEUScore(n_gram=4)
-        self.rougeL = ROUGEScore(rouge_keys=('rougeL', 'rouge1'))
-        self.bertscore = BERTScore(model_type='distilroberta-base')
+        self.bleu = evaluate.load('bleu')
+        self.rouge = evaluate.load('rouge')
+        self.meteor = evaluate.load('meteor')
+        self.bertscore = evaluate.load('bertscore')
+        self.exact_match = evaluate.load('exact_match')
+
+    def compute(self, prediction: str, reference: str):
+        prediction = prediction.lower()
+        reference = reference.lower()
+
+        return {
+            'bleu': (
+                self.bleu.compute(
+                    predictions=[prediction],
+                    references=[[reference]],
+                    max_order=1,
+                )['bleu']
+                if prediction.strip()
+                else 0.0
+            ),
+            'rouge': self.rouge.compute(
+                predictions=[prediction], references=[reference]
+            )['rouge1'],
+            'meteor': self.meteor.compute(
+                predictions=[prediction], references=[reference]
+            )['meteor'],
+            'bertscore': self.bertscore.compute(
+                predictions=[prediction],
+                references=[reference],
+                model_type='distilroberta-base',
+            )['f1'][0],
+            'exact_match': self.exact_match.compute(
+                predictions=[prediction], references=[reference]
+            )['exact_match'],
+        }
 
     def process(self, run: Path):
         df = pd.read_csv(str(run) + '.csv')
@@ -117,18 +147,21 @@ class GenericMetrics:
         else:
             summary = {}
 
-        predictions = [
-            str(prediction) if pd.notna(prediction) else ''
-            for prediction in df['prediction']
-        ]
-        references = [[reference] for reference in df['answer']]
         results = {
-            'bleu1': list(self.bleu1(predictions, references)),
-            'bleu2': list(self.bleu2(predictions, references)),
-            'bleu4': list(self.bleu4(predictions, references)),
-            'rougeL': list(self.rougeL(predictions, references)),
-            'bertscore': list(self.bertscore(predictions, references)),
+            'bleu': [],
+            'rouge': [],
+            'meteor': [],
+            'bertscore': [],
+            'exact_match': [],
         }
+
+        for _, row in tqdm(df.iterrows(), total=df.shape[0]):
+            score = self.compute(
+                str(row['prediction']) if pd.notna(row['prediction']) else '',
+                str(row['answer']),
+            )
+            for key in score.keys():
+                results[key].append(score[key])
 
         for key in results.keys():
             df[key] = results[key]
