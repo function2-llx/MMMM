@@ -336,10 +336,10 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
                 ],
                 dim=1,
             )
-            mask_cost = box_cost.new_zeros(num_queries, num_queries)
+            mask_cost = torch.zeros_like(disc_cost)
         else:
             # not using box for matching when mask is available
-            box_cost = disc_cost.new_zeros(num_queries, num_queries)
+            box_cost = torch.zeros_like(disc_cost)
             mask_cost_pos = pairwise_forward(self.mask_loss, masks_logits, masks_label, reduce_batch=False)
             if self.neg_mask_loss and masks_label is not None:
                 mask_cost_neg = self.mask_loss(masks_logits, reduce_batch=False)
