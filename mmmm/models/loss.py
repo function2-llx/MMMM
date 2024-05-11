@@ -61,6 +61,8 @@ class DiceFocalLoss(nn.Module):
         return_dict: bool = False,
     ) -> torch.Tensor | dict[str, torch.Tensor]:
         assert input.ndim == 5
+        if target is not None:
+            assert input.shape == target.shape
         dice_loss = self.dice(input, target)
         focal_loss = self.focal(input, target)
         if reduce_batch:
