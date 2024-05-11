@@ -485,6 +485,10 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
                 )
 
             # 2. instance part
+            # drop the semantic part
+            masks_logits_ds = masks_logits_ds[:, 1:]
+            masks_logits = masks_logits[:, 1:]
+            boxes_reg = boxes_reg[:, 1:]
             # downsample the mask for matching to save computation
             if masks_label is None:
                 masks_label_ds = None
@@ -502,8 +506,8 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
                     continue
                 label_slice = slice(*index_offsets[i])
                 match[i] = self._match_instances(
-                    masks_logits_ds[i, 1:, None],
-                    boxes_reg[i, 1:],
+                    masks_logits_ds[i, :, None],
+                    boxes_reg,
                     disc_logit[i],
                     None if masks_label_ds is None else masks_label_ds[label_slice, None],
                     boxes_label[label_slice],
@@ -527,7 +531,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
                 if masks_label is not None:
                     loss += _accumulate(
                         self.mask_loss(
-                            masks_logits[:, 1:][match_pos_mask], masks_label[match_pos], return_dict=True,
+                            masks_logits[match_pos_mask][:, None], masks_label[match_pos, None], return_dict=True,
                         ),
                         'instance', 'mask-pos',
                     )
