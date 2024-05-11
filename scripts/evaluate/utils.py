@@ -2,14 +2,15 @@ import os
 from pathlib import Path
 import sys
 from typing import OrderedDict
-import evaluate
 import json
 import numpy as np
 import pandas as pd
+import pickle as pkl
 from radgraph import F1RadGraph
 import random
 import torch
 from torch.utils.data import Dataset
+from torchmetrics.text import BLEUScore, ROUGEScore, BERTScore
 from tqdm import tqdm
 from transformers import BertTokenizer
 from vllm import LLM, SamplingParams
@@ -20,6 +21,7 @@ from mmmm.data.defs import PROCESSED_VL_DATA_ROOT
 
 LLAMA3_PATH = '/data/llama3/Meta-Llama-3-70B-Instruct-hf'
 CHEXBERT_PATH = '/data/chexbert/chexbert.pth'
+RADCLIQ_PATH = 'third-party/CXR-Report-Metric/CXRMetric/radcliq-v1.pkl'
 
 
 LLAMA_SYSTEM_PROMPT = '''
@@ -101,41 +103,11 @@ class ReportTestDataset(Dataset):
 
 class GenericMetrics:
     def __init__(self):
-        self.bleu = evaluate.load('bleu')
-        self.rouge = evaluate.load('rouge')
-        self.meteor = evaluate.load('meteor')
-        self.bertscore = evaluate.load('bertscore')
-        self.exact_match = evaluate.load('exact_match')
-
-    def compute(self, prediction: str, reference: str):
-        prediction = prediction.lower()
-        reference = reference.lower()
-
-        return {
-            'bleu': (
-                self.bleu.compute(
-                    predictions=[prediction],
-                    references=[[reference]],
-                    max_order=1,
-                )['bleu']
-                if prediction.strip()
-                else 0.0
-            ),
-            'rouge': self.rouge.compute(
-                predictions=[prediction], references=[reference]
-            )['rouge1'],
-            'meteor': self.meteor.compute(
-                predictions=[prediction], references=[reference]
-            )['meteor'],
-            'bertscore': self.bertscore.compute(
-                predictions=[prediction],
-                references=[reference],
-                model_type='microsoft/deberta-xlarge-mnli',
-            )['f1'][0],
-            'exact_match': self.exact_match.compute(
-                predictions=[prediction], references=[reference]
-            )['exact_match'],
-        }
+        self.bleu1 = BLEUScore(n_gram=1)
+        self.bleu2 = BLEUScore(n_gram=2, weights=[1 / 2, 1 / 2])
+        self.bleu4 = BLEUScore(n_gram=4)
+        self.rougeL = ROUGEScore(rouge_keys=('rougeL', 'rouge1'))
+        self.bertscore = BERTScore(model_type='distilroberta-base')
 
     def process(self, run: Path):
         df = pd.read_csv(str(run) + '.csv')
@@ -145,21 +117,18 @@ class GenericMetrics:
         else:
             summary = {}
 
+        predictions = [
+            str(prediction) if pd.notna(prediction) else ''
+            for prediction in df['prediction']
+        ]
+        references = [[reference] for reference in df['answer']]
         results = {
-            'bleu': [],
-            'rouge': [],
-            'meteor': [],
-            'bertscore': [],
-            'exact_match': [],
+            'bleu1': list(self.bleu1(predictions, references)),
+            'bleu2': list(self.bleu2(predictions, references)),
+            'bleu4': list(self.bleu4(predictions, references)),
+            'rougeL': list(self.rougeL(predictions, references)),
+            'bertscore': list(self.bertscore(predictions, references)),
         }
-
-        for _, row in df.iterrows():
-            score = self.compute(
-                str(row['prediction']) if pd.notna(row['prediction']) else '',
-                str(row['answer']),
-            )
-            for key in results.keys():
-                results[key].append(score[key])
 
         for key in results.keys():
             df[key] = results[key]
@@ -264,11 +233,26 @@ class CXRMetrics:
         self.chexbert_model = model
         self.chexbert_tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
 
+    def setup_radcliq(self):
+        sys.path.append('third-party/CXR-Report-Metric/')
+        sys.path.append('third-party/CXR-Report-Metric/CXRMetric/')
+        from run_eval import CompositeMetric
+
+        class RadCliQUnpickler(pkl.Unpickler):
+            def find_class(self, module, name):
+                if name == 'CompositeMetric':
+                    return CompositeMetric
+                return super().find_class(module, name)
+
+        with open(RADCLIQ_PATH, 'rb') as f:
+            self.radcliq = RadCliQUnpickler(f).load()
+
     def __init__(self):
         self.setup_chexbert()
         self.radgraph = F1RadGraph(
             reward_level='partial', cuda=0, model_type='radgraph'
         )
+        self.setup_radcliq()
 
     def compute_chexbert(self, prediction: str, reference: str):
         sys.path.append('third-party/CXR-Report-Metric/CXRMetric/')
@@ -394,16 +378,22 @@ class CXRMetrics:
             'radgraph': [],
         }
 
-        for _, row in tqdm(df.iterrows()):
+        for _, row in tqdm(df.iterrows(), total=df.shape[0]):
             score = self.compute(
                 str(row['prediction']) if pd.notna(row['prediction']) else '',
                 str(row['answer']),
             )
-            for key in results.keys():
+            for key in score.keys():
                 results[key].append(score[key])
 
         for key in results.keys():
             df[key] = results[key]
+
+        df['radcliq'] = self.radcliq.predict(
+            np.array(df[['radgraph', 'bertscore', 'chexbert', 'bleu']])
+        )
+
+        for key in results.keys():
             summary[key] = sum(results[key]) / len(results[key])
 
         df.to_csv(str(run) + '.csv')
