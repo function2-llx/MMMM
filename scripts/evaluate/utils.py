@@ -280,6 +280,8 @@ class CXRMetrics:
         with open(RADCLIQ_PATH, 'rb') as f:
             self.radcliq = RadCliQUnpickler(f).load()
 
+        self.bleu2 = evaluate.load('bleu')
+
     def __init__(self):
         self.setup_chexbert()
         self.radgraph = F1RadGraph(
@@ -392,10 +394,18 @@ class CXRMetrics:
             hyp_annotation_lists[0], ref_annotation_lists[0]
         )
 
+    def compute_bleu2(self, prediction: str, reference: str):
+        return self.bleu2.compute(
+            predictions=[prediction],
+            references=[[reference]],
+            max_order=2,
+        )['bleu'] if prediction.strip() else 0.0
+
     def compute(self, prediction: str, reference: str):
         return {
             'chexbert': self.compute_chexbert(prediction, reference),
             'radgraph': self.compute_radgraph(prediction, reference),
+            'bleu2': self.compute_bleu2(prediction, reference),
         }
 
     def process(self, run: Path):
@@ -409,6 +419,7 @@ class CXRMetrics:
         results = {
             'chexbert': [],
             'radgraph': [],
+            'bleu2': []
         }
 
         for _, row in tqdm(df.iterrows(), total=df.shape[0]):
@@ -423,8 +434,9 @@ class CXRMetrics:
             df[key] = results[key]
 
         df['radcliq'] = self.radcliq.predict(
-            np.array(df[['radgraph', 'bertscore', 'chexbert', 'bleu']])
+            np.array(df[['radgraph', 'bertscore', 'chexbert', 'bleu2']])
         )
+        df.drop(columns=['bleu2'])
 
         for key in results.keys():
             summary[key] = sum(results[key]) / len(results[key])
