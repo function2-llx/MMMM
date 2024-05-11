@@ -8,7 +8,6 @@ def main():
             snapshot_download(
                 'ibrahimhamamci/CT-RATE',
                 repo_type='dataset',
-                allow_patterns='dataset/valid/**',
                 resume_download=True,
                 cache_dir=ORIGIN_DATA_ROOT / '.hub',
                 local_dir=ORIGIN_VL_DATA_ROOT / 'CT-RATE',

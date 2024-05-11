@@ -118,13 +118,13 @@ template = {
 
 list_desc = 'List each request followed by "yes" or "no" to indicate its presence or absence.'
 
-def _join_list(tokenizer: MMMMTokenizer, names: Iterable[str], *, wrap: bool):
-    # if wrap:
-    #     wrapper = partial(tokenizer.wrap_name, neg=neg)
-    #     names = map(wrapper, names)
-    names = list(names)
-    space = '' if wrap else ' '
-    ret = f', and{space}'.join([f',{space}'.join(names[:-1]), names[-1]])
+def _join_list_natural(names: list[str]):
+    if len(names) == 1:
+        ret = names[0]
+    elif len(names) == 2:
+        ret = f'{names[0]} and {names[1]}'
+    else:
+        ret = ', '.join(names[:-1]) + f', and {names[-1]}'
     return ret
 
 def _list_results(
@@ -142,7 +142,7 @@ def _list_results(
         if pos_mask is not None:
             item += ': ' + ('no' if neg else 'yes')
         items.append(item)
-    ret = f'Results:{space}' + f',{space}'.join(items)
+    ret = f'Results:{space}' + f',{space}'.join(items) + '.'
     return ret
 
 def gen_general_conv(
@@ -184,7 +184,7 @@ def gen_general_conv(
         else R.choice(target.synonyms)
         for class_name in classes
     ]
-    prompt = f'{prompt_template.format(_join_list(tokenizer, names, wrap=False))} {list_desc}'
+    prompt = f'{prompt_template.format(_join_list_natural(names))} {list_desc}'
     response = _list_results(tokenizer, names, pos_class_mask, wrap=grounding)
     return [ConvTurn(prompt, response)], classes
 

@@ -1,6 +1,6 @@
 """largely copy from llama and adapt for cogvlm"""
+from typing import Any, Dict, List, Literal, Optional, TYPE_CHECKING, Tuple, Union
 import warnings
-from typing import TYPE_CHECKING, Optional, Tuple, List, Union, Literal, Dict, Any
 
 import math
 import torch
@@ -17,6 +17,7 @@ from luolib.models.utils import forward_gc
 from luolib.types import tuple3_t
 
 from mmmm.utils import apply_prefix, get_lora_modules_default
+from mmmm.data.defs import CE_IGNORE_INDEX
 from .configuration_cogvlm import CogVLMConfig
 from .visual import EVA2CLIPModel
 
@@ -649,6 +650,24 @@ def _history_to_prompt(signal_type, history, query):
     prompt += 'Question: {} {}'.format(query, answer_format)
     return prompt
 
+def _sample_weighted_ce(logits: torch.FloatTensor, labels: torch.LongTensor, weight: torch.Tensor | None):
+    """
+    Args:
+        weight: weight for each sample, not for class
+    """
+    logits = logits.view(-1, logits.shape[-1])
+    labels = labels.view(-1)
+    if weight is None:
+        return F.cross_entropy(logits, labels)
+    mask: torch.BoolTensor = labels != CE_IGNORE_INDEX
+    ce = F.cross_entropy(logits, labels, reduction='none')
+    # the life of weight:
+    # 0. constructed as fp32 in DataModule
+    # 1. converted to bf16 by precision plugin
+    # 2. convert back to fp32 here
+    # stupid and meaningless? yes
+    ret = torch.dot(ce[mask], weight.float().view(-1)[mask]) / mask.sum()
+    return ret
 
 class CogVLMForCausalLM(CogVLMPreTrainedModel):
     _auto_class = "AutoModelForCausalLM"
@@ -698,6 +717,7 @@ class CogVLMForCausalLM(CogVLMPreTrainedModel):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         labels: Optional[torch.LongTensor] = None,
+        weight: torch.Tensor | None = None,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
@@ -723,13 +743,12 @@ class CogVLMForCausalLM(CogVLMPreTrainedModel):
             return_dict=True,
         )
 
-        logits = self.lm_head(output.last_hidden_state)
-        logits = logits.float()
+        logits = self.lm_head(output.last_hidden_state).float()
 
         loss = None
         if labels is not None:
-            # the labels were already shifted in datamodule
-            loss = F.cross_entropy(logits.view(-1, logits.shape[-1]), labels.view(-1))
+            # NOTE: the labels were already shifted in MMMMDataModule, not shifting again here
+            loss = _sample_weighted_ce(logits, labels, weight)
 
         ret = CausalLMOutputWithPast(
             loss=loss,

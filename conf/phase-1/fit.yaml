@@ -8,14 +8,7 @@ trainer:
   gradient_clip_val: 1
   gradient_clip_algorithm: norm
   save_embedding_layers: true
-#  strategy: deepspeed_stage_3
-  strategy:
-    class_path: lightning.pytorch.strategies.DDPStrategy
-    init_args:
-      broadcast_buffers: false
-      gradient_as_bucket_view: true
-#     `static_graph` seems to make DDP with gradient accumulation crash
-#      static_graph: true
+  strategy: ddp
   callbacks:
   - class_path: luolib.lightning.callbacks.ModelCheckpoint
     init_args:
@@ -25,58 +18,24 @@ trainer:
       save_last: true
       verbose: true
 optim:
-  vlm:
-    prefix: model
-    optimizer:
-      class_path: torch.optim.AdamW
-#      class_path: deepspeed.ops.adam.FusedAdam
+  param_groups:
+  - prefix: ['']
+  optimizer:
+    class_path: torch.optim.AdamW
+    init_args:
+      lr: 1e-4
+      weight_decay: 0.01
+  lr_scheduler:
+    scheduler:
+      class_path: timm.scheduler.CosineLRScheduler
       init_args:
-        lr: 5e-5
-        weight_decay: 5e-2
-    lr_scheduler:
-      scheduler:
-        class_path: timm.scheduler.CosineLRScheduler
-        init_args:
-          t_initial: ${trainer.max_steps}
-          t_in_epochs: false
-          warmup_t: 0
-          warmup_prefix: true
-      interval: step
-      frequency: 500
-  sam:
-    prefix: sam_model
-    optimizer:
-      class_path: torch.optim.AdamW
-#      class_path: deepspeed.ops.adam.FusedAdam
-      init_args:
-        lr: 1e-4
-        weight_decay: 5e-2
-    lr_scheduler:
-      scheduler:
-        class_path: timm.scheduler.CosineLRScheduler
-        init_args:
-          t_initial: ${trainer.max_steps}
-          t_in_epochs: false
-          warmup_t: 2000
-          warmup_prefix: true
-      interval: step
-      frequency: 500
-  new:
-    optimizer:
-      class_path: torch.optim.AdamW
-#      class_path: deepspeed.ops.adam.FusedAdam
-      init_args:
-        lr: 1e-4
-        weight_decay: 5e-2
-    lr_scheduler:
-      scheduler:
-        class_path: timm.scheduler.CosineLRScheduler
-        init_args:
-          t_initial: ${trainer.max_steps}
-          t_in_epochs: false
-          warmup_t: 0
-          warmup_prefix: true
-      interval: step
-      frequency: 500
+        t_initial: ${trainer.max_steps}
+        t_in_epochs: false
+        warmup_t: 0
+        warmup_prefix: true
+    interval: step
+    frequency: 500
 mask_loss:
-  lambda_focal: 1
+  dice_weight: 2
+  focal_weight: 2
+  focal_gamma: 0

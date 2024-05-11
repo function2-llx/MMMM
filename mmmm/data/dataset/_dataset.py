@@ -43,6 +43,7 @@ class DatasetConf:
     seg_trans: LocalTransConf
     vl_trans: VLTransConf
     max_seq_len: int | None = None
+    bop_weight: float
 
     @property
     def base_stride_z(self):

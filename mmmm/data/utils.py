@@ -41,6 +41,7 @@ def prepare_vlm_inputs(
     inference: bool,
     grounding: bool,
     max_seq_len: int | None = None,
+    bop_weight: float,
 ):
     """
     Args:
@@ -60,7 +61,8 @@ def prepare_vlm_inputs(
     text_ids = []
     if inference:
         assert conversation[-1].response == ''
-    labels = None if inference else []
+    else:
+        labels = []
     for i, (query, answer) in enumerate(conversation):
         prompt = f'{user_start} {query}{sys_start}'
         prompt_ids = torch.tensor(tokenizer.encode(prompt, add_special_tokens=False))
@@ -70,13 +72,15 @@ def prepare_vlm_inputs(
         else:
             answer_ids = torch.tensor(tokenizer.encode(answer, add_special_tokens=False))
             text_ids.append(torch.cat([prompt_ids, answer_ids]))
-            labels.append(
-                torch.cat([
-                    torch.full((prompt_ids.shape[0] - 1, ), CE_IGNORE_INDEX),
-                    answer_ids,
-                    torch.tensor([tokenizer.eos_token_id]),
-                ]),
-            )
+            if not inference:
+                labels.append(
+                    torch.cat([
+                        torch.full((prompt_ids.shape[0] - 1, ), CE_IGNORE_INDEX),
+                        answer_ids,
+                        torch.tensor([tokenizer.eos_token_id]),
+                    ]),
+                )
+    # replace the <np> tokens with corresponding <p> tokens
     text_ids = torch.cat(text_ids)
     text_ids_ex_bos = text_ids[1:]
     bonp_mask: torch.BoolTensor = text_ids_ex_bos == tokenizer.bonp_token_id  # type: ignore
@@ -90,6 +94,9 @@ def prepare_vlm_inputs(
         labels_ex_eos[bonp_mask] = labels[1:][bonp_mask]
         # the open tag <p> presents after all, predict the close tag as well for negative targets
         labels_ex_eos[eonp_mask] = tokenizer.eop_token_id
+        weight = torch.ones_like(labels, dtype=torch.float)
+        # give prediction for <p> different weights
+        weight[:-1][text_ids[1:] == tokenizer.bop_token_id] = bop_weight
     num_image_tokens += 2  # to include boi and eoi
     input_ids = torch.cat([
         torch.tensor([tokenizer.bos_token_id]),
@@ -114,12 +121,6 @@ def prepare_vlm_inputs(
         get_text_position_ids(text_ids, tokenizer, start=5)
     ])
     attention_mask = torch.ones(input_ids.shape, dtype=dtype)
-    if not inference:
-        labels = torch.cat([
-            # bos, (boi, *image, eoi), grounding
-            torch.full((1 + num_image_tokens + 1, ), CE_IGNORE_INDEX),
-            labels,
-        ])
     inputs = {
         'input_ids': input_ids,
         'image_features_mask': image_features_mask,
@@ -128,7 +129,12 @@ def prepare_vlm_inputs(
         'attention_mask': attention_mask,
     }
     if not inference:
+        # bos, (boi, *image, eoi), grounding
+        padding = torch.full((1 + num_image_tokens + 1, ), CE_IGNORE_INDEX)
+        labels = torch.cat([padding, labels])
         inputs['labels'] = labels
+        weight = torch.cat([padding, weight])
+        inputs['weight'] = weight
     if max_seq_len is not None:
         for k, v in inputs.items():
             inputs[k] = v[:max_seq_len]

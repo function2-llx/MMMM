@@ -42,6 +42,8 @@ init_args:
       type: local
     - name: LiTS
       type: local
+    - name: LIDC-IDRI
+      type: local
     - name: LNQ2023
       type: local
     - name: MRSpineSeg
@@ -100,18 +102,19 @@ init_args:
     vit_patch_size_xy: 16
     pool_size_xy: 2
     base_pool_size_z: 2
-    max_seq_len: 768
+    max_seq_len: 512
+    bop_weight: 3
     seg_trans:
-      max_vision_tokens: 144
+      max_vision_tokens: 100
       scale_z: [1, 2]
       scale_z_p: 0.5
       max_tokens_z: 4
       scale_xy: [0.9, 3]
       scale_xy_p: 0.9
-      num_pos: 32
-      num_neg: 8
+      num_pos: 12
+      num_neg: 4
     vl_trans:
-      max_tokens: 144
+      max_tokens: 100
       max_tokens_z: 4
   dataloader:
     train_batch_size: 4
