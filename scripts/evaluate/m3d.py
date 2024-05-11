@@ -5,6 +5,8 @@ from tqdm import tqdm
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import torchvision.transforms as transforms
 
+from luolib.utils import load_pt_zst
+
 
 def setup_m3d(checkpoint: str, tokenizer: str):
     model = AutoModelForCausalLM.from_pretrained(
@@ -33,8 +35,12 @@ def m3d_collate_fn(batch: list[dict]):
         image = reduce(image, 'c d h w -> d h w', 'mean')
         image = repeat(image, 'd h w -> 1 1 d h w')
     else:
+        if batch[0]['image'].endswith('.pt.zst'):
+            image = load_pt_zst(batch[0]['image'])
+        else:
+            image = Image.open(batch[0]['image'])
         transform = transforms.ToTensor()
-        image = transform(Image.open(batch[0]['image']).convert('RGB'))
+        image = transform(image).convert('RGB')
         image = reduce(image, 'c h w -> h w', 'mean')
         image = repeat(image, 'h w -> 1 1 1 h w')
 

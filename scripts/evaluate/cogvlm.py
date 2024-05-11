@@ -4,6 +4,9 @@ from tqdm import tqdm
 from transformers import AutoModelForCausalLM, LlamaTokenizer
 
 
+from luolib.utils import load_pt_zst
+
+
 def setup_cogvlm(checkpoint: str, tokenizer: str):
     model = AutoModelForCausalLM.from_pretrained(
         checkpoint,
@@ -22,8 +25,12 @@ def setup_cogvlm(checkpoint: str, tokenizer: str):
 def cogvlm_collate_fn(batch: list[dict]):
     assert len(batch) == 1
 
+    if batch[0]['image'].endswith('.pt.zst'):
+        image = load_pt_zst(batch[0]['image'])
+    else:
+        image = Image.open(batch[0]['image']).convert('RGB')
     return {
-        'image': Image.open(batch[0]['image']).convert('RGB'),
+        'image': image,
         'question': batch[0]['question'],
         'answer': batch[0]['answer'],
     }

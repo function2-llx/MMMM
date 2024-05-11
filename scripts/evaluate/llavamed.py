@@ -5,6 +5,8 @@ from tqdm import tqdm
 from transformers import AutoTokenizer, AutoConfig, CLIPImageProcessor, StoppingCriteria
 import sys
 
+from luolib.utils import load_pt_zst
+
 
 class KeywordsStoppingCriteria(StoppingCriteria):
     def __init__(self, keywords, tokenizer, input_ids):
@@ -77,8 +79,12 @@ def setup_llavamed(checkpoint: str, tokenizer: str):
 def llavamed_collate_fn(batch: list[dict]):
     assert len(batch) == 1
 
+    if batch[0]['image'].endswith('.pt.zst'):
+        image = load_pt_zst(batch[0]['image'])
+    else:
+        image = Image.open(batch[0]['image'])
     return {
-        'image': Image.open(batch[0]['image']),
+        'image': image,
         'question': batch[0]['question'],
         'answer': batch[0]['answer'],
     }

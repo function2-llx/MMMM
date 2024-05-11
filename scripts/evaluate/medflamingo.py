@@ -3,6 +3,8 @@ from einops import repeat
 import torch
 from tqdm import tqdm
 
+from luolib.utils import load_pt_zst
+
 
 def setup_medflamingo(checkpoint: str, tokenizer: str):
     from accelerate import Accelerator
@@ -30,8 +32,11 @@ def setup_medflamingo(checkpoint: str, tokenizer: str):
 
 def medflamingo_collate_fn(batch: list[dict]):
     assert len(batch) == 1
-    image = Image.open(batch[0]['image'])
 
+    if batch[0]['image'].endswith('.pt.zst'):
+        image = load_pt_zst(batch[0]['image'])
+    else:
+        image = Image.open(batch[0]['image'])
     return {
         'image': image,
         'question': batch[0]['question'],

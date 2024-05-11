@@ -2,6 +2,8 @@ from PIL import Image
 import torch
 from tqdm import tqdm
 
+from luolib.utils import load_pt_zst
+
 
 def setup_llavanext(checkpoint: str, tokenizer: str):
     from transformers import LlavaNextProcessor, LlavaNextForConditionalGeneration
@@ -22,8 +24,12 @@ def setup_llavanext(checkpoint: str, tokenizer: str):
 def llavanext_collate_fn(batch: list[dict]):
     assert len(batch) == 1
 
+    if batch[0]['image'].endswith('.pt.zst'):
+        image = load_pt_zst(batch[0]['image'])
+    else:
+        image = Image.open(batch[0]['image']).convert('RGB')
     return {
-        'image': Image.open(batch[0]['image']).convert('RGB'),
+        'image': image,
         'question': batch[0]['question'],
         'answer': batch[0]['answer'],
     }

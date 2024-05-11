@@ -6,6 +6,7 @@ from torchvision import transforms
 from tqdm import tqdm
 from transformers import LlamaTokenizer
 
+from luolib.utils import load_pt_zst
 
 def setup_radfm(checkpoint: str, tokenizer: str):
     sys.path.append('third-party/RadFM/Quick_demo/Model')
@@ -39,7 +40,12 @@ def radfm_collate_fn(batch: list[dict]):
         image = (image - image.min()) / (image.max() - image.min())
     else:
         transform = transforms.Compose([transforms.ToTensor()])
-        image = transform(Image.open(batch[0]['image']).convert('RGB'))
+        if batch[0]['image'].endswith('.pt.zst'):
+            image = load_pt_zst(batch[0]['image'])
+        else:
+            image = Image.open(batch[0]['image']).convert('RGB')
+        image = transform(image)
+
     target_d, max_d = 4, 4
     if len(image.shape) == 4:
         max_d = max(image.shape[3], max_d)
