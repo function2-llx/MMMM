@@ -74,7 +74,7 @@ class LocalTransConf:
     mask_th_rel: float = 0.5
     box_th: float = 0.5
     grounding_prob: float = 0.99
-    neg_grounding_prob: float = 0.1
+    neg_grounding_prob: float = 0.2
 
 def get_local_transform(
     conf: _dataset.DatasetConf,
@@ -367,7 +367,10 @@ class SamplePatch(mt.Randomizable):
                 }
 
         # 5. generate conversation
-        conv = gen_modality_conv(modality, self.R)
+        if toss(self.R, 0.9):
+            conv = gen_modality_conv(modality, self.R)
+        else:
+            conv = []
         grounding_classes = []
         grounding = toss(self.R, trans_conf.grounding_prob)
         neg_grounding = toss(self.R, trans_conf.neg_grounding_prob) if grounding else False

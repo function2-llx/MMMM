@@ -50,6 +50,7 @@ def prepare_vlm_inputs(
     # TODO: refactor this function to support various VLM formats
     # user_start = 'Question:'
     # sys_start = 'Answer:'
+    assert len(conversation) > 0
     user_start = tokenizer.usr_token
     sys_start = tokenizer.sys_token
     # just for viewing, don't tokenize it directly
