@@ -60,7 +60,13 @@ class DatasetConf:
         assert _is_power_of_2(self.base_pool_size_z)
 
 class MMMMDataset(Dataset):
-    def __init__(self, conf: DatasetConf, split: split_t, tokenizer: MMMMTokenizer):
+    def __init__(
+        self,
+        conf: DatasetConf,
+        split: split_t,
+        tokenizer: MMMMTokenizer,
+        inference: bool,
+    ):
         super().__init__()
         self.conf = conf
         self.data_lists = [
@@ -68,8 +74,8 @@ class MMMMDataset(Dataset):
             for dataset in conf.datasets
         ]
         # NOTE: use attributes instead of storing in a dict to make MONAI's set_rnd work
-        self.local_transform = get_local_transform(conf, tokenizer, False)
-        self.vl_transform = VLTransform(conf, tokenizer, False)
+        self.local_transform = get_local_transform(conf, tokenizer, inference)
+        self.vl_transform = VLTransform(conf, tokenizer, inference)
 
     @property
     def dataset_weights(self):

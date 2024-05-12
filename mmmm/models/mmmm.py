@@ -590,6 +590,8 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         attention_mask=None,
         inputs_embeds=None,
         image_features_mask: torch.BoolTensor | None = None,
+        patch_size,
+        pool_size,
         **kwargs,
     ):
         if past_key_values:
@@ -610,8 +612,10 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
                 "position_ids": position_ids,
                 "past_key_values": past_key_values,
                 "attention_mask": attention_mask,
+                'patch_size': patch_size,
+                'pool_size': pool_size,
                 "use_cache": kwargs.get("use_cache"),
-            }
+            },
         )
         return model_inputs
 

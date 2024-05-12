@@ -70,7 +70,7 @@ class MMMMDataModule(ExpDataModuleBase):
         assert len(set([d.name for d in dataset.datasets])) == len(dataset.datasets), 'duplicated dataset'
 
     def train_dataloader(self):
-        dataset = MMMMDataset(self.dataset_conf, 'train', self.tokenizer)
+        dataset = MMMMDataset(self.dataset_conf, 'train', self.tokenizer, inference=False)
         conf = self.dataloader_conf
         assert conf.train_batch_size is not None and conf.num_batches is not None
         sampler = MMMMRandomSampler(dataset, conf.num_batches * conf.train_batch_size * self.world_size)
