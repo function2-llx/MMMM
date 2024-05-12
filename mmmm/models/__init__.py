@@ -1,1 +1,1 @@
-from .mmmm import MMMMForCausalLM, build_finetune
+from .mmmm import MMMMForCausalLM, build

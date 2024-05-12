@@ -28,7 +28,7 @@ from .segvol import Sam, SamArgs, build_sam_vit_3d
 
 __all__ = [
     'MMMMForCausalLM',
-    'build_finetune',
+    'build',
 ]
 
 @dataclass
@@ -662,4 +662,4 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             )
         return generated_output_ids, pred_masks
 
-build_finetune = class_from_function(MMMMForCausalLM.build_finetune, MMMMForCausalLM)
+build = class_from_function(MMMMForCausalLM.build, MMMMForCausalLM)
