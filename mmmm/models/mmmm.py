@@ -85,7 +85,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
     mask_loss: DiceFocalLoss | None
 
     @classmethod
-    def build_finetune(
+    def build(
         cls,
         pretrained_model_name_or_path: str | os.PathLike | None,
         *args,
