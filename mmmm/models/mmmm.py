@@ -147,6 +147,9 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         self.check_grad = False
         return self
 
+    def on_load_checkpoint(self, checkpoint: dict):
+        pass
+
     def _init_weights(self, module):
         """Let's happily do nothing (necessary to make SAM pre-trained weights survive)"""
 

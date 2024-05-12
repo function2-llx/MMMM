@@ -134,18 +134,17 @@ def _list_results(
     wrap_pos: bool,
     wrap_neg: bool,
 ):
-    wrap = torch.empty(len(names), dtype=torch.bool)
-    wrap[pos_mask] = wrap_pos
-    wrap[~pos_mask] = wrap_neg
     ret = 'Results:'
     wrapped_classes = []
     for i, name in enumerate(names):
-        if wrap[i]:
-            ret += tokenizer.wrap_name(name, pos=pos_mask[i])
+        pos = pos_mask[i]
+        wrap = wrap_pos if pos else wrap_neg
+        if wrap:
+            ret += tokenizer.wrap_name(name, pos=pos)
             wrapped_classes.append(classes[i])
         else:
             ret += f' {name}'
-        ret += ': ' + ('yes' if pos_mask[i] else 'no')
+        ret += ': ' + ('yes' if pos else 'no')
         ret += '.' if i + 1 == len(names) else ','
     # prepend a "Results" to avoid capitalization
     return ret, wrapped_classes

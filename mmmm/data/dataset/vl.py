@@ -95,7 +95,11 @@ PARTIAL_REFERRINGS = [' image', ' scan', ' radiograph']
 
 def get_vl_data_list(name: str, split: split_t):
     dataset_dir = PROCESSED_VL_DATA_ROOT / name
-    with open(dataset_dir / f'{split}.json') as f:
+    if name == 'MIMIC-CXR':
+        split_filename = f'{split}-filtered.json'
+    else:
+        split_filename = f'{split}.json'
+    with open(dataset_dir / split_filename) as f:
         info = json.load(f)
     return info
 
@@ -167,8 +171,8 @@ class VLTransform(mt.RandomizableTransform):
         image, _ = ensure_rgb(image, contiguous=True)
         image = intensity_norm(image)
         referring: str = self.R.choice(COMPLETE_REFERRINGS)
+
         conversation = []
-        has_caption_or_report:
         if caption := data.get('caption'):
             conversation.append(ConvTurn(self.R.choice(CAPTION_PROMPTS), caption))
         if (findings := data.get('findings')) and (impression := data.get('impression')):
