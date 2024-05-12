@@ -31,10 +31,10 @@ optim:
       init_args:
         t_initial: ${trainer.max_steps}
         t_in_epochs: false
-        warmup_t: 0
+        warmup_t: 250
         warmup_prefix: true
     interval: step
-    frequency: 500
+    frequency: 250
 mask_loss:
   dice_weight: 2
   focal_weight: 2
