@@ -3,7 +3,6 @@ from PIL import Image
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, LlamaTokenizer
 
-
 from luolib.utils import load_pt_zst
 
 

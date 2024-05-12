@@ -37,10 +37,11 @@ def m3d_collate_fn(batch: list[dict]):
     else:
         if batch[0]['image'].endswith('.pt.zst'):
             image = load_pt_zst(batch[0]['image'])
+            image = image.float() / 255.0
         else:
             image = Image.open(batch[0]['image'])
-        transform = transforms.ToTensor()
-        image = transform(image).convert('RGB')
+            transform = transforms.ToTensor()
+            image = transform(image)
         image = reduce(image, 'c h w -> h w', 'mean')
         image = repeat(image, 'h w -> 1 1 1 h w')
 
