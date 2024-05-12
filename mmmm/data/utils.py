@@ -11,7 +11,7 @@ from luolib.utils import load_pt_zst
 
 from mmmm.models.cogvlm import LANGUAGE_TOKEN_TYPE, VISION_TOKEN_TYPE
 from mmmm.tokenizer import MMMMTokenizer
-from .defs import CE_IGNORE_INDEX, ConvTurn
+from .defs import CE_IGNORE_INDEX, ConvTurn, mmmm_debug
 from .sparse import Sparse
 
 def get_text_position_ids(text_ids: torch.Tensor, tokenizer: MMMMTokenizer, start: int):
@@ -60,14 +60,14 @@ def prepare_vlm_inputs(
     dtype = torch.long
     text_ids = []
     if inference:
-        assert conversation[-1].response == ''
+        if not mmmm_debug():
+            assert conversation[-1].response == ''
     else:
         labels = []
     for i, (query, answer) in enumerate(conversation):
         prompt = f'{user_start} {query}{sys_start}'
         prompt_ids = torch.tensor(tokenizer.encode(prompt, add_special_tokens=False))
         if inference and i + 1 == len(conversation):
-            assert i == len(conversation) - 1 and inference
             text_ids.append(prompt_ids)
         else:
             answer_ids = torch.tensor(tokenizer.encode(answer, add_special_tokens=False))

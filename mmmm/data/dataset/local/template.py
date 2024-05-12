@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Iterable
-
 import numpy as np
 import torch
 
@@ -129,26 +127,34 @@ def _join_list_natural(names: list[str]):
 
 def _list_results(
     tokenizer: MMMMTokenizer,
-    names: Iterable[str],
-    pos_mask: torch.BoolTensor | None = None,
+    names: list[str],
+    classes: list[str],
+    pos_mask: torch.BoolTensor,
     *,
-    wrap: bool,
+    wrap_pos: bool,
+    wrap_neg: bool,
 ):
-    space = '' if wrap else ' '
-    items = []
+    wrap = torch.empty(len(names), dtype=torch.bool)
+    wrap[pos_mask] = wrap_pos
+    wrap[~pos_mask] = wrap_neg
+    ret = 'Results:'
+    wrapped_classes = []
     for i, name in enumerate(names):
-        neg = False if pos_mask is None else ~pos_mask[i]
-        item = tokenizer.wrap_name(name, neg=neg)
-        if pos_mask is not None:
-            item += ': ' + ('no' if neg else 'yes')
-        items.append(item)
-    ret = f'Results:{space}' + f',{space}'.join(items) + '.'
-    return ret
+        if wrap[i]:
+            ret += tokenizer.wrap_name(name, pos=pos_mask[i])
+            wrapped_classes.append(classes[i])
+        else:
+            ret += f' {name}'
+        ret += ': ' + ('yes' if pos_mask[i] else 'no')
+        ret += '.' if i + 1 == len(names) else ','
+    # prepend a "Results" to avoid capitalization
+    return ret, wrapped_classes
 
 def gen_general_conv(
     pos_classes: list[str],
     neg_classes: list[str],
     grounding: bool,
+    neg_grounding: bool,
     tokenizer: MMMMTokenizer,
     target_tax: dict[str, TargetClass],
     R: np.random.RandomState,
@@ -185,14 +191,18 @@ def gen_general_conv(
         for class_name in classes
     ]
     prompt = f'{prompt_template.format(_join_list_natural(names))} {list_desc}'
-    response = _list_results(tokenizer, names, pos_class_mask, wrap=grounding)
-    return [ConvTurn(prompt, response)], classes
+    response, grounding_classes = _list_results(
+        tokenizer, names, classes, pos_class_mask,
+        wrap_pos=grounding, wrap_neg=neg_grounding,
+    )
+    return [ConvTurn(prompt, response)], grounding_classes
 
 def gen_anomaly_conv(
     pos_classes: list[str],
     neg_classes: list[str],
     _complete: bool,
     grounding: bool,
+    neg_grounding: bool,
     tokenizer: MMMMTokenizer,
     target_tax: dict[str, TargetClass],
     dataset: str,
@@ -202,6 +212,7 @@ def gen_anomaly_conv(
         pos_classes,
         neg_classes,
         grounding,
+        neg_grounding,
         tokenizer,
         target_tax,
         R,

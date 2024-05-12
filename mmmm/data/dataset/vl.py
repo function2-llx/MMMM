@@ -17,7 +17,7 @@ from monai.utils import InterpolateMode, convert_to_tensor
 
 import mmmm.data.dataset._dataset as _dataset
 from mmmm.tokenizer import MMMMTokenizer
-from ..defs import ConvTurn, DataPoint, PROCESSED_VL_DATA_ROOT, split_t
+from ..defs import ConvTurn, DataPoint, PROCESSED_VL_DATA_ROOT, mmmm_debug, split_t
 from ..utils import prepare_vlm_inputs
 from .misc import get_max_resize, gen_modality_conv, intensity_norm, toss
 
@@ -168,6 +168,7 @@ class VLTransform(mt.RandomizableTransform):
         image = intensity_norm(image)
         referring: str = self.R.choice(COMPLETE_REFERRINGS)
         conversation = []
+        has_caption_or_report:
         if caption := data.get('caption'):
             conversation.append(ConvTurn(self.R.choice(CAPTION_PROMPTS), caption))
         if (findings := data.get('findings')) and (impression := data.get('impression')):
@@ -178,18 +179,22 @@ class VLTransform(mt.RandomizableTransform):
                 ),
             )
         elif findings:
-            conversation.append(
-                ConvTurn(
-                    self.R.choice(FINDINGS_PROMPTS).format(referring),
-                    findings,
-                ),
-            )
+            pass
+            # conversation.append(
+            #     ConvTurn(
+            #         self.R.choice(FINDINGS_PROMPTS).format(referring),
+            #         findings,
+            #     ),
+            # )
         if vqa := data.get('vqa'):
-            conversation.extend([ConvTurn(qa['question'], qa['answer']) for qa in vqa])
+            conversation.extend([ConvTurn(qa['question'], qa['answer']) for qa in vqa[:1]])
+        else:
+            conversation.append(ConvTurn('What is this?', ''))
         self.R.shuffle(conversation)
-        if modality is not None and toss(self.R, 0.5):
-            # prepend the modality conversation
-            conversation = gen_modality_conv(modality, self.R) + conversation
+        # if modality is not None and toss(self.R, 0.5):
+        #     # prepend the modality conversation
+        #     conversation = gen_modality_conv(modality, self.R) + conversation
+
         vlm_inputs, conversation_text = prepare_vlm_inputs(
             conversation,
             self.tokenizer,

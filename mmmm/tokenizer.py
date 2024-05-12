@@ -74,11 +74,11 @@ class MMMMTokenizer(LlamaTokenizer):
         """This method is useful only when not self.share_seg_token"""
         self.class_to_idx = {name: i for i, name in enumerate(sorted(names))}
 
-    def wrap_name(self, name: str, neg: bool = False):
-        if neg:
-            bop_token, eop_token = self.bonp_token, self.eonp_token
-        else:
+    def wrap_name(self, name: str, pos: bool = False):
+        if pos:
             bop_token, eop_token = self.bop_token, self.eop_token
+        else:
+            bop_token, eop_token = self.bonp_token, self.eonp_token
         ret = f'{bop_token} {name}{eop_token}'
         return ret
 
