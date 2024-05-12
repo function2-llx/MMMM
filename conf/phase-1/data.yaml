@@ -97,7 +97,7 @@ init_args:
       weight: 0.02
     - name: PMC-OA
       type: vl
-      weight: 0.0012
+      weight: 0.0005
     base_vit_patch_size_z: 16
     vit_patch_size_xy: 16
     pool_size_xy: 2
