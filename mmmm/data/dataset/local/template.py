@@ -410,18 +410,30 @@ def gen_anomaly_conv(
     dataset: str,
     R: np.random.RandomState,
 ):
-    if dataset.startswith('BraTS2023') and 'glioma' in pos_classes and toss(R, 0.9):
-        pos_classes = list(pos_classes)
-        pos_classes.remove('glioma')
-        return gen_brats_conv(
-            pos_classes,
-            neg_classes,
-            tokenizer,
-            target_tax,
-            grounding,
-            neg_grounding,
-            R,
-        )
+    if dataset.startswith('BraTS2023'):
+        if 'glioma' in pos_classes and toss(R, 0.9):
+            pos_classes = list(pos_classes)
+            pos_classes.remove('glioma')
+            return gen_brats_conv(
+                pos_classes,
+                neg_classes,
+                tokenizer,
+                target_tax,
+                grounding,
+                neg_grounding,
+                R,
+            )
+        else:
+            return gen_general_conv(
+                pos_classes,
+                neg_classes,
+                grounding,
+                neg_grounding,
+                tokenizer,
+                target_tax,
+                R,
+            )
+
     if (len(pos_classes) > 0 or complete_anomaly) and toss(R, 0.8):
         return gen_anomaly_detection_conv(
             pos_classes,
