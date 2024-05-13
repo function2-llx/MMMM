@@ -64,7 +64,7 @@ class Batch(TypedDict):
     num_uncertain: list[torch.LongTensor]
     semantic: list[torch.BoolTensor]
 
-split_t = Literal['train', 'val']
+split_t = Literal['train', 'val', 'test']
 CE_IGNORE_INDEX = -100
 
 class ConvTurn(NamedTuple):

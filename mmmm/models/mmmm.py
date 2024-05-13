@@ -147,6 +147,11 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         self.check_grad = False
         return self
 
+    def on_load_checkpoint(self, checkpoint: dict):
+        # we handle the state dict by cls.from_pretrained (in constructor) and peft_model.load_adapter (in CLI)
+        checkpoint['state_dict'] = {}
+        self.strict_loading = False
+
     def _init_weights(self, module):
         """Let's happily do nothing (necessary to make SAM pre-trained weights survive)"""
 
