@@ -72,7 +72,7 @@ class CheXpertProcessor(NaturalImageLoaderMixin, Processor):
     def _load_anomalies(self, data_point: CheXpertDataPoint) -> tuple[set[str], set[str]]:
         info: pd.Series = self.label[data_point.split].loc[data_point.key]
         if info['No Finding']:
-            return set(), set()
+            return set(), {target for _, target in self.anomalies}
         pos, neg = [], []
         for (anomaly, target) in self.anomalies:
             (pos if info[anomaly] else neg).append(target)
