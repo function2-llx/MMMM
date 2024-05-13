@@ -25,7 +25,7 @@ from monai.transforms import generate_spatial_bounding_box
 from monai.utils import GridSamplePadMode
 
 import mmmm.data.dataset._dataset as _dataset
-from mmmm.data.defs import DataPoint, PROCESSED_LOCAL_DATA_ROOT, mmmm_debug, split_t
+from mmmm.data.defs import DataPoint, PROCESSED_LOCAL_DATA_ROOT, mmmm_debug, Split
 from mmmm.data.sparse import Sparse
 from mmmm.data.target_tax import TargetCategory, get_target_tax
 from mmmm.data.utils import prepare_vlm_inputs
@@ -39,7 +39,7 @@ __all__ = [
     'LocalTransConf',
 ]
 
-def get_local_data_list(name: str, split: split_t):
+def get_local_data_list(name: str, split: Split):
     if split != 'train':
         raise NotImplementedError
     dataset_dir = PROCESSED_LOCAL_DATA_ROOT / name

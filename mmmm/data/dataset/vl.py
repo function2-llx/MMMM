@@ -17,7 +17,7 @@ from monai.utils import InterpolateMode, convert_to_tensor
 
 import mmmm.data.dataset._dataset as _dataset
 from mmmm.tokenizer import MMMMTokenizer
-from ..defs import ConvTurn, DataPoint, PROCESSED_VL_DATA_ROOT, mmmm_debug, split_t
+from ..defs import ConvTurn, DataPoint, PROCESSED_VL_DATA_ROOT, mmmm_debug, Split
 from ..utils import prepare_vlm_inputs
 from .misc import get_max_resize, gen_modality_conv, intensity_norm, toss
 
@@ -93,7 +93,7 @@ COMPLETE_REFERRINGS = ['image', 'medical image', 'radiograph', 'scan', 'radiolog
 
 PARTIAL_REFERRINGS = [' image', ' scan', ' radiograph']
 
-def get_vl_data_list(name: str, split: split_t):
+def get_vl_data_list(name: str, split: Split):
     dataset_dir = PROCESSED_VL_DATA_ROOT / name
     if name == 'MIMIC-CXR':
         split_filename = f'{split}-filtered.json'

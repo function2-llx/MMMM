@@ -7,7 +7,7 @@ from torch.utils.data import Dataset
 from monai.transforms import apply_transform
 
 from mmmm.tokenizer import MMMMTokenizer
-from ..defs import split_t
+from ..defs import Split
 from .local import LocalTransConf, get_local_data_list, get_local_transform
 from .vl import VLTransConf, VLTransform, get_vl_data_list
 
@@ -63,7 +63,7 @@ class MMMMDataset(Dataset):
     def __init__(
         self,
         conf: DatasetConf,
-        split: split_t,
+        split: Split,
         tokenizer: MMMMTokenizer,
         inference: bool,
     ):

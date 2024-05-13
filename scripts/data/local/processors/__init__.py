@@ -39,3 +39,5 @@ from .VerSe import VerSeProcessor
 from .VinDrCXR import VinDrCXRProcessor
 from .WORD import WORDProcessor
 from .autoPET_III import AutoPETIIIProcessor
+
+from .ad.CheXpert import CheXpertProcessor

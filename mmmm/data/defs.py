@@ -8,7 +8,7 @@ from typing import Literal, NamedTuple, TypedDict
 import torch
 
 from luolib.types import tuple3_t
-from monai.utils import str2bool
+from monai.utils import StrEnum, str2bool
 
 @cache
 def mmmm_debug() -> bool:
@@ -64,7 +64,11 @@ class Batch(TypedDict):
     num_uncertain: list[torch.LongTensor]
     semantic: list[torch.BoolTensor]
 
-split_t = Literal['train', 'val', 'test']
+class Split(StrEnum):
+    TRAIN = 'train'
+    VAL = 'val'
+    TEST = 'test'
+
 CE_IGNORE_INDEX = -100
 
 class ConvTurn(NamedTuple):

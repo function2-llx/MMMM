@@ -434,7 +434,7 @@ def gen_anomaly_conv(
                 R,
             )
 
-    if (len(pos_classes) > 0 or complete_anomaly) and toss(R, 0.8):
+    if (len(pos_classes) == 0 and complete_anomaly) or (len(pos_classes) > 0 and toss(R, 0.8)):
         return gen_anomaly_detection_conv(
             pos_classes,
             grounding,

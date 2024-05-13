@@ -47,6 +47,10 @@ class MMMMRandomSampler(Sampler):
         self.G = torch.Generator()
         self.G.manual_seed(seed)
 
+    @property
+    def num_datasets(self):
+        return self.dataset_weights.shape[0]
+
     def __iter__(self) -> Iterator[tuple[int, int]]:
         for dataset_idx in torch.multinomial(
             self.dataset_weights, self.num_samples, True, generator=self.G,
