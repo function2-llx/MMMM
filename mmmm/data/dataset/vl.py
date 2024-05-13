@@ -108,6 +108,7 @@ class VLTransConf:
     max_tokens: int
     max_tokens_z: int
     log2_patch_size_z_std: float = 0.5
+    report_ratio: float = 0.8
 
 class VLTransform(mt.RandomizableTransform):
     def __init__(
@@ -172,32 +173,31 @@ class VLTransform(mt.RandomizableTransform):
         image = intensity_norm(image)
         referring: str = self.R.choice(COMPLETE_REFERRINGS)
 
-        conversation = []
-        if caption := data.get('caption'):
-            conversation.append(ConvTurn(self.R.choice(CAPTION_PROMPTS), caption))
-        if (findings := data.get('findings')) and (impression := data.get('impression')):
-            conversation.append(
-                ConvTurn(
-                    self.R.choice(REPORT_PROMPTS).format(referring),
-                    f"Findings: {findings}\nImpression: {impression}",
-                ),
-            )
-        elif findings:
-            pass
-            # conversation.append(
-            #     ConvTurn(
-            #         self.R.choice(FINDINGS_PROMPTS).format(referring),
-            #         findings,
-            #     ),
-            # )
-        if vqa := data.get('vqa'):
-            conversation.extend([ConvTurn(qa['question'], qa['answer']) for qa in vqa[:1]])
+        if modality is not None and toss(self.R, 0.3):
+            conversation = gen_modality_conv(modality, self.R)
         else:
-            conversation.append(ConvTurn('What is this?', ''))
-        self.R.shuffle(conversation)
-        # if modality is not None and toss(self.R, 0.5):
-        #     # prepend the modality conversation
-        #     conversation = gen_modality_conv(modality, self.R) + conversation
+            conversation = []
+        findings = data.get('findings')
+        vqa = data.get('vqa')
+        if not vqa or toss(self.R, trans_conf.report_ratio):
+            if impression := data.get('impression'):
+                conversation.append(
+                    ConvTurn(
+                        self.R.choice(REPORT_PROMPTS).format(referring),
+                        f"Findings: {findings}\nImpression: {impression}",
+                    ),
+                )
+            else:
+                conversation.append(
+                    ConvTurn(
+                        self.R.choice(FINDINGS_PROMPTS).format(referring),
+                        findings,
+                    ),
+                )
+        else:
+            conv_vqa = [ConvTurn(qa['question'], qa['answer']) for qa in vqa]
+            self.R.shuffle(conv_vqa)
+            conversation.extend(conv_vqa)
 
         vlm_inputs, conversation_text = prepare_vlm_inputs(
             conversation,

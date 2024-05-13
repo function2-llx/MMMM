@@ -396,7 +396,7 @@ class SamplePatch(mt.Randomizable):
         conv.extend(conv_anomaly)
         grounding_classes.extend(grounding_classes_anomaly)
         if len(conv) == 0 or toss(self.R, 0.9):
-            # this also avoid a empty conversation
+            # this also avoid an empty conversation
             conv = gen_modality_conv(modality, self.R) + conv
         vlm_inputs, conversation_text = prepare_vlm_inputs(
             conv,
