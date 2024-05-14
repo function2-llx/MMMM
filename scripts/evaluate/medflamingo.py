@@ -1,6 +1,7 @@
 from PIL import Image
 from einops import repeat
 import torch
+import torchvision.transforms as transforms
 from tqdm import tqdm
 
 from luolib.utils import load_pt_zst
@@ -34,7 +35,9 @@ def medflamingo_collate_fn(batch: list[dict]):
     assert len(batch) == 1
 
     if batch[0]['image'].endswith('.pt.zst'):
+        transform = transforms.ToPILImage()
         image = load_pt_zst(batch[0]['image'])
+        image = transform(image.squeeze(1))
     else:
         image = Image.open(batch[0]['image'])
     return {

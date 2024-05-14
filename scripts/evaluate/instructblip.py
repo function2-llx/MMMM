@@ -1,4 +1,5 @@
 import torch
+import torchvision.transforms as transforms
 from PIL import Image
 from tqdm import tqdm
 
@@ -25,7 +26,9 @@ def instructblip_collate_fn(batch: list[dict]):
     assert len(batch) == 1
 
     if batch[0]['image'].endswith('.pt.zst'):
+        transform = transforms.ToPILImage()
         image = load_pt_zst(batch[0]['image'])
+        image = transform(image.squeeze(1))
     else:
         image = Image.open(batch[0]['image']).convert('RGB')
     return {

@@ -40,12 +40,13 @@ def radfm_collate_fn(batch: list[dict]):
         image = (image - image.min()) / (image.max() - image.min())
     else:
         if batch[0]['image'].endswith('.pt.zst'):
+            transform = transforms.ToPILImage()
             image = load_pt_zst(batch[0]['image'])
-            image = image.float() / 255.0
+            image = transform(image.squeeze(1))
         else:
-            transform = transforms.Compose([transforms.ToTensor()])
             image = Image.open(batch[0]['image']).convert('RGB')
-            image = transform(image)
+        transform = transforms.ToTensor()
+        image = transform(image)
 
     target_d, max_d = 4, 4
     if len(image.shape) == 4:
