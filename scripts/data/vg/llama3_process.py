@@ -12,14 +12,14 @@ model_name = model_id.split("/")[-1]
 
 sampling_params = SamplingParams(
     temperature=0., 
-    top_p=0.5,
-    max_tokens=256,
+    top_p=0.95,
+    max_tokens=8000,
     stop = ["<|eot_id|>"],
 )
 
 llm = LLM(
     model=model_id,
-    tensor_parallel_size=1,
+    tensor_parallel_size=2,
     disable_custom_all_reduce=True,
 )
 
@@ -33,7 +33,7 @@ Example input:
 Frontal and lateral views of the chest were obtained. Rounded calcified nodule in the region of the posterior right lung base is seen and represents calcified granuloma on CTs dating back to ___, likely secondary to prior granulomatous disease. Previously seen pretracheal lymph node conglomerate and right hilar lymph nodes are better seen/evaluated on CT. No focal consolidation is seen. There is no pleural effusion or pneumothorax. Cardiac and mediastinal silhouettes are stable with possible slight decrease in right paratracheal prominence.
 
 Example output:
-Frontal and lateral views of the chest were obtained. Rounded <p>calcified nodule</p> in the region of the posterior right <p>lung</p> base is seen and represents <p>calcified granuloma</p> on CTs dating back to ___, likely secondary to prior granulomatous disease. Previously seen <p>pretracheal lymph</p> <p>node conglomerate</p> and <p>right hilar lymph nodes</p> are better seen/evaluated on CT. No focal consolidation is seen. There is no pleural effusion or pneumothorax. <p>Cardiac</p> and <p>mediastinal silhouettes</p> are stable with possible slight decrease in right paratracheal prominence.
+Output: Frontal and lateral views of the chest were obtained. Rounded <p>calcified nodule</p> in the region of the posterior right <p>lung</p> base is seen and represents <p>calcified granuloma</p> on CTs dating back to ___, likely secondary to prior granulomatous disease. Previously seen <p>pretracheal lymph</p> <p>node conglomerate</p> and <p>right hilar lymph nodes</p> are better seen/evaluated on CT. No focal consolidation is seen. There is no pleural effusion or pneumothorax. <p>Cardiac</p> and <p>mediastinal silhouettes</p> are stable with possible slight decrease in right paratracheal prominence.
 """
 
 system_prompt2 = """
@@ -46,7 +46,7 @@ Example input:
 Lateral view somewhat limited due to overlying motion artifact. The <p>lungs</p> are low in volume.  There is no focal airspace consolidation to suggest\n <p>pneumonia</p>.  A 1.2-cm <p>calcified granuloma</p> just below the medial aspect of the\n right <p>hemidiaphragm</p> is unchanged from prior study.  No <p>pleural effusions</p> or\n <p>pulmonary edema</p>. There is no <p>pneumothorax</p>.\n\n The inferior <p>sternotomy wire</p> is fractured but unchanged. Surgical clips and\n vascular markers in the <p>thorax</p> are related to prior CABG surgery.
 
 Example output: 
-Lateral view somewhat limited due to overlying motion artifact. The <p>lungs</p> are low in volume.  There is no focal airspace consolidation to suggest\n pneumonia.  A 1.2-cm <p>calcified granuloma</p> just below the medial aspect of the\n right <p>hemidiaphragm</p> is unchanged from prior study.  No pleural effusions or\n pulmonary edema. There is no pneumothorax.\n\n The inferior <p>sternotomy wire</p> is fractured but unchanged. Surgical clips and\n vascular markers in the <p>thorax</p> are related to prior CABG surgery.
+Output: Lateral view somewhat limited due to overlying motion artifact. The <p>lungs</p> are low in volume.  There is no focal airspace consolidation to suggest\n pneumonia.  A 1.2-cm <p>calcified granuloma</p> just below the medial aspect of the\n right <p>hemidiaphragm</p> is unchanged from prior study.  No pleural effusions or\n pulmonary edema. There is no pneumothorax.\n\n The inferior <p>sternotomy wire</p> is fractured but unchanged. Surgical clips and\n vascular markers in the <p>thorax</p> are related to prior CABG surgery.
 """
 
 def llama3_user_prompt(item_key):
@@ -95,7 +95,7 @@ def process(dataset: str, num_samples: Tuple[int] = None, FIRST: bool = True):
 
         for i, output in enumerate(responses):
             generated_text = output.outputs[0].text
-            generated_text = generated_text.replace("Output:", '')
+            generated_text = generated_text.replace("Output: ", '')
             generated_text = generated_text.replace("```", '')
             for key in key_list:
                 if FIRST:
@@ -111,8 +111,8 @@ def process(dataset: str, num_samples: Tuple[int] = None, FIRST: bool = True):
 
 def main():
     datasets = [
-        ('MIMIC-CXR', (10, 10, 10)),
-        ('CT-RATE',   (10, 0, 10)),
+        ('MIMIC-CXR', (-1, -1, 10000)),
+        ('CT-RATE',   (-1, 0, 10000)),
     ]
     FIRST = sys.argv[1] == '1'
     for dataset, num_samples in datasets:
