@@ -53,17 +53,18 @@ class CheXpertProcessor(NaturalImageLoaderMixin, Processor):
             keys = []
             for _, info in tqdm(label.iterrows(), total=label.shape[0]):
                 path = Path(info['Path'])
-                patient, study, filename = *path.parts[-3:-1], path.stem
-                key = f'{patient}-{study}-{filename}'
-                keys.append(key)
-                ret.append(
-                    CheXpertDataPoint(
-                        key=key,
-                        images={'X-ray': self.dataset_root / path},
-                        split=split,
-                        complete_anomaly=True,
+                if path.stem.endswith('frontal'):
+                    patient, study, filename = *path.parts[-3:-1], path.stem
+                    key = f'{patient}-{study}-{filename}'
+                    keys.append(key)
+                    ret.append(
+                        CheXpertDataPoint(
+                            key=key,
+                            images={'X-ray': self.dataset_root / path},
+                            split=split,
+                            complete_anomaly=True,
+                        )
                     )
-                )
             split_dict[split] = keys
             label['_keys'] = keys
             label.set_index('_keys', inplace=True)

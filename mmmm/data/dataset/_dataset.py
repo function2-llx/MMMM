@@ -21,7 +21,7 @@ class DatasetSpec:
     type: Literal['local', 'vl']
     weight: float = 1.
 
-    def get_data_list(self, split: Split) -> list[dict]:
+    def get_data_list(self, split: Split) -> list:
         match self.type:
             case 'local':
                 return get_local_data_list(self.name, split)
