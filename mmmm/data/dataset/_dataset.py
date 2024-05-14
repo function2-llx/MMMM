@@ -21,7 +21,7 @@ class DatasetSpec:
     type: Literal['local', 'vl']
     weight: float = 1.
 
-    def get_data_list(self, split: Literal['train', 'validate', 'test']) -> list:
+    def get_data_list(self, split: Split) -> list[dict]:
         match self.type:
             case 'local':
                 return get_local_data_list(self.name, split)
@@ -40,10 +40,10 @@ class DatasetConf:
     vit_patch_size_xy: int
     pool_size_xy: int
     base_pool_size_z: int
-    seg_trans: LocalTransConf
-    vl_trans: VLTransConf
+    local_trans: LocalTransConf | None = None
+    vl_trans: VLTransConf | None = None
     max_seq_len: int | None = None
-    bop_weight: float
+    bop_weight: float = 1.
 
     @property
     def base_stride_z(self):
@@ -74,8 +74,10 @@ class MMMMDataset(Dataset):
             for dataset in conf.datasets
         ]
         # NOTE: use attributes instead of storing in a dict to make MONAI's set_rnd work
-        self.local_transform = get_local_transform(conf, tokenizer, inference)
-        self.vl_transform = VLTransform(conf, tokenizer, inference)
+        if conf.local_trans is not None:
+            self.local_transform = get_local_transform(conf, tokenizer, inference)
+        if conf.vl_trans is not None:
+            self.vl_transform = VLTransform(conf, tokenizer, inference)
 
     @property
     def dataset_weights(self):

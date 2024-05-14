@@ -1,0 +1,5 @@
+class_path: lightning.pytorch.loggers.WandbLogger
+init_args:
+  name: base
+  save_dir: output/phase-2
+  project: MMMM

@@ -116,7 +116,7 @@ class SamplePatch(mt.Randomizable):
     ):
         super().__init__()
         self.conf = conf
-        self.trans_conf = conf.seg_trans
+        self.trans_conf = conf.local_trans
         self.tokenizer = tokenizer
         self.device = device
         self.inference = inference
@@ -124,7 +124,7 @@ class SamplePatch(mt.Randomizable):
 
     def gen_patch_info(self, sparse: Sparse):
         conf = self.conf
-        trans_conf = conf.seg_trans
+        trans_conf = conf.local_trans
         # 1. sample tokens_z, tokens_xy, thus obtain patch_size_xy
         if sparse.shape[0] == 1:
             tokens_z = 1
@@ -298,7 +298,7 @@ class SamplePatch(mt.Randomizable):
         data = dict(data)
         dataset_name = data['dataset']
         conf = self.conf
-        trans_conf = conf.seg_trans
+        trans_conf = conf.local_trans
         data_dir: Path = data['dataset_dir'] / 'data' / data['key']
         sparse = Sparse.from_json((data_dir / 'sparse.json').read_bytes())
 

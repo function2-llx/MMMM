@@ -93,7 +93,7 @@ COMPLETE_REFERRINGS = ['image', 'medical image', 'radiograph', 'scan', 'radiolog
 
 PARTIAL_REFERRINGS = [' image', ' scan', ' radiograph']
 
-def get_vl_data_list(name: str, split: Split):
+def get_vl_data_list(name: str, split: Split) -> list:
     dataset_dir = PROCESSED_VL_DATA_ROOT / name
     if name == 'MIMIC-CXR':
         split_filename = f'{split}-filtered.json'

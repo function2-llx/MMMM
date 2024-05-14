@@ -100,6 +100,8 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         torch_dtype: str | torch.dtype = 'auto',
         mask_loss: DiceFocalLoss | None = None,
         lora_lang: bool = True,
+        disable_vg: bool = False,
+        freeze_vg: bool = False,
     ):
         """make jsonargparse happy
         This works thanks to that AST does not support this (according to the debug information)
@@ -108,6 +110,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         Args:
             neg_mask_loss: whether to compute loss on negative instance masks
             lora_lang: whether to fine-tune language weights
+            vlm_only: do not perform vg during training
         """
         self: MMMMForCausalLM = super().from_pretrained(
             pretrained_model_name_or_path,
@@ -116,7 +119,6 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         )
         self.resize_token_embeddings(len(tokenizer))
         self.sam_model = build_sam_vit_3d(sam)
-        self._setup_sam_requires_grad()
         self.tokenizer = tokenizer
         self.lm_loss_weight = lm_loss_weight
         self.box_l1_loss_weight = box_l1_loss_weight
@@ -145,6 +147,8 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         self.model.config.lora_lang = lora_lang
         self.model.tokenizer = tokenizer
         self.check_grad = False
+        self._setup_freeze(freeze_vg)
+        self.disable_vg = disable_vg
         return self
 
     def on_load_checkpoint(self, checkpoint: dict):
@@ -164,16 +168,21 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
     def load_default_adapter(self, ckpt_dir: Path):
         self.peft_model.load_adapter(str(ckpt_dir / 'adapter'), 'default')
 
-    def _setup_sam_requires_grad(self):
-        # make DDP work
-        # if this dissatisfies you, go and construct it
+    def _setup_freeze(self, freeze_vg: bool):
         sam = self.sam_model
-        sam.prompt_encoder.point_embeddings.requires_grad_(False)
-        sam.prompt_encoder.not_a_point_embed.requires_grad_(False)
-        sam.prompt_encoder.mask_downscaling.requires_grad_(False)
-        # sam.mask_decoder.iou_prediction_head.requires_grad_(False)
-        if not sam.mask_decoder.text_sim:
-            sam.mask_decoder.txt_align_upscaled_embedding.requires_grad_(False)
+        if freeze_vg:
+            self.vg_proj.requires_grad_(False)
+            sam.requires_grad_(False)
+            self.disc_head.requires_grad_(False)
+            self.box_head.requires_grad_(False)
+        else:
+            # freeze unused parameters to make DDP work
+            sam.prompt_encoder.point_embeddings.requires_grad_(False)
+            sam.prompt_encoder.not_a_point_embed.requires_grad_(False)
+            sam.prompt_encoder.mask_downscaling.requires_grad_(False)
+            # sam.mask_decoder.iou_prediction_head.requires_grad_(False)
+            if not sam.mask_decoder.text_sim:
+                sam.mask_decoder.txt_align_upscaled_embedding.requires_grad_(False)
 
     def get_lora_modules(self, prefix: str):
         # apply LoRA on VLM, fully finetune others
@@ -265,6 +274,10 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             return_dict=True,
             output_hidden_states=True,
         )
+        if self.disable_vg:
+            lm_loss = vlm_output.loss
+            self.log('train/loss', lm_loss, sync_dist=True)
+            return self.lm_loss_weight * lm_loss
         vg_output = self.visual_grounding(
             # shift as suggested by GLaMM: https://github.com/mbzuai-oryx/groundingLMM/issues/16
             input_ids[:, 1:],

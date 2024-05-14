@@ -108,4 +108,4 @@ init_args:
       max_tokens: 100
       max_tokens_z: 4
   dataloader:
-    train_batch_size: 4
+    train_batch_size: 8
