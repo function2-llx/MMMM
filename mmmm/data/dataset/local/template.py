@@ -357,6 +357,7 @@ def gen_anomaly_detection_conv(
         response = R.choice(template['no-anomaly-answer'])
     else:
         names = list(map(sample_name(R=R, target_tax=target_tax), anomaly_classes))
+        R.shuffle(names)
         if grounding:
             results = ','.join(map(tokenizer.wrap_name(pos=True), names))
         else:
@@ -434,7 +435,7 @@ def gen_anomaly_conv(
                 R,
             )
 
-    if (len(pos_classes) == 0 and complete_anomaly) or (len(pos_classes) > 0 and toss(R, 0.8)):
+    if (len(pos_classes) == 0 and complete_anomaly) or (len(pos_classes) > 0 and toss(R, 0.5)):
         return gen_anomaly_detection_conv(
             pos_classes,
             grounding,
