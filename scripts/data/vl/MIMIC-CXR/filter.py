@@ -15,7 +15,7 @@ def main():
                 item[key] = item[key].replace('\n', '')
             for i, image_path in enumerate(item['image']):
                 assert image_path.startswith(prefix)
-                item[key] = new_prefix + image_path[prefix_len:]
+                item['image'][i] = new_prefix + image_path[prefix_len:]
 
         (data_dir / f'{split}-filtered.json').write_bytes(orjson.dumps(data, option=orjson.OPT_INDENT_2))
 
