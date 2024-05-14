@@ -403,7 +403,7 @@ def gen_brats_conv(
 def gen_anomaly_conv(
     pos_classes: list[str],
     neg_classes: list[str],
-    complete_anomaly: bool,
+    _complete_anomaly: bool,
     grounding: bool,
     neg_grounding: bool,
     tokenizer: MMMMTokenizer,
@@ -435,7 +435,7 @@ def gen_anomaly_conv(
                 R,
             )
 
-    if (len(pos_classes) == 0 and complete_anomaly) or (len(pos_classes) > 0 and toss(R, 0.5)):
+    if toss(R, 0.5):
         return gen_anomaly_detection_conv(
             pos_classes,
             grounding,
@@ -443,13 +443,13 @@ def gen_anomaly_conv(
             target_tax,
             R,
         )
-
-    return gen_general_conv(
-        pos_classes,
-        neg_classes,
-        grounding,
-        neg_grounding,
-        tokenizer,
-        target_tax,
-        R,
-    )
+    else:
+        return gen_general_conv(
+            pos_classes,
+            neg_classes,
+            grounding,
+            neg_grounding,
+            tokenizer,
+            target_tax,
+            R,
+        )
