@@ -53,7 +53,7 @@ class Evaluator:
         if self.task == 'vqa':
             dataset = VQATestDataset(self.dataset)
         elif self.task == 'report':
-            dataset = ReportTestDataset(self.dataset)
+            dataset = ReportTestDataset(self.dataset, self.setting)
 
         if self.model == 'radfm':
             setup_fn = setup_radfm
@@ -94,7 +94,7 @@ class Evaluator:
             collate_fn=collate_fn,
         )
 
-        results = evaluate_fn(*packed, dataloader)
+        results = evaluate_fn(self.task, self.dataset, self.setting, *packed, dataloader)
 
         dump_results(
             results,

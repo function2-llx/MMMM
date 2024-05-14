@@ -38,7 +38,7 @@ def instructblip_collate_fn(batch: list[dict]):
     }
 
 
-def instructblip_vl_evaluate(model, processor, dataloader):
+def instructblip_vl_evaluate(task, dataset, setting, model, processor, dataloader):
     results = []
 
     for sample in tqdm(dataloader):

@@ -6,6 +6,8 @@ from tqdm import tqdm
 
 from luolib.utils import load_pt_zst
 
+from constants import FEW_SHOT_PROMPTS
+
 
 def setup_medflamingo(checkpoint: str, tokenizer: str):
     from accelerate import Accelerator
@@ -73,15 +75,21 @@ class FlamingoProcessor:
         return vision_x
 
 
-def medflamingo_vl_evaluate(model, processor, dataloader):
+def medflamingo_vl_evaluate(task, dataset, setting, model, processor, dataloader):
     results = []
 
     for sample in tqdm(dataloader):
-        language = processor.encode_text(
-            'You are a helpful medical assistant. You are being provided with images and a question about the image, please answer the question. <image>Question:'
-            + sample['question']
-            + ' Answer:'
-        )
+        if task == 'vqa':
+            language = processor.encode_text(
+                'You are a helpful medical assistant. You are being provided with images and a question about the image, please answer the question. <image>Question:'
+                + sample['question']
+                + ' Answer:'
+            )
+        elif task == 'report':
+            language = processor.encode_text(
+                sample['question']
+                + ' <image>Report:'
+            )
         vision = processor.preprocess_images([sample['image']])
         vision = repeat(vision, '1 c h w -> 1 1 1 c h w')
         

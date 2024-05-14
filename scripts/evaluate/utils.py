@@ -16,23 +16,14 @@ from transformers import BertTokenizer
 
 
 from mmmm.data.defs import PROCESSED_VL_DATA_ROOT
-
-
-LLAMA3_PATH = '/data/llama3/Meta-Llama-3-70B-Instruct-hf'
-CHEXBERT_PATH = '/data/chexbert/chexbert.pth'
-RADCLIQ_PATH = 'third-party/CXR-Report-Metric/CXRMetric/radcliq-v1.pkl'
-
-
-LLAMA_SYSTEM_PROMPT = '''
-You are an AI assistant specialized in medical topics. 
-'''
-
-LLAMA_USER_PROMPT = '''
-You are given the question, ground truth and prediction of a medical visual question answering task. Your task is to evaluate the prediction based on the question and ground truth in terms of medical knowledge. You should consider various aspects, such as the correctness, completeness and relevance of the prediction. You should provide a final score from 0 to 10 to summarize the overall quality of the prediction. The output format is 'score: xx'. Do not output anything else other than the score.
-question: {question}
-ground truth: {answer}
-prediction: {prediction}
-'''
+from constants import (
+    LLAMA3_PATH,
+    LLAMA_SYSTEM_PROMPT,
+    LLAMA_USER_PROMPT,
+    CHEXBERT_PATH,
+    RADCLIQ_PATH,
+    FEW_SHOT_PROMPTS,
+)
 
 
 def setup_seed(seed):
@@ -48,7 +39,7 @@ def dump_results(
     results: list[dict], output_dir, task: str, dataset: str, model: str, setting: str
 ):
     results = pd.DataFrame(results)
-    results.to_csv(output_dir / f'{task}_{dataset}_{model}_{setting}.csv')
+    results.to_csv(output_dir / f'{task}_{dataset}_{model}_{setting}.csv', index=False)
 
 
 class VQATestDataset(Dataset):
@@ -71,17 +62,22 @@ class VQATestDataset(Dataset):
 
 
 class ReportTestDataset(Dataset):
-    def __init__(self, dataset: str):
+    def __init__(self, dataset: str, setting: str):
         super().__init__()
         self.name = dataset
-        with open(PROCESSED_VL_DATA_ROOT / dataset / 'test.json') as f:
+        self.setting = setting
+        with open(PROCESSED_VL_DATA_ROOT / dataset / 'test-filtered.json') as f:
             self.dataset = [
                 {
                     'image': image,
                     'question': (
-                        'Can you provide a radiology report for this medical image?'
-                        if x.get('impression')
-                        else 'Can you provide the findings for this medical image?'
+                        FEW_SHOT_PROMPTS[dataset]
+                        if setting == 'fewshot'
+                        else (
+                            'Can you provide a radiology report for this medical image?'
+                            if x.get('impression')
+                            else 'Can you provide the findings for this medical image?'
+                        )
                     ),
                     'answer': (
                         f'Findings: {x["findings"]}\nImpression: {x["impression"]}'
@@ -166,7 +162,7 @@ class GenericMetrics:
             df[key] = results[key]
             summary[key] = sum(results[key]) / len(results[key])
 
-        df.to_csv(str(run) + '.csv')
+        df.to_csv(str(run) + '.csv', index=False)
         with open(str(run) + '.json', 'w') as f:
             json.dump(summary, f, indent=4)
 
@@ -176,7 +172,7 @@ class LlamaMetrics:
         from vllm import LLM
 
         self.llama = LLM(
-            model=LLAMA3_PATH, dtype='bfloat16', gpu_memory_utilization=0.75
+            model=LLAMA3_PATH, dtype='bfloat16', gpu_memory_utilization=0.9
         )
 
     def process(self, run: Path):
@@ -213,7 +209,7 @@ class LlamaMetrics:
         ]
 
         sampling_params = SamplingParams(
-            max_tokens=10,
+            max_tokens=256,
             min_tokens=1,
             temperature=0.1,
             stop_token_ids=[
@@ -226,25 +222,26 @@ class LlamaMetrics:
             prompts=conversations,
             sampling_params=sampling_params,
         )
-
+        response_texts = []
         scores = []
         for i, response in enumerate(responses):
             while True:
                 try:
-                    score = int(response.outputs[0].text.split('score: ')[1].strip())
+                    response_texts.append(response.outputs[0].text)
+                    score = int(response.outputs[0].text.split('Score: ')[1].strip())
                     scores.append(score)
                     break
                 except:
-                    print(response.outputs[0].text)
                     response = self.llama.generate(
                         prompts=[conversations[i]],
                         sampling_params=sampling_params,
                     )
 
+        df['llama_responses'] = response_texts
         df['llama'] = scores
         summary['llama'] = sum(scores) / len(scores)
 
-        df.to_csv(str(run) + '.csv')
+        df.to_csv(str(run) + '.csv', index=False)
         with open(str(run) + '.json', 'w') as f:
             json.dump(summary, f, indent=4)
 
@@ -398,11 +395,15 @@ class CXRMetrics:
         )
 
     def compute_bleu2(self, prediction: str, reference: str):
-        return self.bleu2.compute(
-            predictions=[prediction],
-            references=[[reference]],
-            max_order=2,
-        )['bleu'] if prediction.strip() else 0.0
+        return (
+            self.bleu2.compute(
+                predictions=[prediction],
+                references=[[reference]],
+                max_order=2,
+            )['bleu']
+            if prediction.strip()
+            else 0.0
+        )
 
     def compute(self, prediction: str, reference: str):
         return {
@@ -422,7 +423,7 @@ class CXRMetrics:
         results = {
             'chexbert': [],
             'radgraph': [],
-            'bleu2': []
+            'bleu2': [],
         }
 
         for _, row in tqdm(df.iterrows(), total=df.shape[0]):
@@ -436,14 +437,15 @@ class CXRMetrics:
         for key in results.keys():
             df[key] = results[key]
 
-        df['radcliq'] = self.radcliq.predict(
+        results['radcliq'] = self.radcliq.predict(
             np.array(df[['radgraph', 'bertscore', 'chexbert', 'bleu2']])
         )
-        df.drop(columns=['bleu2'])
+        df['radcliq'] = results['radcliq']
+        df = df.drop(columns=['bleu2'])
 
         for key in results.keys():
             summary[key] = sum(results[key]) / len(results[key])
 
-        df.to_csv(str(run) + '.csv')
+        df.to_csv(str(run) + '.csv', index=False)
         with open(str(run) + '.json', 'w') as f:
             json.dump(summary, f, indent=4)

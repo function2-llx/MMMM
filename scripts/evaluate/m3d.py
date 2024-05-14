@@ -55,7 +55,7 @@ def m3d_collate_fn(batch: list[dict]):
     }
 
 
-def m3d_vl_evaluate(model, tokenizer, dataloader):
+def m3d_vl_evaluate(task, dataset, setting, model, tokenizer, dataloader):
     results = []
 
     for sample in tqdm(dataloader):

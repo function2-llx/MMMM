@@ -38,7 +38,7 @@ def llavanext_collate_fn(batch: list[dict]):
     }
 
 
-def llavanext_vl_evaluate(model, processor, dataloader):
+def llavanext_vl_evaluate(task, dataset, setting, model, processor, dataloader):
     results = []
 
     for sample in tqdm(dataloader):

@@ -38,7 +38,7 @@ def cogvlm_collate_fn(batch: list[dict]):
     }
 
 
-def cogvlm_vl_evaluate(model, tokenizer, dataloader):
+def cogvlm_vl_evaluate(task, dataset, setting, model, tokenizer, dataloader):
     results = []
 
     for sample in tqdm(dataloader):
