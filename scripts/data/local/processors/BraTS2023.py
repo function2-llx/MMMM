@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 
 from mmmm.data.defs import Split
@@ -33,10 +34,6 @@ class BraTS2023SegmentationProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderM
             2: 'peritumoral edema',
             3: 'enhancing tumor',
         }
-        split_dict = {
-            Split.TRAIN: [],
-            Split.VAL: [],
-        }
         ret = []
         for subject_dir in self.dataset_root.glob('*/*'):
             if not (subject_dir.is_dir() and subject_dir.name.startswith(self.dataset_root.name)):
@@ -45,14 +42,6 @@ class BraTS2023SegmentationProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderM
             label_path = subject_dir / f'{key}-seg.nii.gz'
             if not label_path.exists():
                 continue
-            split_dir = subject_dir.parent.parents[1].name
-            if 'Train' in split_dir:
-                split = Split.TRAIN
-            elif 'Validation' in split_dir:
-                split = Split.VAL
-            else:
-                raise ValueError('cannot determine split')
-            split_dict[split].append(key)
             ret.append(
                 MultiClassDataPoint(
                     key=key,
@@ -64,10 +53,21 @@ class BraTS2023SegmentationProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderM
                     class_mapping=class_mapping,
                 ),
             )
-        return ret, split_dict
+        return ret, None
 
 class BraTS2023GLIProcessor(BraTS2023SegmentationProcessor):
     name = 'BraTS2023/BraTS-GLI'
+    num_val = 50
+
+    def get_data_points(self):
+        data_points, _ = super().get_data_points()
+        R = np.random.RandomState(233)
+        keys = [data_point.key for data_point in data_points]
+        R.shuffle(keys)
+        return data_points, {
+            Split.TRAIN: keys[:-self.num_val],
+            Split.VAL: keys[-self.num_val:],
+        }
 
 class BraTS2023MENProcessor(BraTS2023SegmentationProcessor):
     name = 'BraTS2023/BraTS-MEN'

@@ -9,6 +9,7 @@ import einops
 import math
 import numpy as np
 import numpy.typing as npt
+import orjson
 import pandas as pd
 import torch
 from torch.types import Device
@@ -40,9 +41,14 @@ __all__ = [
 ]
 
 def get_local_data_list(name: str, split: Split):
-    if split != 'train':
-        raise NotImplementedError
     dataset_dir = PROCESSED_LOCAL_DATA_ROOT / name
+    if (split_path := dataset_dir / 'split.json').exists():
+        split_dict = orjson.loads(split_path.read_bytes())
+        keys = set(split_dict[split])
+    else:
+        keys = None
+        if split != Split.TRAIN:
+            raise ValueError
     info = pd.read_csv(dataset_dir / 'info.csv', dtype={'key': 'string'})
     info.set_index('key', inplace=True)
     return [
@@ -51,7 +57,7 @@ def get_local_data_list(name: str, split: Split):
             'dataset_dir': dataset_dir,
             'key': key,
         }
-        for key in info.index
+        for key in info.index if keys is None or key in keys
     ]
 
 @dataclass(kw_only=True)

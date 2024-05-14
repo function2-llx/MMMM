@@ -147,7 +147,7 @@ class Processor(ABC):
         return self.output_root / 'data'
 
     @abstractmethod
-    def get_data_points(self) -> tuple[list[DataPoint], dict[Split, list[str]]]:
+    def get_data_points(self) -> tuple[list[DataPoint], dict[Split, list[str]] | None]:
         pass
 
     def image_loader(self, path: Path) -> MetaTensor:
@@ -272,11 +272,12 @@ class Processor(ABC):
             self._collect_info, data_points,
             max_workers=self.max_workers, chunksize=10, disable=True,
         )
-        split = {
-            str(key): value
-            for key, value in split.items()
-        }
-        (self.output_root / 'split.json').write_bytes(orjson.dumps(split, option=orjson.OPT_INDENT_2))
+        if split:
+            split = {
+                str(key): value
+                for key, value in split.items()
+            }
+            (self.output_root / 'split.json').write_bytes(orjson.dumps(split, option=orjson.OPT_INDENT_2))
         info_list = [*filter(lambda x: x is not None, info_list)]
         if len(info_list) > 0:
             info = pd.DataFrame.from_records(info_list, index='key')

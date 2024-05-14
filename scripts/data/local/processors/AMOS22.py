@@ -57,6 +57,5 @@ class AMOS22Processor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor
                     class_mapping=class_mappings[meta.loc[case_id, "Patient's Sex"]],
                 )
                 ret.append(data_point)
-                split = Split.TRAIN if 'Tr' else Split.VAL
                 split_dict[split].append(key)
-        return ret
+        return ret, split_dict
