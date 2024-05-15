@@ -1,5 +1,7 @@
+import numpy as np
 import torch
 
+from mmmm.data.defs import Split
 from ._base import DataPoint, DefaultImageLoaderMixin, DefaultMaskLoaderMixin, MultiClassDataPoint, Processor
 
 class BraTS2023SegmentationProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor):
@@ -20,7 +22,7 @@ class BraTS2023SegmentationProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderM
         targets = ['necrotic tumor core', 'peritumoral edema', 'glioma']
         return targets, masks
 
-    def get_data_points(self) -> list[DataPoint]:
+    def get_data_points(self):
         modality_map = {
             't1c': 'T1CE MRI',
             't1n': 'T1 MRI',
@@ -51,10 +53,21 @@ class BraTS2023SegmentationProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderM
                     class_mapping=class_mapping,
                 ),
             )
-        return ret
+        return ret, None
 
 class BraTS2023GLIProcessor(BraTS2023SegmentationProcessor):
     name = 'BraTS2023/BraTS-GLI'
+    num_val = 50
+
+    def get_data_points(self):
+        data_points, _ = super().get_data_points()
+        R = np.random.RandomState(233)
+        keys = [data_point.key for data_point in data_points]
+        R.shuffle(keys)
+        return data_points, {
+            Split.TRAIN: keys[:-self.num_val],
+            Split.VAL: keys[-self.num_val:],
+        }
 
 class BraTS2023MENProcessor(BraTS2023SegmentationProcessor):
     name = 'BraTS2023/BraTS-MEN'

@@ -11,6 +11,7 @@ import cytoolz
 import einops
 import numpy as np
 from numpy import typing as npt
+import orjson
 import pandas as pd
 from scipy.stats import norm
 import torch
@@ -23,15 +24,16 @@ from luolib.transforms import affine_resize
 from luolib.transforms.box_ops import apply_affine_to_boxes_int
 from luolib.types import tuple3_t
 from luolib.utils import as_tensor, fall_back_none, get_cuda_device, process_map, save_pt_zst
-from mmmm.data.target_tax import TargetCategory
 from monai import transforms as mt
 from monai.data import MetaTensor, convert_box_to_standard_mode
 from monai.data.box_utils import CornerCornerModeTypeB, box_centers, clip_boxes_to_image
 from monai.transforms import generate_spatial_bounding_box
 
 from mmmm.data import load_target_tax
-from mmmm.data.defs import ORIGIN_LOCAL_DATA_ROOT, PROCESSED_LOCAL_DATA_ROOT
+from mmmm.data.defs import ORIGIN_LOCAL_DATA_ROOT, PROCESSED_LOCAL_DATA_ROOT, Split
 from mmmm.data.sparse import Sparse
+from mmmm.data.target_tax import TargetCategory
+from monai.utils import GridSampleMode
 
 @dataclass(kw_only=True)
 class DataPoint:
@@ -111,6 +113,7 @@ class Processor(ABC):
     cuda_cache_th: int = 15
     semantic_targets: set[str] = set()
     affine_atol: float = 1e-2
+    assert_local: bool = True
 
     def __init__(self, logger: Logger, *, max_workers: int, chunksize: int, override: bool):
         self.tax = load_target_tax()
@@ -124,6 +127,13 @@ class Processor(ABC):
     @property
     def device(self):
         return get_cuda_device()
+
+    def _check_cuda_cache(self):
+        device = get_cuda_device()
+        cuda_cache = torch.cuda.memory_reserved(device) - torch.cuda.memory_allocated(device)
+        if cuda_cache > self.cuda_cache_th << 30:
+            gc.collect()
+            torch.cuda.empty_cache()
 
     def _get_category(self, name: str):
         return self.tax[name].category
@@ -145,7 +155,7 @@ class Processor(ABC):
         return self.output_root / 'data'
 
     @abstractmethod
-    def get_data_points(self) -> list[DataPoint]:
+    def get_data_points(self) -> tuple[list[DataPoint], dict[Split, list[str]] | None]:
         pass
 
     def image_loader(self, path: Path) -> MetaTensor:
@@ -249,13 +259,15 @@ class Processor(ABC):
             return pd.read_pickle(path)
         return None
 
-    def process(self, limit: int | None = None, empty_cache: bool = False, raise_error: bool = False):
-        data_points = self.get_data_points()
+    def process(self, limit: int | tuple[int, int] | None = None, empty_cache: bool = False, raise_error: bool = False):
+        data_points, split = self.get_data_points()
         assert len(data_points) > 0
         assert len(data_points) == len(set(data_point.key for data_point in data_points)), "key must be unique within the dataset"
         pending_data_points = [*filter(lambda p: not (self.case_data_root / p.key).exists(), data_points)]
-        if limit is not None:
+        if isinstance(limit, int):
             pending_data_points = pending_data_points[:limit]
+        elif isinstance(limit, tuple) and len(limit) == 2:
+            pending_data_points = pending_data_points[slice(*limit)]
         if self.orientation is None:
             self.logger.warning('orientation is not specified, will infer from the metadata')
         if len(pending_data_points) > 0:
@@ -270,6 +282,12 @@ class Processor(ABC):
             self._collect_info, data_points,
             max_workers=self.max_workers, chunksize=10, disable=True,
         )
+        if split:
+            split = {
+                str(key): value
+                for key, value in split.items()
+            }
+            (self.output_root / 'split.json').write_bytes(orjson.dumps(split, option=orjson.OPT_INDENT_2))
         info_list = [*filter(lambda x: x is not None, info_list)]
         if len(info_list) > 0:
             info = pd.DataFrame.from_records(info_list, index='key')
@@ -313,8 +331,11 @@ class Processor(ABC):
         new_shape = (np.array(shape) / scale).round().astype(np.int64)
         return new_spacing, new_shape
 
+    def _is_unknown_target(self, target: str):
+        return target not in self.tax
+
     def _check_targets(self, targets: Iterable[str]):
-        unknown_targets = [*filter(lambda name: name not in self.tax, targets)]
+        unknown_targets = [*filter(self._is_unknown_target, targets)]
         if len(unknown_targets) > 0:
             print('unknown targets:', unknown_targets)
             raise ValueError
@@ -388,17 +409,14 @@ class Processor(ABC):
         self.key = key = data_point.key
         try:
             if empty_cache:
-                device = get_cuda_device()
-                cuda_cache = torch.cuda.memory_reserved(device) - torch.cuda.memory_allocated(device)
-                if cuda_cache > self.cuda_cache_th << 30:
-                    gc.collect()
-                    torch.cuda.empty_cache()
+                self._check_cuda_cache()
             modalities, images = self.load_images(data_point)
             targets, neg_targets, masks, boxes = self.load_annotations(data_point, images)
             if targets:
                 if masks is None:
-                    assert boxes is not None
-                    assert len(targets) == boxes.shape[0]
+                    if self.assert_local:
+                        assert boxes is not None
+                        assert len(targets) == boxes.shape[0]
                 else:
                     assert boxes is None
                     assert len(targets) == masks.shape[0]
@@ -437,7 +455,7 @@ class Processor(ABC):
             })
             # 4. apply resize & intensity normalization, save processed results
             # 4.1. normalize and save images
-            images, mean, std = self.normalize_image(images, new_shape)
+            images, mean, std = self.normalize_image(images, new_shape, GridSampleMode.BICUBIC)
             save_dir = self.case_data_root / f'.{key}'
             save_dir.mkdir(exist_ok=True, parents=True)
             # 4.2. save image
@@ -491,7 +509,9 @@ class Processor(ABC):
                 import traceback
                 self.logger.error(traceback.format_exc())
 
-    def normalize_image(self, images: MetaTensor, new_shape: npt.NDArray[np.int64]) -> tuple[MetaTensor, torch.Tensor, torch.Tensor]:
+    def normalize_image(
+        self, images: MetaTensor, new_shape: npt.NDArray[np.int64], mode: GridSampleMode,
+    ) -> tuple[MetaTensor, torch.Tensor, torch.Tensor]:
         # 1. rescale to [0, 1]
         if images.dtype == torch.uint8:
             images = to_dtype(images, scale=True)

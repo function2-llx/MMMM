@@ -25,14 +25,14 @@ def process(csv_file: str):
                 )
     np.random.RandomState(30924).shuffle(data)
 
-    train_data = data[:int(len(data) * 0.8)]
-    val_data = data[int(len(data) * 0.8):int(len(data) * 0.9)]
+    train_data = data[:int(len(data) * 0.9)]
+    # val_data = data[int(len(data) * 0.8):int(len(data) * 0.9)]
     test_data = data[int(len(data) * 0.9):]
     # TODO: follow the split of https://github.com/omar-mohamed/GPT2-Chest-X-Ray-Report-Generation, as suggested by RadFM
     with open(PROCESSED_VL_DATA_ROOT / 'OpenI' / 'train.json', 'w') as f:
         json.dump(train_data, f, indent=4)
-    with open(PROCESSED_VL_DATA_ROOT / 'OpenI' / 'validate.json', 'w') as f:
-        json.dump(val_data, f, indent=4)
+    # with open(PROCESSED_VL_DATA_ROOT / 'OpenI' / 'validate.json', 'w') as f:
+    #     json.dump(val_data, f, indent=4)
     with open(PROCESSED_VL_DATA_ROOT / 'OpenI' / 'test.json', 'w') as f:
         json.dump(test_data, f, indent=4)
 

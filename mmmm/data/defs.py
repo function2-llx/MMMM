@@ -8,16 +8,21 @@ from typing import Literal, NamedTuple, TypedDict
 import torch
 
 from luolib.types import tuple3_t
-from monai.utils import str2bool
+from monai.utils import StrEnum, str2bool
 
 @cache
 def mmmm_debug() -> bool:
     val = os.environ.get('MMMM_DEBUG', False)
     return val if isinstance(val, bool) else str2bool(val)
 
+@cache
+def mmmm_debug_data() -> bool:
+    val = os.environ.get('MMMM_DEBUG_DATA', False)
+    return val if isinstance(val, bool) else str2bool(val)
+
 DATA_ROOT = Path('data')
 ORIGIN_DATA_ROOT = DATA_ROOT / 'origin'
-PROCESSED_DATA_ROOT = DATA_ROOT / ('processed-debug' if mmmm_debug() else 'processed')
+PROCESSED_DATA_ROOT = DATA_ROOT / ('processed-debug' if mmmm_debug_data() else 'processed')
 ORIGIN_LOCAL_DATA_ROOT = ORIGIN_DATA_ROOT / 'local'
 ORIGIN_VL_DATA_ROOT = ORIGIN_DATA_ROOT / 'vision-language'
 PROCESSED_LOCAL_DATA_ROOT = PROCESSED_DATA_ROOT / 'local'
@@ -64,7 +69,11 @@ class Batch(TypedDict):
     num_uncertain: list[torch.LongTensor]
     semantic: list[torch.BoolTensor]
 
-split_t = Literal['train', 'val']
+class Split(StrEnum):
+    TRAIN = 'train'
+    VAL = 'val'
+    TEST = 'test'
+
 CE_IGNORE_INDEX = -100
 
 class ConvTurn(NamedTuple):

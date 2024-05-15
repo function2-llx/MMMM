@@ -1,116 +1,68 @@
-from functools import partial
-import warnings
-
 import einops
 import torch
+from torch import nn
 
-from monai.losses import DiceFocalLoss as _MONAIDiceFocalLoss, DiceLoss
-from monai.networks import one_hot
-from monai.utils import LossReduction
+from luolib.losses import bce_with_binary_label
+from monai.losses.focal_loss import sigmoid_focal_loss
 
 __all__ = [
     'DiceFocalLoss',
 ]
 
-def patched_dice_forward(self: DiceLoss, input: torch.Tensor, target: torch.Tensor):
-    # fix: https://github.com/MIC-DKFZ/nnUNet/issues/812
-    if self.sigmoid:
+_EPS = 1e-8
+
+class DiceFocalLoss(nn.Module):
+    """
+    fix smooth issue of dice
+    use BCE by default
+    """
+    def __init__(
+        self,
+        dice_weight: float = 1.,
+        focal_weight: float = 1.,
+        focal_gamma: float = 0.,
+    ):
+        super().__init__()
+        self.dice_weight = dice_weight
+        self.focal_gamma = focal_gamma
+        assert focal_gamma >= 0
+        self.focal_weight = focal_weight
+
+    def dice(self, input: torch.Tensor, target: torch.Tensor | None):
+        """
+        copy from monai.losses.DiceLoss.forward, but fix the smooth issue, fix: https://github.com/MIC-DKFZ/nnUNet/issues/812
+        """
+        if target is None:
+            return input.new_ones(input.shape[:2])
         input = torch.sigmoid(input)
+        intersection = einops.reduce(target * input, 'n c ... -> n c', 'sum')
+        ground_o = einops.reduce(target, 'n c ... -> n c ', 'sum')
+        pred_o = einops.reduce(input, 'n c ... -> n c', 'sum')
+        denominator = ground_o + pred_o
+        # NOTE: no smooth item for nominator, or it will become unfortunate
+        f: torch.Tensor = 1.0 - 2.0 * intersection / torch.clip(denominator, min=_EPS)
+        return f
 
-    n_pred_ch = input.shape[1]
-    if self.softmax:
-        if n_pred_ch == 1:
-            warnings.warn("single channel prediction, `softmax=True` ignored.")
+    def focal(self, input: torch.Tensor, target: torch.Tensor | None):
+        # let's be happy
+        if self.focal_gamma < _EPS:
+            return bce_with_binary_label(input, target)
         else:
-            input = torch.softmax(input, 1)
-
-    if self.other_act is not None:
-        input = self.other_act(input)
-
-    if self.to_onehot_y:
-        if n_pred_ch == 1:
-            warnings.warn("single channel prediction, `to_onehot_y=True` ignored.")
-        else:
-            target = one_hot(target, num_classes=n_pred_ch)
-
-    if not self.include_background:
-        if n_pred_ch == 1:
-            warnings.warn("single channel prediction, `include_background=False` ignored.")
-        else:
-            # if skipping background, removing first channel
-            target = target[:, 1:]
-            input = input[:, 1:]
-
-    if target.shape != input.shape:
-        raise AssertionError(f"ground truth has different shape ({target.shape}) from input ({input.shape})")
-
-    # reducing only spatial dimensions (not batch nor channels)
-    reduce_axis: list[int] = torch.arange(2, len(input.shape)).tolist()
-    if self.batch:
-        # reducing spatial dimensions and batch
-        reduce_axis = [0] + reduce_axis
-
-    intersection = torch.sum(target * input, dim=reduce_axis)
-
-    if self.squared_pred:
-        ground_o = torch.sum(target ** 2, dim=reduce_axis)
-        pred_o = torch.sum(input ** 2, dim=reduce_axis)
-    else:
-        ground_o = torch.sum(target, dim=reduce_axis)
-        pred_o = torch.sum(input, dim=reduce_axis)
-
-    denominator = ground_o + pred_o
-
-    if self.jaccard:
-        denominator = 2.0 * (denominator - intersection)
-
-    # NOTE: the only change is here
-    f: torch.Tensor = 1.0 - (2.0 * intersection + self.smooth_nr) / torch.clip(denominator + self.smooth_dr, min=1e-8)
-
-    num_of_classes = target.shape[1]
-    if self.class_weight is not None and num_of_classes != 1:
-        # make sure the lengths of weights are equal to the number of classes
-        if self.class_weight.ndim == 0:
-            self.class_weight = torch.as_tensor([self.class_weight] * num_of_classes)
-        else:
-            if self.class_weight.shape[0] != num_of_classes:
-                raise ValueError(
-                    """the length of the `weight` sequence should be the same as the number of classes.
-                    If `include_background=False`, the weight should not include
-                    the background category class 0."""
-                )
-        if self.class_weight.min() < 0:
-            raise ValueError("the value/values of the `weight` should be no less than 0.")
-        # apply class_weight to loss
-        f = f * self.class_weight.to(f)
-
-    if self.reduction == LossReduction.MEAN.value:
-        f = torch.mean(f)  # the batch and channel average
-    elif self.reduction == LossReduction.SUM.value:
-        f = torch.sum(f)  # sum over the batch and channel dims
-    elif self.reduction == LossReduction.NONE.value:
-        # If we are not computing voxelwise loss components at least
-        # make sure a none reduction maintains a broadcastable shape
-        broadcast_shape = list(f.shape[0:2]) + [1] * (len(input.shape) - 2)
-        f = f.view(broadcast_shape)
-    else:
-        raise ValueError(
-            f'Unsupported reduction: {self.reduction}, available options are ["mean", "sum", "none"].'
-        )
-
-    return f
-
-class DiceFocalLoss(_MONAIDiceFocalLoss):
-    """reduce the results to channel only; also fix smooth issue of dice"""
-
-    def __init__(self, **kwargs):
-        super().__init__(reduction='none', smooth_nr=0, smooth_dr=0, sigmoid=True, **kwargs)
-        self.dice.forward = partial(patched_dice_forward, self.dice)
+            if target is None:
+                target = torch.zeros_like(input)
+            return sigmoid_focal_loss(input, target)
 
     def forward(
-        self, input: torch.Tensor, target: torch.Tensor, *, reduce_batch: bool = True, return_dict: bool = False,
+        self,
+        input: torch.Tensor,
+        target: torch.BoolTensor | None = None,
+        *,
+        reduce_batch: bool = True,
+        return_dict: bool = False,
     ) -> torch.Tensor | dict[str, torch.Tensor]:
-        input = input.float()
+        assert input.ndim == 5
+        if target is not None:
+            assert input.shape == target.shape
         dice_loss = self.dice(input, target)
         focal_loss = self.focal(input, target)
         if reduce_batch:
@@ -119,11 +71,12 @@ class DiceFocalLoss(_MONAIDiceFocalLoss):
         else:
             dice_loss = einops.reduce(dice_loss, 'n ... -> n', 'mean')
             focal_loss = einops.reduce(focal_loss, 'n ... -> n', 'mean')
-        total_loss: torch.Tensor = self.lambda_dice * dice_loss + self.lambda_focal * focal_loss
+        total_loss: torch.Tensor = self.dice_weight * dice_loss + self.focal_weight * focal_loss
         if return_dict:
+            focal_key = 'ce' if self.focal_gamma < _EPS else f'focal-{self.focal_gamma:.1f}'
             return {
                 'dice': dice_loss,
-                'focal': focal_loss,
+                focal_key: focal_loss,
                 'total': total_loss,
             }
         else:

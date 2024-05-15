@@ -2,6 +2,7 @@ from __future__ import annotations as _
 
 from dataclasses import dataclass
 import json
+from typing import TypedDict
 
 import einops
 import math
@@ -10,13 +11,14 @@ import torch
 from torchvision.io import read_image
 from torchvision.transforms import v2 as tvt
 
+from luolib.utils import load_pt_zst
 from luolib.utils.misc import ensure_rgb
 from monai import transforms as mt
 from monai.utils import InterpolateMode, convert_to_tensor
 
 import mmmm.data.dataset._dataset as _dataset
 from mmmm.tokenizer import MMMMTokenizer
-from ..defs import ConvTurn, DataPoint, PROCESSED_VL_DATA_ROOT, split_t
+from ..defs import ConvTurn, DataPoint, PROCESSED_VL_DATA_ROOT, mmmm_debug, Split
 from ..utils import prepare_vlm_inputs
 from .misc import get_max_resize, gen_modality_conv, intensity_norm, toss
 
@@ -92,9 +94,13 @@ COMPLETE_REFERRINGS = ['image', 'medical image', 'radiograph', 'scan', 'radiolog
 
 PARTIAL_REFERRINGS = [' image', ' scan', ' radiograph']
 
-def get_vl_data_list(name: str, split: split_t):
+def get_vl_data_list(name: str, split: Split) -> list:
     dataset_dir = PROCESSED_VL_DATA_ROOT / name
-    with open(dataset_dir / f'{split}.json') as f:
+    if name == 'MIMIC-CXR':
+        split_filename = f'{split}-filtered.json'
+    else:
+        split_filename = f'{split}.json'
+    with open(dataset_dir / split_filename) as f:
         info = json.load(f)
     return info
 
@@ -103,6 +109,16 @@ class VLTransConf:
     max_tokens: int
     max_tokens_z: int
     log2_patch_size_z_std: float = 0.5
+    report_ratio: float = 0.8
+
+class VLDataPoint(TypedDict):
+    image: list[str]
+    modality: list[str]
+    findings: str
+    impression: str
+    anomaly_pos: list[str]
+    anomaly_neg: list[str]
+    vqa: list
 
 class VLTransform(mt.RandomizableTransform):
     def __init__(
@@ -127,6 +143,8 @@ class VLTransform(mt.RandomizableTransform):
             modality = None
         if image_path.endswith('.pt'):
             image = torch.load(image_path)
+        elif image_path.endswith('.pt.zst'):
+            image = load_pt_zst(image_path)
         else:
             image = read_image(image_path)
             image = einops.rearrange(image, 'c h w -> c 1 h w')
@@ -164,29 +182,33 @@ class VLTransform(mt.RandomizableTransform):
         image, _ = ensure_rgb(image, contiguous=True)
         image = intensity_norm(image)
         referring: str = self.R.choice(COMPLETE_REFERRINGS)
-        conversation = []
-        if caption := data.get('caption'):
-            conversation.append(ConvTurn(self.R.choice(CAPTION_PROMPTS), caption))
-        if (findings := data.get('findings')) and (impression := data.get('impression')):
-            conversation.append(
-                ConvTurn(
-                    self.R.choice(REPORT_PROMPTS).format(referring),
-                    f"Findings: {findings}\nImpression: {impression}",
-                ),
-            )
-        elif findings := data.get('findings'):
-            conversation.append(
-                ConvTurn(
-                    self.R.choice(FINDINGS_PROMPTS).format(referring),
-                    findings,
-                ),
-            )
-        if vqa := data.get('vqa'):
-            conversation.extend([ConvTurn(qa['question'], qa['answer']) for qa in vqa])
-        self.R.shuffle(conversation)
-        if modality is not None and toss(self.R, 0.5):
-            # prepend the modality conversation
-            conversation = gen_modality_conv(modality, self.R) + conversation
+
+        if modality is not None and toss(self.R, 0.3):
+            conversation = gen_modality_conv(modality, self.R)
+        else:
+            conversation = []
+        findings = data.get('findings')
+        vqa = data.get('vqa')
+        if not vqa or toss(self.R, trans_conf.report_ratio):
+            if impression := data.get('impression'):
+                conversation.append(
+                    ConvTurn(
+                        self.R.choice(REPORT_PROMPTS).format(referring),
+                        f"Findings: {findings}\nImpression: {impression}",
+                    ),
+                )
+            else:
+                conversation.append(
+                    ConvTurn(
+                        self.R.choice(FINDINGS_PROMPTS).format(referring),
+                        findings,
+                    ),
+                )
+        else:
+            conv_vqa = [ConvTurn(qa['question'], qa['answer']) for qa in vqa]
+            self.R.shuffle(conv_vqa)
+            conversation.extend(conv_vqa)
+
         vlm_inputs, conversation_text = prepare_vlm_inputs(
             conversation,
             self.tokenizer,
@@ -194,16 +216,21 @@ class VLTransform(mt.RandomizableTransform):
             inference=self.inference,
             grounding=False,
             max_seq_len=conf.max_seq_len,
+            bop_weight=1.,
         )
         data: DataPoint = {
+            'src': ('?', str(image_path)),
             'image': image,
             'grounding_image': torch.zeros(3, *patch_size),
             'patch_size': patch_size,
             'pool_size': (pool_size_z, conf.pool_size_xy, conf.pool_size_xy),
             'vlm_inputs': vlm_inputs,
-            'mask': torch.zeros(0, *patch_size, dtype=torch.bool),
-            'mask_index': torch.empty(0, dtype=torch.bool),
-            'bbox': torch.empty(0, 2, 3),
-            'bbox_index': torch.zeros(0, dtype=torch.bool),
+            'masks': torch.zeros(0, *patch_size, dtype=torch.bool),
+            'boxes': torch.zeros(0, 6),
+            'semantic_masks': None,
+            'semantic_boxes': None,
+            'index_offsets': torch.empty(0, 2, dtype=torch.long),
+            'num_uncertain': torch.empty(0, dtype=torch.long),
+            'semantic': torch.empty(0, dtype=torch.bool),
         }
         return data

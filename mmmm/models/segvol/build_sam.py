@@ -16,7 +16,7 @@ class SamArgs:
     pt_pos_embed_shape: tuple3_t[int] | None = None
     checkpoint: Path | None = None
     text_sim: bool = False
-    num_instances: int = 9
+    num_instances: int
 
 def build_sam_vit_3d(args: SamArgs) -> Sam:
     return _build_sam(
@@ -60,8 +60,6 @@ def _build_sam(
                 num_heads=8,
             ),
             transformer_dim=embed_dim,
-            iou_head_depth=3,
-            iou_head_hidden_dim=256,
             text_sim=args.text_sim,
         ),
     )

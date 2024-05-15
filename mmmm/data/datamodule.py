@@ -47,6 +47,10 @@ class MMMMRandomSampler(Sampler):
         self.G = torch.Generator()
         self.G.manual_seed(seed)
 
+    @property
+    def num_datasets(self):
+        return self.dataset_weights.shape[0]
+
     def __iter__(self) -> Iterator[tuple[int, int]]:
         for dataset_idx in torch.multinomial(
             self.dataset_weights, self.num_samples, True, generator=self.G,
@@ -70,7 +74,7 @@ class MMMMDataModule(ExpDataModuleBase):
         assert len(set([d.name for d in dataset.datasets])) == len(dataset.datasets), 'duplicated dataset'
 
     def train_dataloader(self):
-        dataset = MMMMDataset(self.dataset_conf, 'train', self.tokenizer)
+        dataset = MMMMDataset(self.dataset_conf, 'train', self.tokenizer, inference=False)
         conf = self.dataloader_conf
         assert conf.train_batch_size is not None and conf.num_batches is not None
         sampler = MMMMRandomSampler(dataset, conf.num_batches * conf.train_batch_size * self.world_size)

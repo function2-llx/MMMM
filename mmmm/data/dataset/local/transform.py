@@ -9,6 +9,7 @@ import einops
 import math
 import numpy as np
 import numpy.typing as npt
+import orjson
 import pandas as pd
 import torch
 from torch.types import Device
@@ -25,7 +26,7 @@ from monai.transforms import generate_spatial_bounding_box
 from monai.utils import GridSamplePadMode
 
 import mmmm.data.dataset._dataset as _dataset
-from mmmm.data.defs import DataPoint, PROCESSED_LOCAL_DATA_ROOT, mmmm_debug, split_t
+from mmmm.data.defs import DataPoint, PROCESSED_LOCAL_DATA_ROOT, mmmm_debug, Split
 from mmmm.data.sparse import Sparse
 from mmmm.data.target_tax import TargetCategory, get_target_tax
 from mmmm.data.utils import prepare_vlm_inputs
@@ -39,10 +40,15 @@ __all__ = [
     'LocalTransConf',
 ]
 
-def get_local_data_list(name: str, split: split_t):
-    if split != 'train':
-        raise NotImplementedError
+def get_local_data_list(name: str, split: Split):
     dataset_dir = PROCESSED_LOCAL_DATA_ROOT / name
+    if (split_path := dataset_dir / 'split.json').exists():
+        split_dict = orjson.loads(split_path.read_bytes())
+        keys = set(split_dict[split])
+    else:
+        keys = None
+        if split != Split.TRAIN:
+            raise ValueError
     info = pd.read_csv(dataset_dir / 'info.csv', dtype={'key': 'string'})
     info.set_index('key', inplace=True)
     return [
@@ -51,11 +57,15 @@ def get_local_data_list(name: str, split: split_t):
             'dataset_dir': dataset_dir,
             'key': key,
         }
-        for key in info.index
+        for key in info.index if keys is None or key in keys
     ]
 
 @dataclass(kw_only=True)
 class LocalTransConf:
+    """
+    Attributes:
+        neg_grounding_prob: the probability of negative targets are forced grounded
+    """
     max_vision_tokens: int
     scale_z: tuple2_t[float]
     scale_z_p: float
@@ -64,12 +74,13 @@ class LocalTransConf:
     scale_xy_p: float
     aniso_ratio_range: tuple2_t[float] = (0.5, 4.)
     log2_vit_patch_size_z_std = 0.5  # 2-sigma, 95.45%
-    num_pos: int  # I've encountered cases setting this to larger than 48 causing NCCL timeout
+    num_pos: int
     num_neg: int
     mask_th_abs: int = 1000
     mask_th_rel: float = 0.5
     box_th: float = 0.5
     grounding_prob: float = 0.99
+    neg_grounding_prob: float = 0.2
 
 def get_local_transform(
     conf: _dataset.DatasetConf,
@@ -111,7 +122,7 @@ class SamplePatch(mt.Randomizable):
     ):
         super().__init__()
         self.conf = conf
-        self.trans_conf = conf.seg_trans
+        self.trans_conf = conf.local_trans
         self.tokenizer = tokenizer
         self.device = device
         self.inference = inference
@@ -119,7 +130,7 @@ class SamplePatch(mt.Randomizable):
 
     def gen_patch_info(self, sparse: Sparse):
         conf = self.conf
-        trans_conf = conf.seg_trans
+        trans_conf = conf.local_trans
         # 1. sample tokens_z, tokens_xy, thus obtain patch_size_xy
         if sparse.shape[0] == 1:
             tokens_z = 1
@@ -293,7 +304,7 @@ class SamplePatch(mt.Randomizable):
         data = dict(data)
         dataset_name = data['dataset']
         conf = self.conf
-        trans_conf = conf.seg_trans
+        trans_conf = conf.local_trans
         data_dir: Path = data['dataset_dir'] / 'data' / data['key']
         sparse = Sparse.from_json((data_dir / 'sparse.json').read_bytes())
 
@@ -362,31 +373,37 @@ class SamplePatch(mt.Randomizable):
                 }
 
         # 5. generate conversation
-        conv = gen_modality_conv(modality, self.R)
-        req_classes = []
+        conv = []
+        grounding_classes = []
         grounding = toss(self.R, trans_conf.grounding_prob)
-        conv_anatomy, req_classes_anatomy = gen_general_conv(
+        neg_grounding = toss(self.R, trans_conf.neg_grounding_prob) if grounding else False
+        conv_anatomy, grounding_classes_anatomy = gen_general_conv(
             self._sample_targets(TargetCategory.ANATOMY, targets, trans_conf.num_pos),
             self._sample_targets(TargetCategory.ANATOMY, neg_targets, trans_conf.num_neg),
             grounding,
+            neg_grounding,
             self.tokenizer,
             self.target_tax,
             self.R,
         )
         conv.extend(conv_anatomy)
-        req_classes.extend(req_classes_anatomy)
-        conv_anomaly, req_classes_anomaly = gen_anomaly_conv(
+        grounding_classes.extend(grounding_classes_anatomy)
+        conv_anomaly, grounding_classes_anomaly = gen_anomaly_conv(
             self._sample_targets(TargetCategory.ANOMALY, targets, trans_conf.num_pos),
             self._sample_targets(TargetCategory.ANOMALY, neg_targets, trans_conf.num_neg),
             sparse.complete_anomaly,
             grounding,
+            neg_grounding,
             self.tokenizer,
             self.target_tax,
             dataset_name,
             self.R,
         )
         conv.extend(conv_anomaly)
-        req_classes.extend(req_classes_anomaly)
+        grounding_classes.extend(grounding_classes_anomaly)
+        if len(conv) == 0 or toss(self.R, 0.9):
+            # this also avoid an empty conversation
+            conv = gen_modality_conv(modality, self.R) + conv
         vlm_inputs, conversation_text = prepare_vlm_inputs(
             conv,
             self.tokenizer,
@@ -394,6 +411,7 @@ class SamplePatch(mt.Randomizable):
             inference=self.inference,
             grounding=grounding,
             max_seq_len=conf.max_seq_len,
+            bop_weight=conf.bop_weight,
         )
 
         # 6. prepare the data point!
@@ -401,13 +419,13 @@ class SamplePatch(mt.Randomizable):
             targets_data = {
                 'mask_indexes': [],
                 'boxes': [],
-                'num_uncertain': torch.empty(len(req_classes), dtype=torch.int64),
-                'semantic': torch.empty(len(req_classes), dtype=torch.bool),
-                'index_offsets': torch.empty(len(req_classes), 2, dtype=torch.int64),
+                'num_uncertain': torch.empty(len(grounding_classes), dtype=torch.int64),
+                'semantic': torch.empty(len(grounding_classes), dtype=torch.bool),
+                'index_offsets': torch.empty(len(grounding_classes), 2, dtype=torch.int64),
             }
             index_offset = 0
-            for i, req_class in enumerate(req_classes):
-                if (req_target := targets.get(req_class)) is None:
+            for i, grounding_class in enumerate(grounding_classes):
+                if (req_target := targets.get(grounding_class)) is None:
                     _num = 0
                     targets_data['num_uncertain'][i] = 0
                     # no ground truth, we can give instance segmentation a try
@@ -428,9 +446,9 @@ class SamplePatch(mt.Randomizable):
             targets_data = {
                 'mask_indexes': [],
                 'boxes': torch.empty(0, 6, dtype=torch.int64),
-                'num_uncertain': torch.full((len(req_classes), ), -1, dtype=torch.int64),
-                'semantic': torch.empty(len(req_classes), dtype=torch.bool),
-                'index_offsets': torch.zeros(len(req_classes), 2, dtype=torch.int64),
+                'num_uncertain': torch.full((len(grounding_classes), ), -1, dtype=torch.int64),
+                'semantic': torch.empty(len(grounding_classes), dtype=torch.bool),
+                'index_offsets': torch.zeros(len(grounding_classes), 2, dtype=torch.int64),
             }
         if patch_masks is not None:
             # select masks before affine transform to save computation

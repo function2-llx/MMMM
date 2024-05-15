@@ -7,7 +7,7 @@ from torch.utils.data import Dataset
 from monai.transforms import apply_transform
 
 from mmmm.tokenizer import MMMMTokenizer
-from ..defs import split_t
+from ..defs import Split
 from .local import LocalTransConf, get_local_data_list, get_local_transform
 from .vl import VLTransConf, VLTransform, get_vl_data_list
 
@@ -21,7 +21,7 @@ class DatasetSpec:
     type: Literal['local', 'vl']
     weight: float = 1.
 
-    def get_data_list(self, split: Literal['train', 'validate', 'test']) -> list:
+    def get_data_list(self, split: Split) -> list:
         match self.type:
             case 'local':
                 return get_local_data_list(self.name, split)
@@ -40,9 +40,10 @@ class DatasetConf:
     vit_patch_size_xy: int
     pool_size_xy: int
     base_pool_size_z: int
-    seg_trans: LocalTransConf
-    vl_trans: VLTransConf
+    local_trans: LocalTransConf | None = None
+    vl_trans: VLTransConf | None = None
     max_seq_len: int | None = None
+    bop_weight: float = 1.
 
     @property
     def base_stride_z(self):
@@ -59,7 +60,13 @@ class DatasetConf:
         assert _is_power_of_2(self.base_pool_size_z)
 
 class MMMMDataset(Dataset):
-    def __init__(self, conf: DatasetConf, split: split_t, tokenizer: MMMMTokenizer):
+    def __init__(
+        self,
+        conf: DatasetConf,
+        split: Split,
+        tokenizer: MMMMTokenizer,
+        inference: bool,
+    ):
         super().__init__()
         self.conf = conf
         self.data_lists = [
@@ -67,8 +74,10 @@ class MMMMDataset(Dataset):
             for dataset in conf.datasets
         ]
         # NOTE: use attributes instead of storing in a dict to make MONAI's set_rnd work
-        self.local_transform = get_local_transform(conf, tokenizer, False)
-        self.vl_transform = VLTransform(conf, tokenizer, False)
+        if conf.local_trans is not None:
+            self.local_transform = get_local_transform(conf, tokenizer, inference)
+        if conf.vl_trans is not None:
+            self.vl_transform = VLTransform(conf, tokenizer, inference)
 
     @property
     def dataset_weights(self):

@@ -54,10 +54,10 @@ class Sparse(DataClassORJSONMixin):
         """
         name: str
         semantic: bool
-        position_offset: tuple2_t[int]
+        position_offset: tuple2_t[int] | None
         index_offset: tuple2_t[int] | None
         mask_sizes: npt.NDArray[np.int64] | None = _numpy_field(np.int64, optional=True)
-        boxes: npt.NDArray[np.int64] = _numpy_field(np.int64)
+        boxes: npt.NDArray[np.int64] | None = _numpy_field(np.int64, optional=True)
 
     targets: dict[TargetCategory, list[Target]]
     neg_targets: dict[TargetCategory, list[str]]

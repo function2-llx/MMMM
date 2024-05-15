@@ -9,7 +9,7 @@ import zstandard as zstd
 from monai.data import MetaTensor
 from monai import transforms as mt
 
-from mmmm.data.defs import ORIGIN_DATA_ROOT
+from mmmm.data.defs import DATA_ROOT
 from ._base import DefaultImageLoaderMixin, DefaultMaskLoaderMixin, MultiLabelMultiFileDataPoint, Processor
 
 class TotalSegmentatorProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor):
@@ -54,7 +54,7 @@ class TotalSegmentatorProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin,
 
     def get_data_points(self):
         ret = []
-        tax = pd.read_excel(ORIGIN_DATA_ROOT / 'target-tax.xlsx', sheet_name='anatomy')
+        tax = pd.read_excel(DATA_ROOT / 'target-tax.xlsx', sheet_name='anatomy')
         tax = tax[~tax['TS-v2 key'].isna()]
         tax.set_index('TS-v2 key', inplace=True)
         for case_dir in self.dataset_root.iterdir():
