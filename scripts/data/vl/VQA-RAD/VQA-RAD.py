@@ -50,14 +50,15 @@ def process():
             test_vqa.append(
                 {
                     'question': item['question'],
-                    'answer': item['answer'],
+                    'answer': str(item['answer']),
                 }
             )
         else:
             train_val_vqa.append(
                 {
                     'question': item['question'],
-                    'answer': item['answer'],
+                    # converting to str since it might be an int, humor
+                    'answer': str(item['answer']),
                 }
             )
 
