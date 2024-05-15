@@ -15,6 +15,9 @@ init_args:
     - name: Slake
       type: vl
       weight: 3
+    - name: CT-RATE
+      type: vl
+      weight: 2.5
     base_vit_patch_size_z: 16
     vit_patch_size_xy: 16
     pool_size_xy: 2

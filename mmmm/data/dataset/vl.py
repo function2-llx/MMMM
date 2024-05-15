@@ -18,7 +18,9 @@ from monai.utils import InterpolateMode, convert_to_tensor
 
 import mmmm.data.dataset._dataset as _dataset
 from mmmm.tokenizer import MMMMTokenizer
-from ..defs import ConvTurn, DataPoint, PROCESSED_VL_DATA_ROOT, mmmm_debug, Split
+from .local.template import gen_anomaly_conv
+from ..defs import ConvTurn, DataPoint, PROCESSED_VL_DATA_ROOT, Split
+from ..target_tax import get_target_tax
 from ..utils import prepare_vlm_inputs
 from .misc import get_max_resize, gen_modality_conv, intensity_norm, toss
 
@@ -110,6 +112,7 @@ class VLTransConf:
     max_tokens_z: int
     log2_patch_size_z_std: float = 0.5
     report_ratio: float = 0.8
+    ad_ratio: float = 0.3
 
 class VLDataPoint(TypedDict):
     image: list[str]
@@ -131,6 +134,7 @@ class VLTransform(mt.RandomizableTransform):
         self.conf = conf
         self.tokenizer = tokenizer
         self.inference = inference
+        self.target_tax = get_target_tax()
 
     def __call__(self, data: dict) -> DataPoint:
         conf = self.conf
@@ -182,29 +186,47 @@ class VLTransform(mt.RandomizableTransform):
         image, _ = ensure_rgb(image, contiguous=True)
         image = intensity_norm(image)
         referring: str = self.R.choice(COMPLETE_REFERRINGS)
-
+        conversation = []
         if modality is not None and toss(self.R, 0.3):
-            conversation = gen_modality_conv(modality, self.R)
-        else:
-            conversation = []
+            conversation.extend(gen_modality_conv(modality, self.R))
         findings = data.get('findings')
         vqa = data.get('vqa')
         assert findings or vqa
         if findings and (not vqa or toss(self.R, trans_conf.report_ratio)):
-            if impression := data.get('impression'):
-                conversation.append(
-                    ConvTurn(
-                        self.R.choice(REPORT_PROMPTS).format(referring),
-                        f"Findings: {findings}\nImpression: {impression}",
-                    ),
+            if (
+                (anomaly_pos := data.get('anomaly_pos')) is not None and
+                (anomaly_neg := data.get('anomaly_neg')) is not None and
+                toss(self.R, trans_conf.ad_ratio)
+            ):
+                grounding = toss(self.R, 0.1)
+                neg_grounding = grounding and toss(self.R, 0.2)
+                ad_conv, _ = gen_anomaly_conv(
+                    anomaly_pos,
+                    anomaly_neg,
+                    True,  # has no effect
+                    grounding,
+                    neg_grounding,
+                    self.tokenizer,
+                    self.target_tax,
+                    '',  # only affects BraTS
+                    self.R,
                 )
+                conversation.extend(ad_conv)
             else:
-                conversation.append(
-                    ConvTurn(
-                        self.R.choice(FINDINGS_PROMPTS).format(referring),
-                        findings,
-                    ),
-                )
+                if impression := data.get('impression'):
+                    conversation.append(
+                        ConvTurn(
+                            self.R.choice(REPORT_PROMPTS).format(referring),
+                            f"Findings: {findings}\nImpression: {impression}",
+                        ),
+                    )
+                else:
+                    conversation.append(
+                        ConvTurn(
+                            self.R.choice(FINDINGS_PROMPTS).format(referring),
+                            findings,
+                        ),
+                    )
         else:
             conv_vqa = [ConvTurn(qa['question'], qa['answer']) for qa in vqa]
             self.R.shuffle(conv_vqa)

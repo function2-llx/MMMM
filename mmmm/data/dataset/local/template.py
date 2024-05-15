@@ -410,7 +410,7 @@ def gen_anomaly_conv(
     target_tax: dict[str, TargetClass],
     dataset: str,
     R: np.random.RandomState,
-):
+) -> tuple[list[ConvTurn], list[str]]:
     if dataset.startswith('BraTS2023'):
         if 'glioma' in pos_classes and toss(R, 0.9):
             pos_classes = list(pos_classes)
@@ -435,7 +435,7 @@ def gen_anomaly_conv(
                 R,
             )
 
-    if toss(R, 0.5):
+    if (len(pos_classes) > 0 or len(neg_classes) > 0) and toss(R, 0.5):
         return gen_anomaly_detection_conv(
             pos_classes,
             grounding,
