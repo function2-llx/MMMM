@@ -4,7 +4,7 @@ import torchvision.transforms as transforms
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, LlamaTokenizer
 
-from luolib.utils import load_pt_zst
+from luolib.utils.zstd import load_pt_zst
 
 
 def setup_cogvlm(checkpoint: str, tokenizer: str):
@@ -22,7 +22,7 @@ def setup_cogvlm(checkpoint: str, tokenizer: str):
     return model, tokenizer
 
 
-def cogvlm_collate_fn(batch: list[dict]):
+def cogvlm_collate_fn(task, dataset, setting, model, tokenizer, batch: list[dict]):
     assert len(batch) == 1
 
     if batch[0]['image'].endswith('.pt.zst'):
@@ -31,10 +31,18 @@ def cogvlm_collate_fn(batch: list[dict]):
         image = transform(image.squeeze(1))
     else:
         image = Image.open(batch[0]['image']).convert('RGB')
+
+    inputs = model.build_conversation_input_ids(
+        tokenizer, query=batch[0]['question'], images=[image]
+    )
+    
     return {
         'image': image,
         'question': batch[0]['question'],
         'answer': batch[0]['answer'],
+        'input_ids': inputs['input_ids'],
+        'token_type_ids': inputs['token_type_ids'],
+        'images': inputs['images'],
     }
 
 
@@ -42,18 +50,14 @@ def cogvlm_vl_evaluate(task, dataset, setting, model, tokenizer, dataloader):
     results = []
 
     for sample in tqdm(dataloader):
-        inputs = model.build_conversation_input_ids(
-            tokenizer, query=sample['question'], images=[sample['image']]
-        )
-
         with torch.inference_mode():
             prediction = (
                 tokenizer.decode(
                     model.generate(
-                        input_ids=inputs['input_ids'].unsqueeze(0).to('cuda'),
-                        token_type_ids=inputs['token_type_ids'].unsqueeze(0).to('cuda'),
-                        attention_mask=inputs['attention_mask'].unsqueeze(0).to('cuda'),
-                        images=[[inputs['images'][0].to('cuda').to(torch.bfloat16)]],
+                        input_ids=sample['input_ids'].unsqueeze(0).to('cuda'),
+                        token_type_ids=sample['token_type_ids'].unsqueeze(0).to('cuda'),
+                        attention_mask=sample['attention_mask'].unsqueeze(0).to('cuda'),
+                        images=[[sample['images'][0].to('cuda').to(torch.bfloat16)]],
                         max_new_tokens=256,
                     )[0],
                     skip_special_tokens=True,

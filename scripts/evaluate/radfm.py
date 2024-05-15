@@ -6,7 +6,7 @@ from torchvision import transforms
 from tqdm import tqdm
 from transformers import LlamaTokenizer
 
-from luolib.utils import load_pt_zst
+from luolib.utils.zstd import load_pt_zst
 
 def setup_radfm(checkpoint: str, tokenizer: str):
     sys.path.append('third-party/RadFM/Quick_demo/Model')
@@ -32,7 +32,7 @@ def setup_radfm(checkpoint: str, tokenizer: str):
     return model, tokenizer
 
 
-def radfm_collate_fn(batch: list[dict]):
+def radfm_collate_fn(task, dataset, setting, model, tokenizer, batch: list[dict]):
     assert len(batch) == 1
 
     if batch[0]['image'].endswith('.pt'):
@@ -68,10 +68,13 @@ def radfm_collate_fn(batch: list[dict]):
                 repeat(image, 'c h w d -> 1 c h w d'), size=(512, 512, target_d)
             ).unsqueeze(0)
 
+    prompt = '<image>' + ''.join([f'<image{i}>' for i in range(32)]) + '</image>' + batch[0]['question']
+        
     return {
         'image': image,
         'question': batch[0]['question'],
         'answer': batch[0]['answer'],
+        'prompt': prompt
     }
 
 
@@ -79,9 +82,8 @@ def radfm_vl_evaluate(task, dataset, setting, model, tokenizer, dataloader):
     results = []
 
     for sample in tqdm(dataloader):
-        question = '<image>' + ''.join([f'<image{i}>' for i in range(32)]) + '</image>' + sample['question']
         language = tokenizer(
-            question,
+            sample['prompt'],
             return_tensors='pt',
         )['input_ids'].to('cuda')
         vision = sample['image'].to('cuda')

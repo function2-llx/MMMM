@@ -3,7 +3,7 @@ import torchvision.transforms as transforms
 from PIL import Image
 from tqdm import tqdm
 
-from luolib.utils import load_pt_zst
+from luolib.utils.zstd import load_pt_zst
 
 
 def setup_instructblip(checkpoint: str, tokenizer: str):
@@ -22,7 +22,7 @@ def setup_instructblip(checkpoint: str, tokenizer: str):
     return model, processor
 
 
-def instructblip_collate_fn(batch: list[dict]):
+def instructblip_collate_fn(task, dataset, setting, model, processor, batch: list[dict]):
     assert len(batch) == 1
 
     if batch[0]['image'].endswith('.pt.zst'):
@@ -35,6 +35,7 @@ def instructblip_collate_fn(batch: list[dict]):
         'image': image,
         'question': batch[0]['question'],
         'answer': batch[0]['answer'],
+        'inputs': processor(images=image, text=batch[0]['question'], return_tensors='pt').to('cuda')
     }
 
 
@@ -42,12 +43,11 @@ def instructblip_vl_evaluate(task, dataset, setting, model, processor, dataloade
     results = []
 
     for sample in tqdm(dataloader):
-        inputs = processor(images=sample['image'], text=sample['question'], return_tensors='pt').to('cuda')
 
         with torch.inference_mode():
             prediction = processor.decode(
                 model.generate(
-                    **inputs,
+                    **sample['inputs'],
                     max_new_tokens=256,
                 )[0],
                 skip_special_tokens=True,

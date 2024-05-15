@@ -1,23 +1,29 @@
+from functools import partial
 from jsonargparse import CLI
 from pathlib import Path
 from torch.utils.data import DataLoader
 
-from cogvlm import cogvlm_collate_fn, setup_cogvlm, cogvlm_vl_evaluate
-from instructblip import (
+from scripts.evaluate._mmmm import (
+    mmmm_collate_fn,
+    setup_mmmm,
+    mmmm_vl_evaluate,
+)
+from scripts.evaluate.cogvlm import cogvlm_collate_fn, setup_cogvlm, cogvlm_vl_evaluate
+from scripts.evaluate.instructblip import (
     instructblip_collate_fn,
     setup_instructblip,
     instructblip_vl_evaluate,
 )
-from llavamed import llavamed_collate_fn, setup_llavamed, llavamed_vl_evaluate
-from llavanext import llavanext_collate_fn, setup_llavanext, llavanext_vl_evaluate
-from m3d import m3d_collate_fn, setup_m3d, m3d_vl_evaluate
-from medflamingo import (
+from scripts.evaluate.llavamed import llavamed_collate_fn, setup_llavamed, llavamed_vl_evaluate
+from scripts.evaluate.llavanext import llavanext_collate_fn, setup_llavanext, llavanext_vl_evaluate
+from scripts.evaluate.m3d import m3d_collate_fn, setup_m3d, m3d_vl_evaluate
+from scripts.evaluate.medflamingo import (
     medflamingo_collate_fn,
     setup_medflamingo,
     medflamingo_vl_evaluate,
 )
-from radfm import radfm_collate_fn, setup_radfm, radfm_vl_evaluate
-from utils import (
+from scripts.evaluate.radfm import radfm_collate_fn, setup_radfm, radfm_vl_evaluate
+from scripts.evaluate.utils import (
     dump_results,
     setup_seed,
     VQATestDataset,
@@ -26,6 +32,7 @@ from utils import (
     LlamaMetrics,
     CXRMetrics,
 )
+
 
 class Evaluator:
     def __init__(
@@ -46,16 +53,20 @@ class Evaluator:
         setup_seed(seed)
 
     def predict(
-            self, 
-            checkpoint: str,
-            tokenizer: str,
-        ):
+        self,
+        checkpoint: str,
+        tokenizer: str,
+    ):
         if self.task == 'vqa':
             dataset = VQATestDataset(self.dataset)
         elif self.task == 'report':
             dataset = ReportTestDataset(self.dataset, self.setting)
 
-        if self.model == 'radfm':
+        if self.model == 'mmmm':
+            setup_fn = setup_mmmm
+            collate_fn = mmmm_collate_fn
+            evaluate_fn = mmmm_vl_evaluate
+        elif self.model == 'radfm':
             setup_fn = setup_radfm
             collate_fn = radfm_collate_fn
             evaluate_fn = radfm_vl_evaluate
@@ -91,10 +102,18 @@ class Evaluator:
             batch_size=1,
             num_workers=8,
             pin_memory=True,
-            collate_fn=collate_fn,
+            collate_fn=partial(
+                collate_fn,
+                task=self.task,
+                dataset=self.dataset,
+                setting=self.setting,
+                *packed,
+            ),
         )
 
-        results = evaluate_fn(self.task, self.dataset, self.setting, *packed, dataloader)
+        results = evaluate_fn(
+            self.task, self.dataset, self.setting, *packed, dataloader
+        )
 
         dump_results(
             results,
@@ -112,8 +131,10 @@ class Evaluator:
             metrics = LlamaMetrics()
         elif metrics == 'cxr':
             metrics = CXRMetrics()
-        
-        metrics.process(self.output_dir / f'{self.task}_{self.dataset}_{self.model}_{self.setting}')
+
+        metrics.process(
+            self.output_dir / f'{self.task}_{self.dataset}_{self.model}_{self.setting}'
+        )
 
 
 if __name__ == '__main__':

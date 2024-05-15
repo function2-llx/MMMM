@@ -3,7 +3,7 @@ import torch
 import torchvision.transforms as transforms
 from tqdm import tqdm
 
-from luolib.utils import load_pt_zst
+from luolib.utils.zstd import load_pt_zst
 
 
 def setup_llavanext(checkpoint: str, tokenizer: str):
@@ -22,7 +22,7 @@ def setup_llavanext(checkpoint: str, tokenizer: str):
     return model, processor
 
 
-def llavanext_collate_fn(batch: list[dict]):
+def llavanext_collate_fn(task, dataset, setting, model, processor, batch: list[dict]):
     assert len(batch) == 1
 
     if batch[0]['image'].endswith('.pt.zst'):
@@ -31,10 +31,16 @@ def llavanext_collate_fn(batch: list[dict]):
         image = transform(image.squeeze(1))
     else:
         image = Image.open(batch[0]['image']).convert('RGB')
+
+    prompt = 'A chat between a curious human and an artificial intelligence assistant. The assistant gives helpful, detailed, and polite answers to the human\'s questions. USER: <image>\n' + sample['question'] + ' ASSISTANT:'
+
+    inputs = processor(prompt, image, return_tensors='pt').to('cuda')
+
     return {
         'image': image,
         'question': batch[0]['question'],
         'answer': batch[0]['answer'],
+        'inputs': inputs,
     }
 
 
@@ -42,14 +48,11 @@ def llavanext_vl_evaluate(task, dataset, setting, model, processor, dataloader):
     results = []
 
     for sample in tqdm(dataloader):
-        prompt = 'A chat between a curious human and an artificial intelligence assistant. The assistant gives helpful, detailed, and polite answers to the human\'s questions. USER: <image>\n' + sample['question'] + ' ASSISTANT:'
-
-        inputs = processor(prompt, sample['image'], return_tensors='pt').to('cuda')
 
         with torch.inference_mode():
             prediction = processor.decode(
                 model.generate(
-                    **inputs,
+                    **sample['inputs'],
                     max_new_tokens=256,
                 )[0],
                 skip_special_tokens=True,
