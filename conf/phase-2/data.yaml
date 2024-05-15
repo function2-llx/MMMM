@@ -152,5 +152,16 @@ init_args:
     vl_trans:
       max_tokens: 100
       max_tokens_z: 4
+    bop_weight: 5
+    local_trans:
+      max_vision_tokens: 100
+      scale_z: [1, 2]
+      scale_z_p: 0.5
+      max_tokens_z: 4
+      scale_xy: [0.9, 3]
+      scale_xy_p: 0.9
+      num_pos: 12
+      num_neg: 4
+      grounding_prob: 0.5
   dataloader:
     train_batch_size: 8

@@ -82,6 +82,7 @@ init_args:
       type: local
     - name: TotalSegmentator
       type: local
+      weight: 3
     - name: VerSe
       type: local
     - name: VinDr-CXR

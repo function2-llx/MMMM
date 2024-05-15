@@ -1,6 +1,9 @@
 import json
 import os
 import random
+import shutil
+
+from tqdm import tqdm
 
 from mmmm.data.defs import ORIGIN_VL_DATA_ROOT, PROCESSED_VL_DATA_ROOT
 
@@ -16,22 +19,30 @@ def process():
     test_vqa = []
     train_val_vqa = []
     img = ''
-    for item in data:
+    for item in tqdm(data):
         if item['image_name'] != img:
             if test_vqa:
-                    test_data.append(
-                        {
-                            'image': [str(ORIGIN_VL_DATA_ROOT / 'VQA-RAD' / 'VQA_RAD Image Folder' / img)],
-                            'vqa': test_vqa
-                        }
-                    )
+                origin_image_path = ORIGIN_VL_DATA_ROOT / 'VQA-RAD' / 'VQA_RAD Image Folder' / img
+                save_image_path = PROCESSED_VL_DATA_ROOT / f'VQA-RAD/images/{img}'
+                save_image_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy(origin_image_path, save_image_path)
+                test_data.append(
+                    {
+                        'image': [str(save_image_path)],
+                        'vqa': test_vqa
+                    }
+                )
             if train_val_vqa:
-                    train_val_data.append(
-                        {
-                            'image': [str(ORIGIN_VL_DATA_ROOT / 'VQA-RAD' / 'VQA_RAD Image Folder' / img)],
-                            'vqa': train_val_vqa
-                        }
-                    )
+                origin_image_path = ORIGIN_VL_DATA_ROOT / 'VQA-RAD' / 'VQA_RAD Image Folder' / img
+                save_image_path = PROCESSED_VL_DATA_ROOT / f'VQA-RAD/images/{img}'
+                save_image_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy(origin_image_path, save_image_path)
+                train_val_data.append(
+                    {
+                        'image': [str(save_image_path)],
+                        'vqa': train_val_vqa
+                    }
+                )
             img = item['image_name']
             test_vqa = []
             train_val_vqa = []
