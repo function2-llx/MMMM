@@ -33,14 +33,14 @@ class LIDC_IDRIProcessor(DefaultImageLoaderMixin, Processor):
         nodules = scan.cluster_annotations()
         if len(nodules) == 0:
             # TODO: calm down
-            return ['nodule'], torch.zeros(1,  dtype=torch.bool, device=self.device)
+            return ['lung nodule'], torch.zeros(1,  dtype=torch.bool, device=self.device)
         masks = np.zeros((len(nodules), *images.shape[1:]), dtype=np.bool_)
         for i, nodule in enumerate(nodules):
             assert len(nodule) <= 4
             mask, mask_bbox = consensus(nodule, ret_masks=False)
             masks[i, *mask_bbox] = mask
         masks = MetaTensor(torch.as_tensor(masks, device=self.device), images.affine)
-        return ['nodule'] * masks.shape[0], masks
+        return ['lung nodule'] * masks.shape[0], masks
 
     def get_data_points(self) -> list[LIDR_IDRIDataPoint]:
         return [
