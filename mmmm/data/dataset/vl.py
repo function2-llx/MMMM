@@ -2,6 +2,7 @@ from __future__ import annotations as _
 
 from dataclasses import dataclass
 import json
+from typing import TypedDict
 
 import einops
 import math
@@ -109,6 +110,14 @@ class VLTransConf:
     max_tokens_z: int
     log2_patch_size_z_std: float = 0.5
     report_ratio: float = 0.8
+
+class VLDataPoint(TypedDict):
+    image: list[str]
+    modality: list[str]
+    findings: str
+    impression: str
+    anomaly_pos: list[str]
+    anomaly_neg: list[str]
 
 class VLTransform(mt.RandomizableTransform):
     def __init__(

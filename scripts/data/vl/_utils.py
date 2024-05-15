@@ -5,10 +5,20 @@ import math
 import torch
 from torchvision.transforms.v2.functional import to_dtype
 
+from luolib.types import tuple3_t
 from luolib.utils import get_cuda_device
 from monai.transforms import generate_spatial_bounding_box
 from monai.utils import InterpolateMode
 import monai.transforms as mt
+
+def get_resize(shape: tuple3_t[int]):
+    max_tokens_z = min(4, shape[0])
+    max_smaller_edge = int((256 / max_tokens_z) ** 0.5) * 32
+    resize_shape = [min(max_tokens_z * 32, shape[0]), *shape[1:]]
+    if (_base := min(resize_shape[1:])) > max_smaller_edge:
+        for j in (1, 2):
+            resize_shape[j] = math.ceil(resize_shape[j] * max_smaller_edge / _base)
+    return resize_shape
 
 def crop_resize(image: torch.Tensor) -> torch.Tensor | None:
     crop_mask = (image > 0).any(0, keepdim=True)
@@ -16,12 +26,7 @@ def crop_resize(image: torch.Tensor) -> torch.Tensor | None:
         return None
     start, end = generate_spatial_bounding_box(crop_mask)
     image = image[:, *starmap(slice, zip(start, end))]
-    max_tokens_z = min(4, image.shape[1])
-    max_smaller_edge = int((256 / max_tokens_z) ** 0.5) * 32
-    resize_shape = [min(max_tokens_z * 32, image.shape[1]), *image.shape[2:]]
-    if (_base := min(resize_shape[1:])) > max_smaller_edge:
-        for j in (1, 2):
-            resize_shape[j] = math.ceil(resize_shape[j] * max_smaller_edge / _base)
+    resize_shape = get_resize(image.shape[1:])
     if (resize_shape := tuple(resize_shape)) != image.shape[1:]:
         image = to_dtype(image, scale=True)
         resize = mt.Resize(resize_shape, mode=InterpolateMode.TRILINEAR, anti_aliasing=True)

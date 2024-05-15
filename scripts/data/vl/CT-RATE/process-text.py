@@ -52,6 +52,7 @@ def main():
         for patient_dir in tqdm(list(image_dir.iterdir())):
             for study_dir in patient_dir.iterdir():
                 study = {
+                    'key': study_dir.name,
                     'image': [],
                     'modality': [],
                     'anomaly_pos': [],
@@ -68,8 +69,9 @@ def main():
                     else:
                         assert cmp_series(ref_report, report_df.loc[image_path.name]), image_path.name
                         assert cmp_series(ref_label, label_df.loc[image_path.name]), image_path.name
-                study['findings'] = ref_report['Findings_EN']
-                study['impression'] = ref_report['Impressions_EN']
+                study['findings'] = ref_report['Findings_EN'].strip()
+                if not pd.isna(impression := ref_report['Impressions_EN']):
+                    study['impression'] = impression.strip()
                 for anomaly_key, anomaly_name in labels:
                     if ref_label[anomaly_key]:
                         study['anomaly_pos'].append(anomaly_name)

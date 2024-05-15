@@ -33,6 +33,7 @@ from mmmm.data import load_target_tax
 from mmmm.data.defs import ORIGIN_LOCAL_DATA_ROOT, PROCESSED_LOCAL_DATA_ROOT, Split
 from mmmm.data.sparse import Sparse
 from mmmm.data.target_tax import TargetCategory
+from monai.utils import GridSampleMode
 
 @dataclass(kw_only=True)
 class DataPoint:
@@ -126,6 +127,13 @@ class Processor(ABC):
     @property
     def device(self):
         return get_cuda_device()
+
+    def _check_cuda_cache(self):
+        device = get_cuda_device()
+        cuda_cache = torch.cuda.memory_reserved(device) - torch.cuda.memory_allocated(device)
+        if cuda_cache > self.cuda_cache_th << 30:
+            gc.collect()
+            torch.cuda.empty_cache()
 
     def _get_category(self, name: str):
         return self.tax[name].category
@@ -251,13 +259,15 @@ class Processor(ABC):
             return pd.read_pickle(path)
         return None
 
-    def process(self, limit: int | None = None, empty_cache: bool = False, raise_error: bool = False):
+    def process(self, limit: int | tuple[int, int] | None = None, empty_cache: bool = False, raise_error: bool = False):
         data_points, split = self.get_data_points()
         assert len(data_points) > 0
         assert len(data_points) == len(set(data_point.key for data_point in data_points)), "key must be unique within the dataset"
         pending_data_points = [*filter(lambda p: not (self.case_data_root / p.key).exists(), data_points)]
-        if limit is not None:
+        if isinstance(limit, int):
             pending_data_points = pending_data_points[:limit]
+        elif isinstance(limit, tuple) and len(limit) == 2:
+            pending_data_points = pending_data_points[slice(*limit)]
         if self.orientation is None:
             self.logger.warning('orientation is not specified, will infer from the metadata')
         if len(pending_data_points) > 0:
@@ -399,11 +409,7 @@ class Processor(ABC):
         self.key = key = data_point.key
         try:
             if empty_cache:
-                device = get_cuda_device()
-                cuda_cache = torch.cuda.memory_reserved(device) - torch.cuda.memory_allocated(device)
-                if cuda_cache > self.cuda_cache_th << 30:
-                    gc.collect()
-                    torch.cuda.empty_cache()
+                self._check_cuda_cache()
             modalities, images = self.load_images(data_point)
             targets, neg_targets, masks, boxes = self.load_annotations(data_point, images)
             if targets:
@@ -449,7 +455,7 @@ class Processor(ABC):
             })
             # 4. apply resize & intensity normalization, save processed results
             # 4.1. normalize and save images
-            images, mean, std = self.normalize_image(images, new_shape)
+            images, mean, std = self.normalize_image(images, new_shape, GridSampleMode.BICUBIC)
             save_dir = self.case_data_root / f'.{key}'
             save_dir.mkdir(exist_ok=True, parents=True)
             # 4.2. save image
@@ -503,7 +509,9 @@ class Processor(ABC):
                 import traceback
                 self.logger.error(traceback.format_exc())
 
-    def normalize_image(self, images: MetaTensor, new_shape: npt.NDArray[np.int64]) -> tuple[MetaTensor, torch.Tensor, torch.Tensor]:
+    def normalize_image(
+        self, images: MetaTensor, new_shape: npt.NDArray[np.int64], mode: GridSampleMode,
+    ) -> tuple[MetaTensor, torch.Tensor, torch.Tensor]:
         # 1. rescale to [0, 1]
         if images.dtype == torch.uint8:
             images = to_dtype(images, scale=True)
