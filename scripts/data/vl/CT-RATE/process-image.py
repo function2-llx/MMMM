@@ -85,7 +85,7 @@ class Processor(DefaultImageLoaderMixin, _ProcessorBase):
                     continue
                 for i, image_path in enumerate(study['image']):
                     image_path = Path(image_path)
-                    processed_path = case_dir / image_path.name[:-len('.nii.gz')] + '.pt.zst'
+                    processed_path = case_dir / (image_path.name[:-len('.nii.gz')] + '.pt.zst')
                     assert processed_path.exists()
                     study['image'][i] = str(processed_path)
                 processed.append(study)
