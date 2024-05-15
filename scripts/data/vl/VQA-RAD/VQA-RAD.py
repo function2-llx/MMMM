@@ -51,13 +51,14 @@ def process():
             )
 
     random.shuffle(train_val_data)
-    train_data = train_val_data[:int(len(data) * 0.8)]
-    val_data = train_val_data[int(len(data) * 0.8):]
+    train_data = train_val_data
+    # train_data = train_val_data[:int(len(train_val_data) * 0.8)]
+    # val_data = train_val_data[int(len(train_val_data) * 0.8):]
 
     with open(PROCESSED_VL_DATA_ROOT / 'VQA-RAD' / 'train.json', 'w') as f:
         json.dump(train_data, f, indent=4)
-    with open(PROCESSED_VL_DATA_ROOT / 'VQA-RAD' / 'validate.json', 'w') as f:
-        json.dump(val_data, f, indent=4)
+    # with open(PROCESSED_VL_DATA_ROOT / 'VQA-RAD' / 'validate.json', 'w') as f:
+    #     json.dump(val_data, f, indent=4)
     with open(PROCESSED_VL_DATA_ROOT / 'VQA-RAD' / 'test.json', 'w') as f:
         json.dump(test_data, f, indent=4)
 

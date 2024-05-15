@@ -1,0 +1,27 @@
+class_path: mmmm.data.MMMMDataModule
+init_args:
+  dataset:
+    datasets:
+    - name: MIMIC-CXR
+      type: vl
+    - name: Radiopaedia
+      type: vl
+    - name: VQA-RAD
+      type: vl
+      weight: 5
+    - name: OpenI
+      type: vl
+      weight: 3
+    - name: Slake
+      type: vl
+      weight: 3
+    base_vit_patch_size_z: 16
+    vit_patch_size_xy: 16
+    pool_size_xy: 2
+    base_pool_size_z: 2
+    max_seq_len: 768
+    vl_trans:
+      max_tokens: 100
+      max_tokens_z: 4
+  dataloader:
+    train_batch_size: 8

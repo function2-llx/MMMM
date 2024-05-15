@@ -86,7 +86,7 @@ init_args:
       type: local
     - name: VinDr-CXR
       type: local
-      weight: 0.2
+      weight: 0.4
     - name: WORD
       type: local
     base_vit_patch_size_z: 16
