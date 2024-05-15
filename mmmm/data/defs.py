@@ -15,9 +15,14 @@ def mmmm_debug() -> bool:
     val = os.environ.get('MMMM_DEBUG', False)
     return val if isinstance(val, bool) else str2bool(val)
 
+@cache
+def mmmm_debug_data() -> bool:
+    val = os.environ.get('MMMM_DEBUG_DATA', False)
+    return val if isinstance(val, bool) else str2bool(val)
+
 DATA_ROOT = Path('data')
 ORIGIN_DATA_ROOT = DATA_ROOT / 'origin'
-PROCESSED_DATA_ROOT = DATA_ROOT / ('processed-debug' if mmmm_debug() else 'processed')
+PROCESSED_DATA_ROOT = DATA_ROOT / ('processed-debug' if mmmm_debug_data() else 'processed')
 ORIGIN_LOCAL_DATA_ROOT = ORIGIN_DATA_ROOT / 'local'
 ORIGIN_VL_DATA_ROOT = ORIGIN_DATA_ROOT / 'vision-language'
 PROCESSED_LOCAL_DATA_ROOT = PROCESSED_DATA_ROOT / 'local'
