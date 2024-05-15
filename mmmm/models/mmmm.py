@@ -14,7 +14,7 @@ from transformers.modeling_outputs import CausalLMOutputWithPast
 
 from luolib.lightning import LightningModule
 from luolib.losses import bce_neg, bce_pos, zero_loss
-from luolib.types import param3_t, tuple2_t, tuple3_t
+from luolib.types import PathLike, param3_t, tuple2_t, tuple3_t
 from luolib.utils.misc import pairwise_forward
 from monai.data import box_pair_giou, convert_box_mode
 from monai.data.box_utils import CenterSizeMode
@@ -685,3 +685,24 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         return generated_output_ids, pred_masks
 
 build = class_from_function(MMMMForCausalLM.build, MMMMForCausalLM)
+
+def from_pretrained(conf_path: PathLike, adapter_dir: PathLike) -> tuple[MMMMForCausalLM, MMMMTokenizer]:
+    from jsonargparse import ArgumentParser, ActionConfigFile
+    from peft import LoraConfig, get_peft_model
+    parser = ArgumentParser()
+    parser.add_argument('-c', action=ActionConfigFile)
+    parser.add_subclass_arguments(MMMMForCausalLM, 'model')
+    parser.add_subclass_arguments(MMMMTokenizer, 'tokenizer')
+    parser.link_arguments('tokenizer', f'model.init_args.tokenizer', apply_on='instantiate')
+    # dataclass as class: https://github.com/omni-us/jsonargparse/issues/287
+    parser.add_class_arguments(LoraConfig, 'lora')
+    args = parser.parse_args(['-c', str(conf_path)])
+    args = parser.instantiate_classes(args)
+    lora_config: LoraConfig = args.lora
+    model: MMMMForCausalLM = args.model
+    lora_config.target_modules, lora_config.modules_to_save = get_lora_modules_default(model)
+    peft_model = get_peft_model(model, lora_config)
+    peft_model.load_adapter(adapter_dir, 'default')
+    print(f'load adapter from {adapter_dir}')
+    tokenizer: MMMMTokenizer = args.tokenizer
+    return model, tokenizer

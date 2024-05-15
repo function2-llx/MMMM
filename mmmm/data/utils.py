@@ -41,16 +41,16 @@ def prepare_vlm_inputs(
     inference: bool,
     grounding: bool,
     max_seq_len: int | None = None,
-    bop_weight: float,
+    bop_weight: float | None = None,
 ):
     """
     Args:
         num_image_tokens: the number of tokens corresponding to image patches (does not include special tokens)
     """
     # TODO: refactor this function to support various VLM formats
-    # user_start = 'Question:'
-    # sys_start = 'Answer:'
     assert len(conversation) > 0
+    if not inference:
+        assert bop_weight is not None
     user_start = tokenizer.usr_token
     sys_start = tokenizer.sys_token
     # just for viewing, don't tokenize it directly

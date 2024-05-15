@@ -118,6 +118,7 @@ class VLDataPoint(TypedDict):
     impression: str
     anomaly_pos: list[str]
     anomaly_neg: list[str]
+    vqa: list
 
 class VLTransform(mt.RandomizableTransform):
     def __init__(

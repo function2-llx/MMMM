@@ -20,3 +20,4 @@ lora:
   lora_alpha: 8
   lora_dropout: 0.05
   use_rslora: true
+tokenizer: tokenizer.yaml
