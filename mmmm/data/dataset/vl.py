@@ -189,7 +189,8 @@ class VLTransform(mt.RandomizableTransform):
             conversation = []
         findings = data.get('findings')
         vqa = data.get('vqa')
-        if not vqa or toss(self.R, trans_conf.report_ratio):
+        assert findings or vqa
+        if findings and toss(self.R, trans_conf.report_ratio):
             if impression := data.get('impression'):
                 conversation.append(
                     ConvTurn(

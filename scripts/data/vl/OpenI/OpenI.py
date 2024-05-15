@@ -1,6 +1,6 @@
 import csv
-from glob import glob
 import json
+import shutil
 
 import numpy as np
 from tqdm import tqdm
@@ -8,17 +8,22 @@ from tqdm import tqdm
 from mmmm.data.defs import ORIGIN_VL_DATA_ROOT, PROCESSED_VL_DATA_ROOT
 
 def process(csv_file: str):
-    (PROCESSED_VL_DATA_ROOT / 'OpenI' / 'images').mkdir(parents=True, exist_ok=True)
+    (save_dir := PROCESSED_VL_DATA_ROOT / 'OpenI' / 'images').mkdir(parents=True, exist_ok=True)
     with open(ORIGIN_VL_DATA_ROOT / 'OpenI' / csv_file) as f:
         reader = csv.DictReader(f)
         data = []
-        for i, item in tqdm(list(enumerate(reader))):
-            images = glob(str(ORIGIN_VL_DATA_ROOT / 'OpenI' / 'images' / 'images_normalized' / (str(i) + '_IM*.dcm.png')))
-            if len(images) > 0 and (findings := item['findings'].strip()) and (impression := item['impression'].strip()):
+        for i, item in tqdm(list(enumerate(reader)), ncols=80):
+            origin_image_paths = list((ORIGIN_VL_DATA_ROOT / 'OpenI' / 'images' / 'images_normalized').glob(f'{i}_IM*.dcm.png'))
+            if len(origin_image_paths) > 0 and (findings := item['findings'].strip()) and (impression := item['impression'].strip()):
+                save_paths = []
+                for origin_path in origin_image_paths:
+                    save_path = save_dir / origin_path.name
+                    shutil.copy(origin_path, save_path)
+                    save_paths.append(str(save_path))
                 data.append(
                     {
-                        'image': images,
-                        'modality': ['X-ray'] * len(images),
+                        'image': save_paths,
+                        'modality': ['X-ray'] * len(origin_image_paths),
                         'findings': findings,
                         'impression': impression,
                     }
