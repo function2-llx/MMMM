@@ -32,11 +32,11 @@ def process_text(json_file: str):
             img = item['img_name']
             vqa = []
             modality = item['modality']
-        if item['q_lang'] == 'en':
+        if item['q_lang'] == 'en' and (question := item['question'].strip()) and (answer := item['answer'].strip()):
             vqa.append(
                 {
-                    'question': item['question'],
-                    'answer': item['answer'],
+                    'question': question,
+                    'answer': answer,
                 }
             )
 

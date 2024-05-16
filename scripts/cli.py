@@ -79,11 +79,12 @@ class CLI(LightningCLI):
         config = self.active_config_init
         lora_config: LoraConfig = config.lora
         lora_config.target_modules, lora_config.modules_to_save = get_lora_modules_default(model)
-        peft_model = get_peft_model(model, lora_config)
-        model.set_peft_model(peft_model)
-        if (lora_adapter_path := config.lora_adapter_path) is not None:
-            peft_model.load_adapter(str(lora_adapter_path), 'default', is_trainable=self.subcommand == 'fit')
-            print(f'load adapter from {lora_adapter_path}')
+        if len(lora_config.target_modules) > 0:
+            peft_model = get_peft_model(model, lora_config)
+            model.set_peft_model(peft_model)
+            if (lora_adapter_path := config.lora_adapter_path) is not None:
+                peft_model.load_adapter(str(lora_adapter_path), 'default', is_trainable=self.subcommand == 'fit')
+                print(f'load adapter from {lora_adapter_path}')
 
 def main():
     CLI(
