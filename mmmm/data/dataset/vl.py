@@ -196,6 +196,7 @@ class VLTransform(mt.RandomizableTransform):
             if (
                 (anomaly_pos := data.get('anomaly_pos')) is not None and
                 (anomaly_neg := data.get('anomaly_neg')) is not None and
+                (len(anomaly_pos) > 0 or len(anomaly_neg) > 0) and
                 toss(self.R, trans_conf.ad_ratio)
             ):
                 grounding = toss(self.R, 0.1)
