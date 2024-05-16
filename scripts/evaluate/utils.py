@@ -16,7 +16,7 @@ from transformers import BertTokenizer
 
 
 from mmmm.data.defs import PROCESSED_VL_DATA_ROOT
-from .constants import (
+from constants import (
     LLAMA3_PATH,
     LLAMA_SYSTEM_PROMPT,
     LLAMA_USER_PROMPT,

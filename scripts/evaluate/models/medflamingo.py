@@ -6,8 +6,6 @@ from tqdm import tqdm
 
 from luolib.utils.zstd import load_pt_zst
 
-from constants import FEW_SHOT_PROMPTS
-
 
 def setup_medflamingo(checkpoint: str, tokenizer: str):
     from accelerate import Accelerator
@@ -33,7 +31,7 @@ def setup_medflamingo(checkpoint: str, tokenizer: str):
     return model, processor
 
 
-def medflamingo_collate_fn(task, dataset, setting, model, processor, batch: list[dict]):
+def medflamingo_collate_fn(batch: list[dict]):
     assert len(batch) == 1
 
     if batch[0]['image'].endswith('.pt.zst'):
@@ -42,27 +40,10 @@ def medflamingo_collate_fn(task, dataset, setting, model, processor, batch: list
         image = transform(image.squeeze(1))
     else:
         image = Image.open(batch[0]['image'])
-
-    if task == 'vqa':
-        language = processor.encode_text(
-            'You are a helpful medical assistant. You are being provided with images and a question about the image, please answer the question. <image>Question:'
-            + batch[0]['question']
-            + ' Answer:'
-        )
-    elif task == 'report':
-        language = processor.encode_text(
-            batch[0]['question']
-            + ' <image>Report:'
-        )
-    vision = processor.preprocess_images([image])
-    vision = repeat(vision, '1 c h w -> 1 1 1 c h w')
-    
     return {
         'image': image,
         'question': batch[0]['question'],
         'answer': batch[0]['answer'],
-        'language': language,
-        'vision': vision,
     }
 
 
@@ -92,19 +73,31 @@ class FlamingoProcessor:
         return vision_x
 
 
-def medflamingo_vl_evaluate(task, dataset, setting, model, processor, dataloader):
+def medflamingo_vl_evaluate(task, model, processor, dataloader):
     results = []
 
     for sample in tqdm(dataloader):
-        
+        if task == 'vqa':
+            language = processor.encode_text(
+                'You are a helpful medical assistant. You are being provided with images and a question about the image, please answer the question. <image>Question:'
+                + sample['question']
+                + ' Answer:'
+            )
+        elif task == 'report':
+            language = processor.encode_text(
+                sample['question']
+                + ' <image>Report:'
+            )
+        vision = processor.preprocess_images([sample['image']])
+        vision = repeat(vision, '1 c h w -> 1 1 1 c h w')
         
         with torch.inference_mode():
             prediction = (
                 processor.tokenizer.decode(
                     model.generate(
-                        vision_x=sample['vision'].to('cuda'),
-                        lang_x=sample['language']['input_ids'].to('cuda'),
-                        attention_mask=sample['language']['attention_mask'].to('cuda'),
+                        vision_x=vision.to('cuda'),
+                        lang_x=language['input_ids'].to('cuda'),
+                        attention_mask=language['attention_mask'].to('cuda'),
                         max_new_tokens=512,
                     )[0]
                 )

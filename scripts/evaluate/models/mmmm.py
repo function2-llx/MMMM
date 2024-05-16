@@ -30,7 +30,7 @@ max_vision_tokens = 100
 def setup_mmmm(checkpoint: str, tokenizer: str):
     from mmmm.models.mmmm import from_pretrained
 
-    model, tokenizer = from_pretrained(checkpoint, tokenizer)
+    model, tokenizer = from_pretrained('conf/model.yaml', checkpoint)
     model = model.to('cuda')
     model.eval()
 
@@ -41,14 +41,12 @@ def image_transform(image_path: PathLike):
     if image_path.endswith('.pt'):
         image = torch.load(image_path).float()
         image = (image - image.min()) / (image.max() - image.min())
+    elif image_path.endswith('.pt.zst'):
+        image = load_pt_zst(image_path).float()
+        image = (image - image.min()) / (image.max() - image.min())
     else:
-        if image_path.endswith('.pt.zst'):
-            transform = transforms.ToPILImage()
-            image = load_pt_zst(image_path)
-            image = transform(image.squeeze(1))
-        else:
-            image = Image.open(image_path).convert('RGB')
         transform = transforms.ToTensor()
+        image = Image.open(image_path).convert('RGB')
         image = transform(image)
         image = repeat(image, 'c h w -> c 1 h w')
     if (size_z := image.shape[1]) <= max_tokens_z:
@@ -86,7 +84,7 @@ def image_transform(image_path: PathLike):
     return image, patch_size, pool_size, num_vision_tokens
 
 
-def mmmm_collate_fn(task, dataset, setting, model, tokenizer, batch: list[dict]):
+def mmmm_collate_fn(batch: list[dict]):
     assert len(batch) == 1
     image, patch_size, pool_size, num_vision_tokens = image_transform(batch[0]['image'])
     vlm_inputs = prepare_vlm_inputs(
@@ -108,7 +106,7 @@ def mmmm_collate_fn(task, dataset, setting, model, tokenizer, batch: list[dict])
     return batch
 
 
-def mmmm_vl_evaluate(task, dataset, setting, model, tokenizer, dataloader):
+def mmmm_vl_evaluate(model, tokenizer, dataloader):
     precision = HalfPrecision('bf16-true')
     gen_config = GenerationConfig(max_new_tokens=512, do_sample=False)
 

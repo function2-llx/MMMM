@@ -26,7 +26,7 @@ def setup_m3d(checkpoint: str, tokenizer: str):
     return model, tokenizer
 
 
-def m3d_collate_fn(task, dataset, setting, model, tokenizer, batch: list[dict]):
+def m3d_collate_fn(batch: list[dict]):
     assert len(batch) == 1
 
     if batch[0]['image'].endswith('.pt'):
@@ -48,30 +48,26 @@ def m3d_collate_fn(task, dataset, setting, model, tokenizer, batch: list[dict]):
 
     image = torch.nn.functional.interpolate(image, size=(32, 256, 256))
 
-    language = tokenizer(
-        '<im_patch>' * 256 + ' ' + batch[0]['question'],
-        return_tensors='pt',
-    )['input_ids'].to('cuda')
-    vision = image.to(device='cuda', dtype=torch.bfloat16)
-
     return {
         'image': image,
         'question': batch[0]['question'],
         'answer': batch[0]['answer'],
-        'language': language,
-        'vision': vision
     }
 
 
-def m3d_vl_evaluate(task, dataset, setting, model, tokenizer, dataloader):
+def m3d_vl_evaluate(model, tokenizer, dataloader):
     results = []
 
     for sample in tqdm(dataloader):
-        
+        language = tokenizer(
+            '<im_patch>' * 256 + ' ' + sample['question'],
+            return_tensors='pt',
+        )['input_ids'].to('cuda')
+        vision = sample['image'].to(device='cuda', dtype=torch.bfloat16)
         
         with torch.inference_mode():
             prediction = tokenizer.decode(
-                model.generate(sample['vision'], sample['language'], max_new_tokens=256)[0],
+                model.generate(vision, language, max_new_tokens=256)[0],
                 skip_special_tokens=True,
             ).strip()
 

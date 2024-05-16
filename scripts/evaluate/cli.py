@@ -3,27 +3,27 @@ from jsonargparse import CLI
 from pathlib import Path
 from torch.utils.data import DataLoader
 
-from scripts.evaluate._mmmm import (
+from models.mmmm import (
     mmmm_collate_fn,
     setup_mmmm,
     mmmm_vl_evaluate,
 )
-from scripts.evaluate.cogvlm import cogvlm_collate_fn, setup_cogvlm, cogvlm_vl_evaluate
-from scripts.evaluate.instructblip import (
+from models.cogvlm import cogvlm_collate_fn, setup_cogvlm, cogvlm_vl_evaluate
+from models.instructblip import (
     instructblip_collate_fn,
     setup_instructblip,
     instructblip_vl_evaluate,
 )
-from scripts.evaluate.llavamed import llavamed_collate_fn, setup_llavamed, llavamed_vl_evaluate
-from scripts.evaluate.llavanext import llavanext_collate_fn, setup_llavanext, llavanext_vl_evaluate
-from scripts.evaluate.m3d import m3d_collate_fn, setup_m3d, m3d_vl_evaluate
-from scripts.evaluate.medflamingo import (
+from models.llavamed import llavamed_collate_fn, setup_llavamed, llavamed_vl_evaluate
+from models.llavanext import llavanext_collate_fn, setup_llavanext, llavanext_vl_evaluate
+from models.m3d import m3d_collate_fn, setup_m3d, m3d_vl_evaluate
+from models.medflamingo import (
     medflamingo_collate_fn,
     setup_medflamingo,
     medflamingo_vl_evaluate,
 )
-from scripts.evaluate.radfm import radfm_collate_fn, setup_radfm, radfm_vl_evaluate
-from scripts.evaluate.utils import (
+from models.radfm import radfm_collate_fn, setup_radfm, radfm_vl_evaluate
+from utils import (
     dump_results,
     setup_seed,
     VQATestDataset,
@@ -72,7 +72,7 @@ class Evaluator:
             evaluate_fn = radfm_vl_evaluate
         elif self.model == 'medflamingo':
             setup_fn = setup_medflamingo
-            collate_fn = medflamingo_collate_fn
+            collate_fn = partial(medflamingo_collate_fn, self.task)
             evaluate_fn = medflamingo_vl_evaluate
         elif self.model == 'm3d':
             setup_fn = setup_m3d
@@ -102,18 +102,10 @@ class Evaluator:
             batch_size=1,
             num_workers=8,
             pin_memory=True,
-            collate_fn=partial(
-                collate_fn,
-                task=self.task,
-                dataset=self.dataset,
-                setting=self.setting,
-                *packed,
-            ),
+            collate_fn=collate_fn,
         )
 
-        results = evaluate_fn(
-            self.task, self.dataset, self.setting, *packed, dataloader
-        )
+        results = evaluate_fn(*packed, dataloader)
 
         dump_results(
             results,

@@ -22,7 +22,7 @@ def setup_cogvlm(checkpoint: str, tokenizer: str):
     return model, tokenizer
 
 
-def cogvlm_collate_fn(task, dataset, setting, model, tokenizer, batch: list[dict]):
+def cogvlm_collate_fn(build_conversation_input_ids, tokenizer, batch: list[dict]):
     assert len(batch) == 1
 
     if batch[0]['image'].endswith('.pt.zst'):
@@ -32,7 +32,7 @@ def cogvlm_collate_fn(task, dataset, setting, model, tokenizer, batch: list[dict
     else:
         image = Image.open(batch[0]['image']).convert('RGB')
 
-    inputs = model.build_conversation_input_ids(
+    inputs = build_conversation_input_ids(
         tokenizer, query=batch[0]['question'], images=[image]
     )
     
@@ -46,7 +46,7 @@ def cogvlm_collate_fn(task, dataset, setting, model, tokenizer, batch: list[dict
     }
 
 
-def cogvlm_vl_evaluate(task, dataset, setting, model, tokenizer, dataloader):
+def cogvlm_vl_evaluate(model, tokenizer, dataloader):
     results = []
 
     for sample in tqdm(dataloader):

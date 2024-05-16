@@ -1,28 +1,28 @@
+from PIL import Image
 import torch
 import torchvision.transforms as transforms
-from PIL import Image
 from tqdm import tqdm
 
 from luolib.utils.zstd import load_pt_zst
 
 
-def setup_instructblip(checkpoint: str, tokenizer: str):
-    from transformers import InstructBlipProcessor, InstructBlipForConditionalGeneration
+def setup_llavanext(checkpoint: str, tokenizer: str):
+    from transformers import LlavaNextProcessor, LlavaNextForConditionalGeneration
 
-    model = InstructBlipForConditionalGeneration.from_pretrained(
-        checkpoint,
-        torch_dtype=torch.float16,
+    model = LlavaNextForConditionalGeneration.from_pretrained(
+        checkpoint, 
+        torch_dtype=torch.float16, 
         low_cpu_mem_usage=True
     )
     model = model.to('cuda')
     model.eval()
 
-    processor = InstructBlipProcessor.from_pretrained(tokenizer)
+    processor = LlavaNextProcessor.from_pretrained(tokenizer)
 
     return model, processor
 
 
-def instructblip_collate_fn(task, dataset, setting, model, processor, batch: list[dict]):
+def llavanext_collate_fn(batch: list[dict]):
     assert len(batch) == 1
 
     if batch[0]['image'].endswith('.pt.zst'):
@@ -35,23 +35,25 @@ def instructblip_collate_fn(task, dataset, setting, model, processor, batch: lis
         'image': image,
         'question': batch[0]['question'],
         'answer': batch[0]['answer'],
-        'inputs': processor(images=image, text=batch[0]['question'], return_tensors='pt').to('cuda')
     }
 
 
-def instructblip_vl_evaluate(task, dataset, setting, model, processor, dataloader):
+def llavanext_vl_evaluate(model, processor, dataloader):
     results = []
 
     for sample in tqdm(dataloader):
+        prompt = 'A chat between a curious human and an artificial intelligence assistant. The assistant gives helpful, detailed, and polite answers to the human\'s questions. USER: <image>\n' + sample['question'] + ' ASSISTANT:'
+
+        inputs = processor(prompt, sample['image'], return_tensors='pt').to('cuda')
 
         with torch.inference_mode():
             prediction = processor.decode(
                 model.generate(
-                    **sample['inputs'],
+                    **inputs,
                     max_new_tokens=256,
                 )[0],
                 skip_special_tokens=True,
-            )
+            ).split('ASSISTANT:')[1].strip()
 
         results.append(
             {

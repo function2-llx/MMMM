@@ -6,7 +6,7 @@ from tqdm import tqdm
 from transformers import AutoTokenizer, AutoConfig, CLIPImageProcessor, StoppingCriteria
 import sys
 
-from luolib.utils.zstd import load_pt_zst
+from luolib.utils import load_pt_zst
 
 
 class KeywordsStoppingCriteria(StoppingCriteria):
@@ -77,10 +77,7 @@ def setup_llavamed(checkpoint: str, tokenizer: str):
     return model, tokenizer, image_processor, image_token_len
 
 
-def llavamed_collate_fn(task, dataset, setting, model, tokenizer, processor, image_token_len, batch: list[dict]):
-    sys.path.append('third-party/LLaVA-Med')
-    from llava.conversation import conv_templates
-    
+def llavamed_collate_fn(batch: list[dict]):
     assert len(batch) == 1
 
     if batch[0]['image'].endswith('.pt.zst'):
@@ -89,54 +86,50 @@ def llavamed_collate_fn(task, dataset, setting, model, tokenizer, processor, ima
         image = transform(image.squeeze(1))
     else:
         image = Image.open(batch[0]['image'])
-
-    question = batch[0]['question']
-    if getattr(model.config, 'mm_use_im_start_end', False):
-        question = (
-            question
-            + '\n'
-            + '<im_start>'
-            + '<im_patch>' * image_token_len
-            + '<im_end>'
-        )
-    else:
-        question = question + '\n' + '<im_patch>' * image_token_len
-    conv = conv_templates['simple'].copy()
-    conv.append_message(conv.roles[0], question)
-    prompt = conv.get_prompt()
-    language = torch.as_tensor(tokenizer([prompt]).input_ids).to('cuda')
-
-    vision = processor.preprocess(image, return_tensors='pt')[
-        'pixel_values'
-    ][0]
-    vision = repeat(vision, 'c h w -> 1 c h w').half().to('cuda')
     return {
         'image': image,
         'question': batch[0]['question'],
         'answer': batch[0]['answer'],
-        'language': language,
-        'vision': vision
     }
 
 
-def llavamed_vl_evaluate(task, dataset, setting, model, tokenizer, processor, image_token_len, dataloader):
+def llavamed_vl_evaluate(model, tokenizer, processor, image_token_len, dataloader):
     sys.path.append('third-party/LLaVA-Med')
     from llava.conversation import conv_templates
 
-    conv = conv_templates['simple'].copy()
-    
     results = []
 
     for sample in tqdm(dataloader):
-        stopping_criteria = KeywordsStoppingCriteria(['###'], tokenizer, sample['language'])
+        question = sample['question']
+        if getattr(model.config, 'mm_use_im_start_end', False):
+            question = (
+                question
+                + '\n'
+                + '<im_start>'
+                + '<im_patch>' * image_token_len
+                + '<im_end>'
+            )
+        else:
+            question = question + '\n' + '<im_patch>' * image_token_len
+        conv = conv_templates['simple'].copy()
+        conv.append_message(conv.roles[0], question)
+        prompt = conv.get_prompt()
+        language = torch.as_tensor(tokenizer([prompt]).input_ids).to('cuda')
+        stopping_criteria = KeywordsStoppingCriteria(['###'], tokenizer, language)
+
+        vision = processor.preprocess(sample['image'], return_tensors='pt')[
+            'pixel_values'
+        ][0]
+        vision = repeat(vision, 'c h w -> 1 c h w').half().to('cuda')
+
         with torch.inference_mode():
             prediction = tokenizer.decode(
                 model.generate(
-                    sample['language'],
-                    images=sample['vision'],
+                    language,
+                    images=vision,
                     stopping_criteria=[stopping_criteria],
                     max_new_tokens=256,
-                )[0, sample['language'].shape[1] :],
+                )[0, language.shape[1] :],
                 skip_special_tokens=True,
             )
 
