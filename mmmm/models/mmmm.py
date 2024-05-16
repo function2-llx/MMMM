@@ -148,10 +148,6 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         self.model.tokenizer = tokenizer
         self.check_grad = False
         self._setup_freeze(freeze_vg)
-        # DEBUG
-        self.model.vision.requires_grad_(False)
-        self.model.layers.requires_grad_(False)
-        self.model.norm.requires_grad_(False)
         self.disable_vg = disable_vg
         return self
 
@@ -270,18 +266,14 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
     def training_step(self, batch: Batch, *args, **kwargs):
         vlm_inputs = batch['vlm_inputs']
         input_ids: torch.LongTensor = vlm_inputs['input_ids']  # type: ignore
-        try:
-            vlm_output: CausalLMOutputWithPast = self(
-                **vlm_inputs,
-                image=batch['image'],
-                patch_size=batch['patch_size'],
-                pool_size=batch['pool_size'],
-                return_dict=True,
-                output_hidden_states=True,
-            )
-        except Exception as e:
-            print(batch['src'])
-            raise e
+        vlm_output: CausalLMOutputWithPast = self(
+            **vlm_inputs,
+            image=batch['image'],
+            patch_size=batch['patch_size'],
+            pool_size=batch['pool_size'],
+            return_dict=True,
+            output_hidden_states=True,
+        )
         if self.disable_vg:
             lm_loss = vlm_output.loss
             self.log('train/loss', lm_loss, sync_dist=True)

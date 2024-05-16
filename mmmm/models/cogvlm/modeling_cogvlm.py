@@ -463,13 +463,6 @@ class CogVLMModel(CogVLMPreTrainedModel):
                 assert image_features_mask is not None
                 assert len(input_ids) == len(image), f"batch size mismatch: {len(input_ids)} {len(image)}"
                 inputs_embeds = self.embed_tokens(input_ids)
-                # DEBUG
-                return BaseModelOutputWithPast(
-                    last_hidden_state=inputs_embeds,
-                    past_key_values=None,
-                    hidden_states=(inputs_embeds, ),
-                    attentions=None,
-                )
                 image_features_list: list[torch.Tensor] = self.vision(image, patch_size, pool_size)
                 for i, (image_features, mask) in enumerate(zip(image_features_list, image_features_mask)):
                     inputs_embeds[i, mask] = image_features[0]
