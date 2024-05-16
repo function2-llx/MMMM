@@ -44,6 +44,7 @@ class DatasetConf:
     vl_trans: VLTransConf | None = None
     max_seq_len: int | None = None
     bop_weight: float = 1.
+    mimic_cxr_neg_weight: float | None = None
 
     @property
     def base_stride_z(self):

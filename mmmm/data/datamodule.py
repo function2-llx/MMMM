@@ -46,6 +46,20 @@ class MMMMRandomSampler(Sampler):
         self.num_samples = num_samples
         self.G = torch.Generator()
         self.G.manual_seed(seed)
+        if (w := dataset.conf.mimic_cxr_neg_weight) is not None:
+            assert 0 <= w <= 1
+            for i, dataset_spec in enumerate(dataset.conf.datasets):
+                if dataset_spec.name == 'MIMIC-CXR':
+                    num_tot = len(dataset.data_lists[i])
+                    neg_mask = torch.ones(num_tot, dtype=torch.bool)
+                    for j, data in enumerate(dataset.data_lists[i]):
+                        if len(data.get('anomaly_pos', [])) > 0:
+                            neg_mask[j] = 0
+                    num_neg = neg_mask.sum()
+                    # sorry for an implementation like this
+                    mimic_weight = torch.ones(num_tot, dtype=torch.float)
+                    mimic_weight[neg_mask] *= (w * (num_tot - num_neg)) / ((1 - w) * num_neg)
+                    self._mimic_weight = mimic_weight
 
     @property
     def num_datasets(self):
@@ -55,7 +69,10 @@ class MMMMRandomSampler(Sampler):
         for dataset_idx in torch.multinomial(
             self.dataset_weights, self.num_samples, True, generator=self.G,
         ):
-            sub_idx = torch.randint(len(self.dataset.data_lists[dataset_idx]), size=(1, ), generator=self.G)
+            if self.dataset.conf.datasets[dataset_idx].name == 'MIMIC-CXR':
+                sub_idx = torch.multinomial(self._mimic_weight, 1, generator=self.G)
+            else:
+                sub_idx = torch.randint(len(self.dataset.data_lists[dataset_idx]), size=(1, ), generator=self.G)
             yield dataset_idx.item(), sub_idx.item()
 
     def __len__(self):

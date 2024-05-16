@@ -152,6 +152,7 @@ init_args:
     pool_size_xy: 2
     base_pool_size_z: 2
     max_seq_len: 768
+    mimic_cxr_neg_weight: 0.15
     vl_trans:
       max_tokens: 100
       max_tokens_z: 4

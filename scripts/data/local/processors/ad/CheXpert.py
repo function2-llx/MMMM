@@ -23,7 +23,7 @@ class CheXpertProcessor(NaturalImageLoaderMixin, Processor):
         ('Enlarged Cardiomediastinum', 'widened mediastinum'),
         ('Cardiomegaly', 'cardiomegaly'),
         ('Lung Opacity', 'pulmonary opacification'),
-        # ('Lung Lesion', 'lung lesion'),
+        ('Lung Lesion', 'lung nodule'),
         ('Edema', 'pulmonary edema'),
         ('Consolidation', 'pulmonary consolidation'),
         # ('Pneumonia', 'pneumonia'),

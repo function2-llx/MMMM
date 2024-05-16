@@ -18,6 +18,7 @@ init_args:
     - name: CT-RATE
       type: vl
       weight: 2.5
+    mimic_cxr_neg_weight: 0.15
     base_vit_patch_size_z: 16
     vit_patch_size_xy: 16
     pool_size_xy: 2
