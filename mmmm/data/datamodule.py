@@ -77,7 +77,7 @@ class MMMMRandomSampler(Sampler):
                 else:
                     buffer[dataset_idx] = torch.randperm(len(self.dataset.data_lists[dataset_idx]))
                 cnt[dataset_idx] = 0
-            sub_idx = buffer[cnt[dataset_idx]]
+            sub_idx = buffer[dataset_idx][cnt[dataset_idx]]
             cnt[dataset_idx] += 1
             yield dataset_idx.item(), sub_idx.item()
 
