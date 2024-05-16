@@ -1,0 +1,18 @@
+optim:
+  param_groups:
+  - prefix: ['']
+  optimizer:
+    class_path: torch.optim.AdamW
+    init_args:
+      lr: 1e-4
+      weight_decay: 0.01
+  lr_scheduler:
+    scheduler:
+      class_path: timm.scheduler.CosineLRScheduler
+      init_args:
+        t_initial: ${trainer.max_steps}
+        t_in_epochs: false
+        warmup_t: 250
+        warmup_prefix: true
+    interval: step
+    frequency: 250
