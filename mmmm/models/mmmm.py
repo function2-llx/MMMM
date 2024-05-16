@@ -151,6 +151,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         # DEBUG
         self.model.vision.requires_grad_(False)
         self.model.layers.requires_grad_(False)
+        self.model.norm.requires_grad_(False)
         self.disable_vg = disable_vg
         return self
 
