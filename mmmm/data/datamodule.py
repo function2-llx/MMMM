@@ -66,13 +66,19 @@ class MMMMRandomSampler(Sampler):
         return self.dataset_weights.shape[0]
 
     def __iter__(self) -> Iterator[tuple[int, int]]:
+        cnt = torch.zeros(self.num_datasets, dtype=torch.int64)
+        buffer = [torch.empty(0, dtype=torch.int64) for _ in range(self.num_datasets)]
         for dataset_idx in torch.multinomial(
             self.dataset_weights, self.num_samples, True, generator=self.G,
         ):
-            if self.dataset.conf.datasets[dataset_idx].name == 'MIMIC-CXR':
-                sub_idx = torch.multinomial(self._mimic_weight, 1, generator=self.G)
-            else:
-                sub_idx = torch.randint(len(self.dataset.data_lists[dataset_idx]), size=(1, ), generator=self.G)
+            if cnt[dataset_idx] == buffer[dataset_idx].shape[0]:
+                if self.dataset.conf.datasets[dataset_idx].name == 'MIMIC-CXR':
+                    buffer[dataset_idx] = torch.multinomial(self._mimic_weight, 131072, generator=self.G)
+                else:
+                    buffer[dataset_idx] = torch.randperm(len(self.dataset.data_lists[dataset_idx]))
+                cnt[dataset_idx] = 0
+            sub_idx = buffer[cnt[dataset_idx]]
+            cnt[dataset_idx] += 1
             yield dataset_idx.item(), sub_idx.item()
 
     def __len__(self):
