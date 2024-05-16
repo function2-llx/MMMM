@@ -172,7 +172,7 @@ class LlamaMetrics:
         from vllm import LLM
 
         self.llama = LLM(
-            model=LLAMA3_PATH, dtype='bfloat16', gpu_memory_utilization=0.9
+            model=LLAMA3_PATH, dtype='bfloat16', gpu_memory_utilization=0.9, tensor_parallel_size=2
         )
 
     def process(self, run: Path):
@@ -224,18 +224,19 @@ class LlamaMetrics:
         )
         response_texts = []
         scores = []
-        for i, response in enumerate(responses):
+        for i, response in tqdm(enumerate(responses)):
             while True:
                 try:
+                    score = float(response.outputs[0].text.split('Score: ')[1].strip().strip('.'))
                     response_texts.append(response.outputs[0].text)
-                    score = int(response.outputs[0].text.split('Score: ')[1].strip())
                     scores.append(score)
                     break
                 except:
+                    print(response.outputs[0].text)
                     response = self.llama.generate(
                         prompts=[conversations[i]],
                         sampling_params=sampling_params,
-                    )
+                    )[0]
 
         df['llama_responses'] = response_texts
         df['llama'] = scores

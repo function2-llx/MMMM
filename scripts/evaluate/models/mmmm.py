@@ -2,6 +2,8 @@ from einops import repeat
 from lightning.fabric.utilities import move_data_to_device
 from lightning.pytorch.plugins import HalfPrecision
 import math
+
+from tqdm import tqdm
 import monai.transforms as mt
 from monai.utils import InterpolateMode, convert_to_tensor
 import numpy as np
@@ -86,24 +88,17 @@ def image_transform(image_path: PathLike):
 
 def mmmm_collate_fn(batch: list[dict]):
     assert len(batch) == 1
+
     image, patch_size, pool_size, num_vision_tokens = image_transform(batch[0]['image'])
-    vlm_inputs = prepare_vlm_inputs(
-        [ConvTurn(batch[0]['question'], '')],
-        image,
-        patch_size,
-        pool_size,
-        num_vision_tokens,
-    )
     
-    batch = _collate_fn([
-        {
-            'image': image,
-            'vlm_inputs': vlm_inputs,
-            'patch_size': patch_size,
-            'pool_size': pool_size,
-        }
-    ])
-    return batch
+    return {
+        'image': image,
+        'question': batch[0]['question'],
+        'answer': batch[0]['answer'],
+        'patch_size': patch_size,
+        'pool_size': pool_size,
+        'num_vision_tokens': num_vision_tokens,
+    }
 
 
 def mmmm_vl_evaluate(model, tokenizer, dataloader):
@@ -112,22 +107,37 @@ def mmmm_vl_evaluate(model, tokenizer, dataloader):
 
     results = []
 
-    for sample in dataloader:
+    for sample in tqdm(dataloader):
         with torch.inference_mode():
-            
-            sample = precision.convert_input(sample)
-            sample = move_data_to_device(sample, 'cuda')
-            outputs = model(
+            vlm_inputs, _ = prepare_vlm_inputs(
+                [ConvTurn(sample['question'], '')],
+                tokenizer,
+                sample['num_vision_tokens'],
+                inference=True,
+                grounding=False,
+            )
+            input_len = len(vlm_inputs['input_ids'])
+            batch = _collate_fn([
+                {
+                    'image': sample['image'],
+                    'patch_size': sample['patch_size'],
+                    'pool_size': sample['pool_size'],
+                    'vlm_inputs': vlm_inputs,
+                },
+            ])
+            batch = precision.convert_input(batch)
+            batch = move_data_to_device(batch, 'cuda')
+            outputs = model.generate(
                 generation_config=gen_config,
                 return_dict_in_generate=True,
                 output_hidden_states=True,
-                **sample['vlm_inputs'],
-                image=sample['image'],
-                patch_size=sample['patch_size'],
-                pool_size=sample['pool_size'],
+                **batch['vlm_inputs'],
+                image=batch['image'],
+                patch_size=batch['patch_size'],
+                pool_size=batch['pool_size'],
             )
             token_ids = outputs.sequences[0].tolist()
-            token_ids = token_ids[len(sample['vlm_inputs']['input_ids']):]
+            token_ids = token_ids[input_len:]
             if token_ids[-1] == tokenizer.eos_token_id:
                 token_ids = token_ids[:-1]
             prediction = tokenizer.decode(token_ids, clean_up_tokenization_spaces=False)
@@ -139,5 +149,9 @@ def mmmm_vl_evaluate(model, tokenizer, dataloader):
                 'prediction': prediction,
             },
         )
+
+        print(sample['question'])
+        print(sample['answer'])
+        print(prediction)
 
     return results

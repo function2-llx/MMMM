@@ -1,4 +1,4 @@
-LLAMA3_PATH = '/data/llama3/Meta-Llama-3-8B-Instruct-hf'
+LLAMA3_PATH = '/data/llama3/Meta-Llama-3-70B-Instruct-hf'
 CHEXBERT_PATH = '/data/chexbert/chexbert.pth'
 RADCLIQ_PATH = 'third-party/CXR-Report-Metric/CXRMetric/radcliq-v1.pkl'
 
@@ -8,7 +8,11 @@ You are an AI assistant specialized in medical topics.
 '''
 
 LLAMA_USER_PROMPT = '''
-You are given the question, ground truth and prediction of a medical visual question answering task. Your task is to evaluate the correctness of the prediction based on the question and ground truth in terms of medical knowledge, considering both precision (i.e. the fraction of relevant contents among the predicted contents) and recall (i.e. the fraction of relevant content that were predicted). You should provide a concise analysis and a score from 0 to 10 to summarize your evaluation. The output format is 'Analysis: ... Score: ...'. Do not output anything else.
+You are given the question, ground truth and prediction of a medical visual question answering in a clinical diagnosis scenario. Your task is to evaluate the correctness of the prediction based on the question and ground truth in terms of medical knowledge.
+You should take both precision (i.e. the fraction of relevant contents among the predicted contents) and recall (i.e. the fraction of relevant content that were predicted) into account.
+You should only focus on the contents directly answering the question, the rest should not affect your evaluation.
+You should be strict and conservative, any statement that is not definitive or cannot be inferred from the question and ground truth in terms of medical knowledge should be considered incorrect.
+You should provide a concise analysis and a score from 0 to 10 to summarize your evaluation. The output format is 'Analysis: ... Score: ...'. Do not output anything else.
 question: {question}
 ground truth: {answer}
 prediction: {prediction}
