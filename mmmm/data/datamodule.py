@@ -73,7 +73,7 @@ class MMMMRandomSampler(Sampler):
         ):
             if cnt[dataset_idx] == buffer[dataset_idx].shape[0]:
                 if self.dataset.conf.datasets[dataset_idx].name == 'MIMIC-CXR':
-                    buffer[dataset_idx] = torch.multinomial(self._mimic_weight, 131072, generator=self.G)
+                    buffer[dataset_idx] = torch.multinomial(self._mimic_weight, 131072, replacement=True, generator=self.G)
                 else:
                     buffer[dataset_idx] = torch.randperm(len(self.dataset.data_lists[dataset_idx]))
                 cnt[dataset_idx] = 0
