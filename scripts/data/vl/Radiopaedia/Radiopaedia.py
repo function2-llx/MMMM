@@ -4,15 +4,15 @@ from pathlib import Path
 
 import cytoolz
 import einops
+from jsonargparse import ArgumentParser
 import numpy as np
 import orjson
 import torch
 from torchvision.io import read_image
-from tqdm import tqdm
 
 from luolib.utils import SavedSet, file_append, process_map
 
-from mmmm.data.defs import ORIGIN_VL_DATA_ROOT, PROCESSED_VL_DATA_ROOT, PROCESSED_DATA_ROOT
+from mmmm.data.defs import ORIGIN_VL_DATA_ROOT, PROCESSED_DATA_ROOT, PROCESSED_VL_DATA_ROOT
 
 ORIGIN_RP_DATA_ROOT = ORIGIN_VL_DATA_ROOT / 'RP3D-Image' / 'raw_images'
 now = datetime.now()
@@ -22,6 +22,8 @@ log_path.parent.mkdir(exist_ok=True, parents=True)
 output_root = PROCESSED_VL_DATA_ROOT / 'Radiopaedia'
 bad = SavedSet(output_root / 'bad.txt')
 
+plane_set = {'axial', 'coronal', 'sagittal'}
+
 def convert_path(radfm_path: str) -> Path:
     path = radfm_path.replace(
         '/mnt/petrelfs/share_data/zhangxiaoman/DATA/Radio_VQA/processed_file/npys',
@@ -29,31 +31,50 @@ def convert_path(radfm_path: str) -> Path:
     )
     for suffix in ['.nii.gz', '.npy']:
         if path.endswith(suffix):
-            path = path[:-len(suffix)] + '.pt'
+            path = path[:-len(suffix)] + '.pt.zst'
     return Path(path)
 
-def process_text(json_file: str, train_val: bool = False):
-    with open(ORIGIN_VL_DATA_ROOT / 'RadFM_data_csv' / 'data_csv' / json_file) as f:
-        data = json.load(f)
-    processed_data = []
-    for item in tqdm(data):
-        valid_idx = [
-            i for i, path in enumerate(item['image_path'])
-            if convert_path(path).exists()
-        ]
-        if len(valid_idx) == 0:
-            continue
-        if isinstance(item['finding'], str) and item['finding'].strip():
-            processed_data.append(
-                {
-                    'image': [str(convert_path(item['image_path'][i])) for i in valid_idx],
-                    'modality': [item['image_modality'][i] for i in valid_idx],
-                    'findings': item['image_caption'],
-                    # 'impression': item['impression'],
-                    'vqa': item['qa_list'],
-                }
-            )
+plane_map = {
+    'axial': 'axial',
+    'coronal': 'coronal',
+    'sagittal': 'sagittal',
+    'frontal': 'frontal',
+    'lateral': 'lateral',
+    'oblique': 'oblique',
+    'longitudinal': 'longitudinal',
+    'transverse': 'transverse',
+    'ap': 'AP',
+    'pa': 'PA',
+}
 
+def process_text_item(item: dict):
+    ret = {
+        'image': [],
+        'modality': [],
+        'plane': [],
+    }
+    for i, radfm_path in enumerate(item['image_path']):
+        if (path := convert_path(radfm_path)).exists():
+            ret['image'].append(str(path))
+            ret['modality'].append(item['image_modality'][i].strip())
+            if isinstance(plane := item['plane_projection'][i], str):
+                plane = plane.lower()
+            ret['plane'].append(plane_map.get(plane, None))
+    if len(ret['image']) == 0:
+        return None
+    if isinstance(findings := item['finding'], str) and (findings := findings.strip()):
+        ret.update({
+            'findings': findings,
+            'vqa': item['qa_list'],
+        })
+    return ret
+
+def process_text(json_file: str, train_val: bool = False):
+    # orjson does not support NaN, sad
+    # data = orjson.loads((ORIGIN_VL_DATA_ROOT / 'RadFM_data_csv' / 'data_csv' / json_file).read_bytes())
+    data = json.loads((ORIGIN_VL_DATA_ROOT / 'RadFM_data_csv' / 'data_csv' / json_file).read_bytes())
+    processed_data = process_map(process_text_item, data, max_workers=8, ncols=80)
+    processed_data = list(filter(None, processed_data))
     if train_val:
         np.random.RandomState(233).shuffle(processed_data)
         num_val = 250
@@ -140,8 +161,12 @@ def process_images():
     process_map(process_image, image_dirs, max_workers=16, chunksize=16)
 
 def process():
+    parser = ArgumentParser()
+    parser.add_argument('--image', action='store_true')
+    args = parser.parse_args()
     (PROCESSED_VL_DATA_ROOT / 'Radiopaedia').mkdir(parents=True, exist_ok=True)
-    process_images()
+    if args.image:
+        process_images()
     process_text('radiology_train.json', train_val=True)
     process_text('radiology_test.json', train_val=False)
 
