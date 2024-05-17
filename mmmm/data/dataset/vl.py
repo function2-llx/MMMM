@@ -92,6 +92,19 @@ FINDINGS_PROMPTS = [
     'What are the findings presented in this {}?',
 ]
 
+PLANE_PROMPTS = [
+    'In what plane is this {} oriented?',
+    'In what plane is this {} taken?',
+    'What imaging plane is depicted here?',
+    'In what plane is this {}?',
+    'What plane is this?',
+    'What is the plane of this {}?',
+    'What plane is the {} acquired in?',
+    'What plane is this {} in?',
+    'What is the scanning plane of this {}?',
+    'Which plane is the {} shown in?',
+]
+
 COMPLETE_REFERRINGS = ['image', 'medical image', 'radiograph', 'scan', 'radiology image', 'radiology scan', 'medical scan']
 
 PARTIAL_REFERRINGS = [' image', ' scan', ' radiograph']
@@ -113,6 +126,8 @@ class VLTransConf:
     log2_patch_size_z_std: float = 0.5
     report_ratio: float = 0.8
     ad_ratio: float = 0.3
+    modality_prob: float = 0.2
+    plane_prob: float = 0.2
 
 class VLDataPoint(TypedDict):
     image: list[str]
@@ -145,6 +160,10 @@ class VLTransform(mt.RandomizableTransform):
             modality = modalities[image_idx]
         else:
             modality = None
+        if planes := data.get('plane'):
+            plane = planes[image_idx]
+        else:
+            plane = None
         if image_path.endswith('.pt'):
             image = torch.load(image_path)
         elif image_path.endswith('.pt.zst'):
@@ -187,8 +206,16 @@ class VLTransform(mt.RandomizableTransform):
         image = intensity_norm(image)
         referring: str = self.R.choice(COMPLETE_REFERRINGS)
         conversation = []
-        if modality is not None and toss(self.R, 0.3):
+        if modality and toss(self.R, trans_conf.modality_prob):
             conversation.extend(gen_modality_conv(modality, self.R))
+        if plane and toss(self.R, trans_conf.plane_prob):
+            _template: str = self.R.choice(PLANE_PROMPTS)
+            conversation.append(
+                ConvTurn(
+                    _template.format(referring),
+                    plane,
+                )
+            )
         findings = data.get('findings')
         vqa = data.get('vqa')
         assert findings or vqa
