@@ -32,19 +32,17 @@ def m3d_collate_fn(batch: list[dict]):
     if batch[0]['image'].endswith('.pt'):
         image = torch.load(batch[0]['image']).float()
         image = (image - image.min()) / (image.max() - image.min())
-        image = reduce(image, 'c d h w -> d h w', 'mean')
-        image = repeat(image, 'd h w -> 1 1 d h w')
+    elif batch[0]['image'].endswith('.pt.zst'):
+        image = load_pt_zst(batch[0]['image']).float()
+        image = (image - image.min()) / (image.max() - image.min())
     else:
-        if batch[0]['image'].endswith('.pt.zst'):
-            transform = transforms.ToPILImage()
-            image = load_pt_zst(batch[0]['image'])
-            image = transform(image.squeeze(1))
-        else:
-            image = Image.open(batch[0]['image']).convert('RGB')
         transform = transforms.ToTensor()
+        image = Image.open(batch[0]['image']).convert('RGB')
         image = transform(image)
-        image = reduce(image, 'c h w -> h w', 'mean')
-        image = repeat(image, 'h w -> 1 1 1 h w')
+        image = repeat(image, 'c h w -> c 1 h w')
+
+    image = reduce(image, 'c d h w -> d h w', 'mean')
+    image = repeat(image, 'd h w -> 1 1 d h w')
 
     image = torch.nn.functional.interpolate(image, size=(32, 256, 256))
 

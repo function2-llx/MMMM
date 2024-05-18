@@ -22,7 +22,6 @@ from constants import (
     LLAMA_USER_PROMPT,
     CHEXBERT_PATH,
     RADCLIQ_PATH,
-    FEW_SHOT_PROMPTS,
 )
 
 
@@ -62,22 +61,17 @@ class VQATestDataset(Dataset):
 
 
 class ReportTestDataset(Dataset):
-    def __init__(self, dataset: str, setting: str):
+    def __init__(self, dataset: str):
         super().__init__()
         self.name = dataset
-        self.setting = setting
-        with open(PROCESSED_VL_DATA_ROOT / dataset / 'test-filtered.json') as f:
+        with open(PROCESSED_VL_DATA_ROOT / dataset / 'test.json') as f:
             self.dataset = [
                 {
                     'image': image,
                     'question': (
-                        FEW_SHOT_PROMPTS[dataset]
-                        if setting == 'fewshot'
-                        else (
                             'Can you provide a radiology report for this medical image?'
                             if x.get('impression')
                             else 'Can you provide the findings for this medical image?'
-                        )
                     ),
                     'answer': (
                         f'Findings: {x["findings"]}\nImpression: {x["impression"]}'
@@ -231,7 +225,7 @@ class LlamaMetrics:
             else:
                 while True:
                     try:
-                        score = float(response.outputs[0].text.split('Score: ')[1].strip().strip('.'))
+                        score = float(response.outputs[0].text.split('Rating: ')[1].strip().strip('.'))
                         response_texts.append(response.outputs[0].text)
                         scores.append(score)
                         break

@@ -1,4 +1,5 @@
 from functools import partial
+from typing import Optional
 from jsonargparse import CLI
 from pathlib import Path
 from torch.utils.data import DataLoader
@@ -55,12 +56,12 @@ class Evaluator:
     def predict(
         self,
         checkpoint: str,
-        tokenizer: str,
+        tokenizer: Optional[str] = None,
     ):
         if self.task == 'vqa':
             dataset = VQATestDataset(self.dataset)
         elif self.task == 'report':
-            dataset = ReportTestDataset(self.dataset, self.setting)
+            dataset = ReportTestDataset(self.dataset)
 
         if self.model == 'mmmm':
             setup_fn = setup_mmmm
