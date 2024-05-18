@@ -88,7 +88,6 @@ def m3d_vl_evaluate(model, tokenizer, dataloader, output):
 
         if i % 1000 == 0:
             dump_results(results, output)
-            results = []
 
         print(sample['question'])
         print(sample['answer'])
