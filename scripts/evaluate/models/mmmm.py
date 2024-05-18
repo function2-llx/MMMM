@@ -120,12 +120,12 @@ class MMMMTransform(mt.RandomizableTransform):
         }
 
 
-def mmmm_vl_evaluate(model, tokenizer, dataloader, start, end, output):
+def mmmm_vl_evaluate(model, tokenizer, dataloader, output):
     gen_config = GenerationConfig(max_new_tokens=512, do_sample=False)
 
     results = []
 
-    for i, sample in enumerate(tqdm(dataloader[start:end])):
+    for i, sample in enumerate(tqdm(dataloader)):
         with torch.inference_mode():
             
             batch = move_data_to_device(sample['batch'], 'cuda')
@@ -161,5 +161,3 @@ def mmmm_vl_evaluate(model, tokenizer, dataloader, start, end, output):
         print(prediction)
 
     dump_results(results, output)
-
-    return results

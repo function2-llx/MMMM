@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 import sys
-from typing import OrderedDict
+from typing import Optional, OrderedDict
 import evaluate
 import json
 from monai.transforms import apply_transform
@@ -35,20 +35,17 @@ def setup_seed(seed):
     torch.backends.cudnn.benchmark = False
 
 
-def dump_results(
-    results: list[dict], output: Path
-):
+def dump_results(results: list[dict], output: Path):
     results = pd.DataFrame(results)
-    if os.path.exists(output):
-        df = pd.read_csv(output)
-        df = df.append(results, ignore_index=True)
-        df.to_csv(output, index=False)
-    else:
-        results.to_csv(output, index=False)
+    results.to_csv(output, index=False)
 
+
+def combine_results(results: list[str], output: Path):
+    combined = pd.concat([pd.read_csv(result) for result in results])
+    combined.to_csv(output, index=False)
 
 class VQATestDataset(Dataset):
-    def __init__(self, dataset: str, transform):
+    def __init__(self, dataset: str, transform, start, end):
         super().__init__()
         self.name = dataset
         self.transform = transform
@@ -58,7 +55,7 @@ class VQATestDataset(Dataset):
                 for x in json.load(f)
                 for vqa in x['vqa']
                 for image in x['image']
-            ]
+            ][start:end]
 
     def __getitem__(self, index: int):
         return apply_transform(self.transform, self.dataset[index])
@@ -68,7 +65,7 @@ class VQATestDataset(Dataset):
 
 
 class ReportTestDataset(Dataset):
-    def __init__(self, dataset: str, transform):
+    def __init__(self, dataset: str, transform, start, end):
         super().__init__()
         self.name = dataset
         self.transform = transform
@@ -89,7 +86,7 @@ class ReportTestDataset(Dataset):
                 }
                 for x in json.load(f)
                 for image in x['image']
-            ]
+            ][start:end]
 
     def __getitem__(self, index: int):
         return apply_transform(self.transform, self.dataset[index])

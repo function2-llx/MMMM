@@ -51,10 +51,10 @@ class CogVLMTransform(mt.RandomizableTransform):
         }
 
 
-def cogvlm_vl_evaluate(model, tokenizer, dataloader, start, end, output):
+def cogvlm_vl_evaluate(model, tokenizer, dataloader, output):
     results = []
 
-    for i, sample in enumerate(tqdm(dataloader[start:end])):
+    for i, sample in enumerate(tqdm(dataloader)):
         with torch.inference_mode():
             prediction = (
                 tokenizer.decode(
@@ -88,5 +88,3 @@ def cogvlm_vl_evaluate(model, tokenizer, dataloader, start, end, output):
         print(prediction)
 
     dump_results(results, output)
-
-    return results

@@ -88,9 +88,9 @@ class Evaluator:
             evaluate_fn = instructblip_vl_evaluate
 
         if self.task == 'vqa':
-            dataset = VQATestDataset(self.dataset, transform)
+            dataset = VQATestDataset(self.dataset, transform, start, end)
         elif self.task == 'report':
-            dataset = ReportTestDataset(self.dataset, transform)
+            dataset = ReportTestDataset(self.dataset, transform, start, end)
 
         dataloader = DataLoader(
             dataset,
@@ -100,13 +100,7 @@ class Evaluator:
             pin_memory=True,
         )
 
-        results = evaluate_fn(
-            *packed,
-            dataloader,
-            start,
-            end,
-            f'{self.output_dir}/{self.task}_{self.dataset}_{self.model}_{self.setting}.csv'
-        )
+        evaluate_fn(*packed, dataloader, f'{self.output_dir}/{self.task}_{self.dataset}_{self.model}_{self.setting}.csv')
 
     def evaluate(self, metrics: str):
         if metrics == 'generic':

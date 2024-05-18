@@ -85,10 +85,10 @@ class RadFMTransform(mt.RandomizableTransform):
         }
 
 
-def radfm_vl_evaluate(model, tokenizer, dataloader, start, end, output):
+def radfm_vl_evaluate(model, tokenizer, dataloader, output):
     results = []
 
-    for i, sample in enumerate(tqdm(dataloader[start:end])):
+    for i, sample in enumerate(tqdm(dataloader)):
         with torch.inference_mode():
             prediction = tokenizer.decode(
                 model.generate(sample['language'].to('cuda'), sample['vision'].to('cuda'))[0], skip_special_tokens=True
@@ -111,5 +111,3 @@ def radfm_vl_evaluate(model, tokenizer, dataloader, start, end, output):
         print(prediction)
 
     dump_results(results, output)
-    
-    return results

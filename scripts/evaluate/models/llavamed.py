@@ -124,12 +124,12 @@ class LlavaMedTransform(mt.RandomizableTransform):
         }
 
 
-def llavamed_vl_evaluate(model, tokenizer, processor, image_token_len, dataloader, start, end, output):
+def llavamed_vl_evaluate(model, tokenizer, processor, image_token_len, dataloader, output):
     
 
     results = []
 
-    for i, sample in enumerate(tqdm(dataloader[start:end])):
+    for i, sample in enumerate(tqdm(dataloader)):
         stopping_criteria = KeywordsStoppingCriteria(['###'], tokenizer, sample['language'])
 
         with torch.inference_mode():
@@ -168,5 +168,3 @@ def llavamed_vl_evaluate(model, tokenizer, processor, image_token_len, dataloade
         print(prediction)
 
     dump_results(results, output)
-
-    return results

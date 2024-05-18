@@ -51,10 +51,10 @@ class InstructBlipTransform(mt.RandomizableTransform):
 
         
 
-def instructblip_vl_evaluate(model, processor, dataloader, start, end, output):
+def instructblip_vl_evaluate(model, processor, dataloader, output):
     results = []
 
-    for i, sample in enumerate(tqdm(dataloader[start:end])):
+    for i, sample in enumerate(tqdm(dataloader)):
         with torch.inference_mode():
             prediction = processor.decode(
                 model.generate(
@@ -82,5 +82,3 @@ def instructblip_vl_evaluate(model, processor, dataloader, start, end, output):
         print(prediction)
 
     dump_results(results, output)
-
-    return results
