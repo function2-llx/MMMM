@@ -1,9 +1,11 @@
+from monai import transforms as mt
 from PIL import Image
 import torch
 import torchvision.transforms as transforms
 from tqdm import tqdm
 
 from luolib.utils.zstd import load_pt_zst
+from scripts.evaluate.utils import dump_results
 
 
 def setup_llavanext(checkpoint: str, tokenizer: str):
@@ -38,18 +40,38 @@ def llavanext_collate_fn(batch: list[dict]):
     }
 
 
-def llavanext_vl_evaluate(model, processor, dataloader):
+class LlavaNextTransform(mt.RandomizableTransform):
+    def __init__(self, processor):
+        self.processor = processor
+
+    def __call__(self, data: dict):
+        if data['image'].endswith('.pt.zst'):
+            transform = transforms.ToPILImage()
+            image = load_pt_zst(data['image'])
+            image = transform(image.squeeze(1))
+        else:
+            image = Image.open(data['image']).convert('RGB')
+
+        prompt = 'A chat between a curious human and an artificial intelligence assistant. The assistant gives helpful, detailed, and polite answers to the human\'s questions. USER: <image>\n' + data['question'] + ' ASSISTANT:'
+
+        inputs = self.processor(prompt, image, return_tensors='pt')
+
+        return {
+            'inputs': inputs,
+            'question': data['question'],
+            'answer': data['answer'],
+        }
+
+
+def llavanext_vl_evaluate(model, processor, dataloader, output):
     results = []
 
-    for sample in tqdm(dataloader):
-        prompt = 'A chat between a curious human and an artificial intelligence assistant. The assistant gives helpful, detailed, and polite answers to the human\'s questions. USER: <image>\n' + sample['question'] + ' ASSISTANT:'
-
-        inputs = processor(prompt, sample['image'], return_tensors='pt').to('cuda')
-
+    for i, sample in enumerate(tqdm(dataloader)):
+        
         with torch.inference_mode():
             prediction = processor.decode(
                 model.generate(
-                    **inputs,
+                    **sample['inputs'],
                     max_new_tokens=256,
                 )[0],
                 skip_special_tokens=True,
@@ -63,8 +85,13 @@ def llavanext_vl_evaluate(model, processor, dataloader):
             },
         )
 
+        if i % 1000 == 0:
+            dump_results(results, output)
+
         print(sample['question'])
         print(sample['answer'])
         print(prediction)
+
+    dump_results(results, output)
 
     return results

@@ -19,6 +19,7 @@ from mmmm.data.datamodule import _collate_fn
 from mmmm.data.dataset.misc import get_max_resize, intensity_norm
 from mmmm.data.defs import ConvTurn
 from mmmm.data.utils import prepare_vlm_inputs
+from scripts.evaluate.utils import dump_results
 
 
 base_pool_size_z = 2
@@ -86,47 +87,48 @@ def image_transform(image_path: PathLike):
     return image, patch_size, pool_size, num_vision_tokens
 
 
-def mmmm_collate_fn(batch: list[dict]):
-    assert len(batch) == 1
+class MMMMTransform(mt.RandomizableTransform):
+    def __init__(self, tokenizer):
+        self.tokenizer = tokenizer
+        self.precision = HalfPrecision('bf16-true')
 
-    image, patch_size, pool_size, num_vision_tokens = image_transform(batch[0]['image'])
-    
-    return {
-        'image': image,
-        'question': batch[0]['question'],
-        'answer': batch[0]['answer'],
-        'patch_size': patch_size,
-        'pool_size': pool_size,
-        'num_vision_tokens': num_vision_tokens,
-    }
+    def __call__(self, data: dict):
+        image, patch_size, pool_size, num_vision_tokens = image_transform(data['image'])
+        vlm_inputs, _ = prepare_vlm_inputs(
+            [ConvTurn(data['question'], '')],
+            self.tokenizer,
+            num_vision_tokens,
+            inference=True,
+            grounding=False,
+        )
+        input_len = len(vlm_inputs['input_ids'])
+        batch = _collate_fn([
+            {
+                'image': image,
+                'patch_size': patch_size,
+                'pool_size': pool_size,
+                'vlm_inputs': vlm_inputs,
+            },
+        ])
+        batch = self.precision.convert_input(batch)
+
+        return {
+            'batch': batch,
+            'input_len': input_len,
+            'question': data['question'],
+            'answer': data['answer'],
+        }
 
 
-def mmmm_vl_evaluate(model, tokenizer, dataloader):
-    precision = HalfPrecision('bf16-true')
+def mmmm_vl_evaluate(model, tokenizer, dataloader, output):
     gen_config = GenerationConfig(max_new_tokens=512, do_sample=False)
 
     results = []
 
-    for sample in tqdm(dataloader):
+    for i, sample in enumerate(tqdm(dataloader)):
         with torch.inference_mode():
-            vlm_inputs, _ = prepare_vlm_inputs(
-                [ConvTurn(sample['question'], '')],
-                tokenizer,
-                sample['num_vision_tokens'],
-                inference=True,
-                grounding=False,
-            )
-            input_len = len(vlm_inputs['input_ids'])
-            batch = _collate_fn([
-                {
-                    'image': sample['image'],
-                    'patch_size': sample['patch_size'],
-                    'pool_size': sample['pool_size'],
-                    'vlm_inputs': vlm_inputs,
-                },
-            ])
-            batch = precision.convert_input(batch)
-            batch = move_data_to_device(batch, 'cuda')
+            
+            batch = move_data_to_device(sample['batch'], 'cuda')
             outputs = model.generate(
                 generation_config=gen_config,
                 return_dict_in_generate=True,
@@ -137,7 +139,7 @@ def mmmm_vl_evaluate(model, tokenizer, dataloader):
                 pool_size=batch['pool_size'],
             )
             token_ids = outputs.sequences[0].tolist()
-            token_ids = token_ids[input_len:]
+            token_ids = token_ids[sample['input_len']:]
             if token_ids[-1] == tokenizer.eos_token_id:
                 token_ids = token_ids[:-1]
             prediction = tokenizer.decode(token_ids, clean_up_tokenization_spaces=False)
@@ -150,8 +152,13 @@ def mmmm_vl_evaluate(model, tokenizer, dataloader):
             },
         )
 
+        if i % 1000 == 0:
+            dump_results(results, output)
+
         print(sample['question'])
         print(sample['answer'])
         print(prediction)
+
+    dump_results(results, output)
 
     return results

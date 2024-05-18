@@ -1,9 +1,11 @@
+from monai import transforms as mt
 import torch
 import torchvision.transforms as transforms
 from PIL import Image
 from tqdm import tqdm
 
 from luolib.utils import load_pt_zst
+from scripts.evaluate.utils import dump_results
 
 
 def setup_instructblip(checkpoint: str, tokenizer: str):
@@ -22,32 +24,40 @@ def setup_instructblip(checkpoint: str, tokenizer: str):
     return model, processor
 
 
-def instructblip_collate_fn(batch: list[dict]):
-    assert len(batch) == 1
+class InstructBlipTransform(mt.RandomizableTransform):
+    def __init__(self, processor):
+        self.processor = processor
 
-    if batch[0]['image'].endswith('.pt.zst'):
-        transform = transforms.ToPILImage()
-        image = load_pt_zst(batch[0]['image'])
-        image = transform(image.squeeze(1))
-    else:
-        image = Image.open(batch[0]['image']).convert('RGB')
-    return {
-        'image': image,
-        'question': batch[0]['question'],
-        'answer': batch[0]['answer'],
-    }
+    def __call__(self, data: dict):
+        if data['image'].endswith('.pt.zst'):
+            transform = transforms.ToPILImage()
+            image = load_pt_zst(data['image'])
+            image = transform(image.squeeze(1))
+        else:
+            image = Image.open(data['image']).convert('RGB')
 
+        inputs = self.processor(
+            images=image,
+            text='Question: ' + data['question'] + 'Answer: ',
+            return_tensors='pt',
+        )
 
-def instructblip_vl_evaluate(model, processor, dataloader):
+        return {
+            'inputs': inputs,
+            'question': data['question'],
+            'answer': data['answer'],
+        }
+
+        
+
+def instructblip_vl_evaluate(model, processor, dataloader, output):
     results = []
 
-    for sample in tqdm(dataloader):
-        inputs = processor(images=sample['image'], text=sample['question'], return_tensors='pt').to('cuda')
-
+    for i, sample in enumerate(tqdm(dataloader)):
         with torch.inference_mode():
             prediction = processor.decode(
                 model.generate(
-                    **inputs,
+                    **sample['inputs'],
                     max_new_tokens=256,
                 )[0],
                 skip_special_tokens=True,
@@ -61,8 +71,13 @@ def instructblip_vl_evaluate(model, processor, dataloader):
             },
         )
 
+        if i % 1000 == 0:
+            dump_results(results, output)
+
         print(sample['question'])
         print(sample['answer'])
         print(prediction)
+
+    dump_results(results, output)
 
     return results

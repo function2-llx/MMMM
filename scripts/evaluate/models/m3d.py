@@ -1,4 +1,5 @@
 from einops import repeat, reduce
+from monai import transforms as mt
 from PIL import Image
 import torch
 from tqdm import tqdm
@@ -6,6 +7,7 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 import torchvision.transforms as transforms
 
 from luolib.utils.zstd import load_pt_zst
+from scripts.evaluate.utils import dump_results
 
 
 def setup_m3d(checkpoint: str, tokenizer: str):
@@ -26,46 +28,53 @@ def setup_m3d(checkpoint: str, tokenizer: str):
     return model, tokenizer
 
 
-def m3d_collate_fn(batch: list[dict]):
-    assert len(batch) == 1
+class M3DTransform(mt.RandomizableTransform):
+    def __init__(self, tokenizer):
+        self.tokenizer = tokenizer
 
-    if batch[0]['image'].endswith('.pt'):
-        image = torch.load(batch[0]['image']).float()
-        image = (image - image.min()) / (image.max() - image.min())
-    elif batch[0]['image'].endswith('.pt.zst'):
-        image = load_pt_zst(batch[0]['image']).float()
-        image = (image - image.min()) / (image.max() - image.min())
-    else:
-        transform = transforms.ToTensor()
-        image = Image.open(batch[0]['image']).convert('RGB')
-        image = transform(image)
-        image = repeat(image, 'c h w -> c 1 h w')
+    def __call__(self, data: dict):
+        if data['image'].endswith('.pt'):
+            image = torch.load(data['image']).float()
+            image = (image - image.min()) / (image.max() - image.min())
+        elif data['image'].endswith('.pt.zst'):
+            image = load_pt_zst(data['image']).float()
+            image = (image - image.min()) / (image.max() - image.min())
+        else:
+            transform = transforms.ToTensor()
+            image = Image.open(data['image']).convert('RGB')
+            image = transform(image)
+            image = repeat(image, 'c h w -> c 1 h w')
 
-    image = reduce(image, 'c d h w -> d h w', 'mean')
-    image = repeat(image, 'd h w -> 1 1 d h w')
+        image = reduce(image, 'c d h w -> d h w', 'mean')
+        image = repeat(image, 'd h w -> 1 1 d h w')
 
-    image = torch.nn.functional.interpolate(image, size=(32, 256, 256))
+        image = torch.nn.functional.interpolate(image, size=(32, 256, 256))
 
-    return {
-        'image': image,
-        'question': batch[0]['question'],
-        'answer': batch[0]['answer'],
-    }
+        language = self.tokenizer(
+            '<im_patch>' * 256 + ' ' + data['question'],
+            return_tensors='pt',
+        )['input_ids']
+
+        return {
+            'vision': image,
+            'language': language,
+            'question': data['question'],
+            'answer': data['answer'],
+        }
 
 
-def m3d_vl_evaluate(model, tokenizer, dataloader):
+def m3d_vl_evaluate(model, tokenizer, dataloader, output):
     results = []
 
-    for sample in tqdm(dataloader):
-        language = tokenizer(
-            '<im_patch>' * 256 + ' ' + sample['question'],
-            return_tensors='pt',
-        )['input_ids'].to('cuda')
-        vision = sample['image'].to(device='cuda', dtype=torch.bfloat16)
+    for i, sample in enumerate(tqdm(dataloader)):
         
         with torch.inference_mode():
             prediction = tokenizer.decode(
-                model.generate(vision, language, max_new_tokens=256)[0],
+                model.generate(
+                    sample['vision'].to(device='cuda', dtype=torch.bfloat16),
+                    sample['language'].to('cuda'),
+                    max_new_tokens=256
+                )[0],
                 skip_special_tokens=True,
             ).strip()
 
@@ -77,8 +86,13 @@ def m3d_vl_evaluate(model, tokenizer, dataloader):
             },
         )
 
+        if i % 1000 == 0:
+            dump_results(results, output)
+
         print(sample['question'])
         print(sample['answer'])
         print(prediction)
+
+    dump_results(results, output)
 
     return results

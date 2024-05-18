@@ -4,6 +4,7 @@ import sys
 from typing import OrderedDict
 import evaluate
 import json
+from monai.transforms import apply_transform
 import numpy as np
 import pandas as pd
 import pickle as pkl
@@ -35,16 +36,17 @@ def setup_seed(seed):
 
 
 def dump_results(
-    results: list[dict], output_dir, task: str, dataset: str, model: str, setting: str
+    results: list[dict], output: Path
 ):
     results = pd.DataFrame(results)
-    results.to_csv(output_dir / f'{task}_{dataset}_{model}_{setting}.csv', index=False)
+    results.to_csv(output, index=False)
 
 
 class VQATestDataset(Dataset):
-    def __init__(self, dataset: str):
+    def __init__(self, dataset: str, transform):
         super().__init__()
         self.name = dataset
+        self.transform = transform
         with open(PROCESSED_VL_DATA_ROOT / dataset / 'test.json') as f:
             self.dataset = [
                 {'image': image, **vqa}
@@ -54,16 +56,17 @@ class VQATestDataset(Dataset):
             ]
 
     def __getitem__(self, index: int):
-        return self.dataset[index]
+        return apply_transform(self.transform, self.dataset[index])
 
     def __len__(self):
         return len(self.dataset)
 
 
 class ReportTestDataset(Dataset):
-    def __init__(self, dataset: str):
+    def __init__(self, dataset: str, transform):
         super().__init__()
         self.name = dataset
+        self.transform = transform
         with open(PROCESSED_VL_DATA_ROOT / dataset / 'test.json') as f:
             self.dataset = [
                 {
@@ -84,11 +87,14 @@ class ReportTestDataset(Dataset):
             ]
 
     def __getitem__(self, index: int):
-        return self.dataset[index]
+        return apply_transform(self.transform, self.dataset[index])
 
     def __len__(self):
         return len(self.dataset)
 
+
+def collate_fn(batch: list[dict]):
+    return batch[0]
 
 class GenericMetrics:
     def __init__(self):

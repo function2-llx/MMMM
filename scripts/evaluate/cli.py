@@ -5,26 +5,22 @@ from pathlib import Path
 from torch.utils.data import DataLoader
 
 from models.mmmm import (
-    mmmm_collate_fn,
+    MMMMTransform,
     setup_mmmm,
     mmmm_vl_evaluate,
 )
-from models.cogvlm import cogvlm_collate_fn, setup_cogvlm, cogvlm_vl_evaluate
+from models.cogvlm import CogVLMTransform, setup_cogvlm, cogvlm_vl_evaluate
 from models.instructblip import (
-    instructblip_collate_fn,
+    InstructBlipTransform,
     setup_instructblip,
     instructblip_vl_evaluate,
 )
-from models.llavamed import llavamed_collate_fn, setup_llavamed, llavamed_vl_evaluate
-from models.llavanext import llavanext_collate_fn, setup_llavanext, llavanext_vl_evaluate
-from models.m3d import m3d_collate_fn, setup_m3d, m3d_vl_evaluate
-from models.medflamingo import (
-    medflamingo_collate_fn,
-    setup_medflamingo,
-    medflamingo_vl_evaluate,
-)
-from models.radfm import radfm_collate_fn, setup_radfm, radfm_vl_evaluate
+from models.llavamed import LlavaMedTransform, setup_llavamed, llavamed_vl_evaluate
+from models.llavanext import LlavaNextTransform, setup_llavanext, llavanext_vl_evaluate
+from models.m3d import M3DTransform, setup_m3d, m3d_vl_evaluate
+from models.radfm import RadFMTransform, setup_radfm, radfm_vl_evaluate
 from utils import (
+    collate_fn,
     dump_results,
     setup_seed,
     VQATestDataset,
@@ -58,63 +54,55 @@ class Evaluator:
         checkpoint: str,
         tokenizer: Optional[str] = None,
     ):
-        if self.task == 'vqa':
-            dataset = VQATestDataset(self.dataset)
-        elif self.task == 'report':
-            dataset = ReportTestDataset(self.dataset)
 
         if self.model == 'mmmm':
-            setup_fn = setup_mmmm
-            collate_fn = mmmm_collate_fn
+            packed = setup_mmmm(checkpoint, tokenizer)
+            transform = MMMMTransform(packed[1])
             evaluate_fn = mmmm_vl_evaluate
-        elif self.model == 'radfm':
-            setup_fn = setup_radfm
-            collate_fn = radfm_collate_fn
+        if self.model == 'radfm':
+            packed = setup_radfm(checkpoint, tokenizer)
+            transform = RadFMTransform(packed[1])
             evaluate_fn = radfm_vl_evaluate
-        elif self.model == 'medflamingo':
-            setup_fn = setup_medflamingo
-            collate_fn = partial(medflamingo_collate_fn, self.task)
-            evaluate_fn = medflamingo_vl_evaluate
         elif self.model == 'm3d':
-            setup_fn = setup_m3d
-            collate_fn = m3d_collate_fn
+            packed = setup_m3d(checkpoint, tokenizer)
+            transform = M3DTransform(packed[1])
             evaluate_fn = m3d_vl_evaluate
         elif self.model == 'llavamed':
-            setup_fn = setup_llavamed
-            collate_fn = llavamed_collate_fn
+            packed = setup_llavamed(checkpoint, tokenizer)
+            transform = LlavaMedTransform(packed[0].config, *packed[1:])
             evaluate_fn = llavamed_vl_evaluate
         elif self.model == 'cogvlm':
-            setup_fn = setup_cogvlm
-            collate_fn = cogvlm_collate_fn
+            packed = setup_cogvlm(checkpoint, tokenizer)
+            transform = CogVLMTransform(
+                packed[0].build_conversation_input_ids, packed[1]
+            )
             evaluate_fn = cogvlm_vl_evaluate
         elif self.model == 'llavanext':
-            setup_fn = setup_llavanext
-            collate_fn = llavanext_collate_fn
+            packed = setup_llavanext(checkpoint, tokenizer)
+            transform = LlavaNextTransform(packed[1])
             evaluate_fn = llavanext_vl_evaluate
         elif self.model == 'instructblip':
-            setup_fn = setup_instructblip
-            collate_fn = instructblip_collate_fn
+            packed = setup_instructblip(checkpoint, tokenizer)
+            transform = InstructBlipTransform(packed[1])
             evaluate_fn = instructblip_vl_evaluate
 
-        packed = setup_fn(checkpoint, tokenizer)
+        if self.task == 'vqa':
+            dataset = VQATestDataset(self.dataset, transform)
+        elif self.task == 'report':
+            dataset = ReportTestDataset(self.dataset, transform)
 
         dataloader = DataLoader(
             dataset,
             batch_size=1,
-            num_workers=8,
-            pin_memory=True,
             collate_fn=collate_fn,
+            num_workers=16,
+            pin_memory=True,
         )
 
-        results = evaluate_fn(*packed, dataloader)
-
-        dump_results(
-            results,
-            self.output_dir,
-            self.task,
-            self.dataset,
-            self.model,
-            self.setting,
+        results = evaluate_fn(
+            *packed,
+            dataloader,
+            f'{self.output_dir}/{self.task}_{self.dataset}_{self.model}_{self.setting}.csv'
         )
 
     def evaluate(self, metrics: str):

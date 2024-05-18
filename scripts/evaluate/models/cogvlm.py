@@ -1,10 +1,12 @@
 import torch
+from monai import transforms as mt
 from PIL import Image
 import torchvision.transforms as transforms
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, LlamaTokenizer
 
 from luolib.utils.zstd import load_pt_zst
+from scripts.evaluate.utils import dump_results
 
 
 def setup_cogvlm(checkpoint: str, tokenizer: str):
@@ -22,34 +24,37 @@ def setup_cogvlm(checkpoint: str, tokenizer: str):
     return model, tokenizer
 
 
-def cogvlm_collate_fn(build_conversation_input_ids, tokenizer, batch: list[dict]):
-    assert len(batch) == 1
+class CogVLMTransform(mt.RandomizableTransform):
+    def __init__(self, build_conversation_input_ids, tokenizer):
+        self.build_conversation_input_ids = build_conversation_input_ids
+        self.tokenizer = tokenizer
 
-    if batch[0]['image'].endswith('.pt.zst'):
-        transform = transforms.ToPILImage()
-        image = load_pt_zst(batch[0]['image'])
-        image = transform(image.squeeze(1))
-    else:
-        image = Image.open(batch[0]['image']).convert('RGB')
+    def __call__(self, data: dict):
+        if data['image'].endswith('.pt.zst'):
+            transform = transforms.ToPILImage()
+            image = load_pt_zst(data['image'])
+            image = transform(image.squeeze(1))
+        else:
+            image = Image.open(data['image']).convert('RGB')
 
-    inputs = build_conversation_input_ids(
-        tokenizer, query=batch[0]['question'], images=[image]
-    )
-    
-    return {
-        'image': image,
-        'question': batch[0]['question'],
-        'answer': batch[0]['answer'],
-        'input_ids': inputs['input_ids'],
-        'token_type_ids': inputs['token_type_ids'],
-        'images': inputs['images'],
-    }
+        inputs = self.build_conversation_input_ids(
+            self.tokenizer, query=data['question'], images=[image]
+        )
+
+        return {
+            'image': image,
+            'question': data['question'],
+            'answer': data['answer'],
+            'input_ids': inputs['input_ids'],
+            'token_type_ids': inputs['token_type_ids'],
+            'images': inputs['images'],
+        }
 
 
-def cogvlm_vl_evaluate(model, tokenizer, dataloader):
+def cogvlm_vl_evaluate(model, tokenizer, dataloader, output):
     results = []
 
-    for sample in tqdm(dataloader):
+    for i, sample in enumerate(tqdm(dataloader)):
         with torch.inference_mode():
             prediction = (
                 tokenizer.decode(
@@ -74,8 +79,13 @@ def cogvlm_vl_evaluate(model, tokenizer, dataloader):
             },
         )
 
+        if i % 1000 == 0:
+            dump_results(results, output)
+
         print(sample['question'])
         print(sample['answer'])
         print(prediction)
+
+    dump_results(results, output)
 
     return results
