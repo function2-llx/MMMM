@@ -63,10 +63,10 @@ class LlavaNextTransform(mt.RandomizableTransform):
         }
 
 
-def llavanext_vl_evaluate(model, processor, dataloader, output):
+def llavanext_vl_evaluate(model, processor, dataloader, start, end, output):
     results = []
 
-    for i, sample in enumerate(tqdm(dataloader)):
+    for i, sample in enumerate(tqdm(dataloader[start:end])):
         
         with torch.inference_mode():
             prediction = processor.decode(
@@ -87,6 +87,7 @@ def llavanext_vl_evaluate(model, processor, dataloader, output):
 
         if i % 1000 == 0:
             dump_results(results, output)
+            results = []
 
         print(sample['question'])
         print(sample['answer'])

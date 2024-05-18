@@ -60,7 +60,7 @@ class RadFMTransform(mt.RandomizableTransform):
         if len(image.shape) == 3:
             image = torch.nn.functional.interpolate(
                 repeat(image, 'c h w -> 1 c h w 1'), size=(512, 512, target_d)
-            )
+            ).unsqueeze(0)
         else:
             if image.shape[0] == 1:
                 image = torch.nn.functional.interpolate(
@@ -85,11 +85,10 @@ class RadFMTransform(mt.RandomizableTransform):
         }
 
 
-def radfm_vl_evaluate(model, tokenizer, dataloader, output):
+def radfm_vl_evaluate(model, tokenizer, dataloader, start, end, output):
     results = []
 
-    for i, sample in tqdm(enumerate(dataloader), total=len(dataloader)):
-
+    for i, sample in enumerate(tqdm(dataloader[start:end])):
         with torch.inference_mode():
             prediction = tokenizer.decode(
                 model.generate(sample['language'].to('cuda'), sample['vision'].to('cuda'))[0], skip_special_tokens=True
@@ -105,6 +104,7 @@ def radfm_vl_evaluate(model, tokenizer, dataloader, output):
 
         if i % 1000 == 0:
             dump_results(results, output)
+            results = []
 
         print(sample['question'])
         print(sample['answer'])

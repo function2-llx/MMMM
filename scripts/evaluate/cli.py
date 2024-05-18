@@ -21,7 +21,6 @@ from models.m3d import M3DTransform, setup_m3d, m3d_vl_evaluate
 from models.radfm import RadFMTransform, setup_radfm, radfm_vl_evaluate
 from utils import (
     collate_fn,
-    dump_results,
     setup_seed,
     VQATestDataset,
     ReportTestDataset,
@@ -53,6 +52,8 @@ class Evaluator:
         self,
         checkpoint: str,
         tokenizer: Optional[str] = None,
+        start: Optional[int] = None,
+        end: Optional[int] = None,
     ):
 
         if self.model == 'mmmm':
@@ -83,7 +84,7 @@ class Evaluator:
             evaluate_fn = llavanext_vl_evaluate
         elif self.model == 'instructblip':
             packed = setup_instructblip(checkpoint, tokenizer)
-            transform = InstructBlipTransform(packed[1])
+            transform = InstructBlipTransform(packed[1], self.setting)
             evaluate_fn = instructblip_vl_evaluate
 
         if self.task == 'vqa':
@@ -102,6 +103,8 @@ class Evaluator:
         results = evaluate_fn(
             *packed,
             dataloader,
+            start,
+            end,
             f'{self.output_dir}/{self.task}_{self.dataset}_{self.model}_{self.setting}.csv'
         )
 

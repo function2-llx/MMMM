@@ -63,10 +63,10 @@ class M3DTransform(mt.RandomizableTransform):
         }
 
 
-def m3d_vl_evaluate(model, tokenizer, dataloader, output):
+def m3d_vl_evaluate(model, tokenizer, dataloader, start, end, output):
     results = []
 
-    for i, sample in enumerate(tqdm(dataloader)):
+    for i, sample in enumerate(tqdm(dataloader[start:end])):
         
         with torch.inference_mode():
             prediction = tokenizer.decode(
@@ -88,6 +88,7 @@ def m3d_vl_evaluate(model, tokenizer, dataloader, output):
 
         if i % 1000 == 0:
             dump_results(results, output)
+            results = []
 
         print(sample['question'])
         print(sample['answer'])

@@ -39,7 +39,12 @@ def dump_results(
     results: list[dict], output: Path
 ):
     results = pd.DataFrame(results)
-    results.to_csv(output, index=False)
+    if os.path.exists(output):
+        df = pd.read_csv(output)
+        df = df.append(results, ignore_index=True)
+        df.to_csv(output, index=False)
+    else:
+        results.to_csv(output, index=False)
 
 
 class VQATestDataset(Dataset):
@@ -109,7 +114,7 @@ class GenericMetrics:
         reference = reference.lower()
 
         return {
-            'bleu': (
+            'bleu1': (
                 self.bleu.compute(
                     predictions=[prediction],
                     references=[[reference]],
@@ -118,9 +123,30 @@ class GenericMetrics:
                 if prediction.strip()
                 else 0.0
             ),
-            'rouge': self.rouge.compute(
+            'bleu2': (
+                self.bleu.compute(
+                    predictions=[prediction],
+                    references=[[reference]],
+                    max_order=2,
+                )['bleu']
+                if prediction.strip()
+                else 0.0
+            ),
+            'bleu4': (
+                self.bleu.compute(
+                    predictions=[prediction],
+                    references=[[reference]],
+                    max_order=4,
+                )['bleu']
+                if prediction.strip()
+                else 0.0
+            ),
+            'rouge1': self.rouge.compute(
                 predictions=[prediction], references=[reference]
             )['rouge1'],
+            'rougeL': self.rouge.compute(
+                predictions=[prediction], references=[reference]
+            )['rougeL'],
             'meteor': self.meteor.compute(
                 predictions=[prediction], references=[reference]
             )['meteor'],
@@ -143,8 +169,11 @@ class GenericMetrics:
             summary = {}
 
         results = {
-            'bleu': [],
-            'rouge': [],
+            'bleu1': [],
+            'bleu2': [],
+            'bleu4': [],
+            'rouge1': [],
+            'rougeL': [],
             'meteor': [],
             'bertscore': [],
             'exact_match': [],
@@ -295,10 +324,6 @@ class CXRMetrics:
         self.setup_radcliq()
 
     def compute_chexbert(self, prediction: str, reference: str):
-        sys.path.append('third-party/CXR-Report-Metric/CXRMetric/')
-        sys.path.append('third-party/CXR-Report-Metric/CXRMetric/CheXbert/src')
-        from CheXbert.src.utils import generate_attention_masks
-
         with torch.inference_mode():
             prediction = self.chexbert_tokenizer.tokenize(prediction)
             if prediction:

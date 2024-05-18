@@ -25,8 +25,9 @@ def setup_instructblip(checkpoint: str, tokenizer: str):
 
 
 class InstructBlipTransform(mt.RandomizableTransform):
-    def __init__(self, processor):
+    def __init__(self, processor, setting):
         self.processor = processor
+        self.setting = setting
 
     def __call__(self, data: dict):
         if data['image'].endswith('.pt.zst'):
@@ -38,7 +39,7 @@ class InstructBlipTransform(mt.RandomizableTransform):
 
         inputs = self.processor(
             images=image,
-            text='Question: ' + data['question'] + 'Answer: ',
+            text='Question: ' + data['question'] + ' Answer: ' if self.setting == 'finetuned' else data['question'],
             return_tensors='pt',
         )
 
@@ -50,15 +51,16 @@ class InstructBlipTransform(mt.RandomizableTransform):
 
         
 
-def instructblip_vl_evaluate(model, processor, dataloader, output):
+def instructblip_vl_evaluate(model, processor, dataloader, start, end, output):
     results = []
 
-    for i, sample in enumerate(tqdm(dataloader)):
+    for i, sample in enumerate(tqdm(dataloader[start:end])):
         with torch.inference_mode():
             prediction = processor.decode(
                 model.generate(
                     **sample['inputs'].to('cuda'),
                     max_new_tokens=256,
+                    do_sample=False,
                 )[0],
                 skip_special_tokens=True,
             )
@@ -73,6 +75,7 @@ def instructblip_vl_evaluate(model, processor, dataloader, output):
 
         if i % 1000 == 0:
             dump_results(results, output)
+            results = []
 
         print(sample['question'])
         print(sample['answer'])
