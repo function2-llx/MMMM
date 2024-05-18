@@ -476,10 +476,3 @@ class CXRMetrics:
         df.to_csv(str(run) + '.csv', index=False)
         with open(str(run) + '.json', 'w') as f:
             json.dump(summary, f, indent=4)
-
-if __name__ == '__main__':
-    metrics = LlamaMetrics()
-    metrics.process(Path('results/vqa_Slake_mmmm_vg+vlm2'))
-    metrics.process(Path('results/vqa_Radiopaedia_m3d_zeroshot'))
-    metrics.process(Path('results/vqa_VQA-RAD_instructblip_zeroshot'))
-    metrics.process(Path('results/vqa_VQA-RAD_instructblip_finetuned'))
