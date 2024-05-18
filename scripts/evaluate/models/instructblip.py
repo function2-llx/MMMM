@@ -57,7 +57,7 @@ def instructblip_vl_evaluate(model, processor, dataloader, output):
         with torch.inference_mode():
             prediction = processor.decode(
                 model.generate(
-                    **sample['inputs'],
+                    **sample['inputs'].to('cuda'),
                     max_new_tokens=256,
                 )[0],
                 skip_special_tokens=True,
