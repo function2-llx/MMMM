@@ -103,7 +103,7 @@ init_args:
       max_tokens_z: 4
       scale_xy: [0.9, 3]
       scale_xy_p: 0.9
-      num_pos: 18
-      num_neg: 6
+      num_pos: 12
+      num_neg: 4
   dataloader:
     train_batch_size: 8
