@@ -1,0 +1,12 @@
+model:
+  class_path: _vqa.instructblip.FinetuneInstructBlip
+data:
+  class_path: _vqa.instructblip.IBLIPVQADataModule
+  init_args:
+    resize: [224, 224]
+logger:
+  class_path: lightning.pytorch.loggers.WandbLogger
+  init_args:
+    name: instructblip-13b
+    save_dir: output/finetune/Slake
+    project: MMMM-FT
