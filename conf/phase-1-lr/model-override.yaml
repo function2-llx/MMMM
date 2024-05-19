@@ -1,0 +1,6 @@
+model:
+  init_args:
+    vision_override:
+      pos_embed_shape: [8, 32, 32]
+    sam:
+      pos_embed_shape: [8, 32, 32]
