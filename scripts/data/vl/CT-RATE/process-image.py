@@ -29,10 +29,11 @@ class CT_RATEDataPoint(DataPoint):
 
 class Processor(DefaultImageLoaderMixin, _ProcessorBase):
     def get_data_points(self):
-        data: list[CT_RATEVLDataPoint] = orjson.loads((PROCESSED_VL_DATA_ROOT / 'CT-RATE/train-raw.json').read_bytes())
         ret = []
-        for study in data:
-            ret.append(CT_RATEDataPoint(key=study['key'], study=study, images={}))
+        for split in ['train', 'validate']:
+            data: list[CT_RATEVLDataPoint] = orjson.loads((PROCESSED_VL_DATA_ROOT / f'CT-RATE/{split}-raw.json').read_bytes())
+            for study in data:
+                ret.append(CT_RATEDataPoint(key=study['key'], study=study, images={}))
         return ret, None
 
     @property

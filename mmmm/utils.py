@@ -72,3 +72,6 @@ class ParameterWrapper(nn.Module):
                 name = apply_prefix(prefix, name)
                 if (weight := state_dict.pop(name, None)) is not None:
                     state_dict[f'{name}.weight'] = weight
+
+    def extra_repr(self) -> str:
+        return f'shape={self.weight.shape}'

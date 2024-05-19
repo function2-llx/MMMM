@@ -128,6 +128,7 @@ class VLTransConf:
     ad_ratio: float = 0.3
     modality_prob: float = 0.2
     plane_prob: float = 0.2
+    impression_prob: float = 0.8
 
 class VLDataPoint(TypedDict):
     image: list[str]
@@ -241,7 +242,7 @@ class VLTransform(mt.RandomizableTransform):
                 )
                 conversation.extend(ad_conv)
             else:
-                if impression := data.get('impression'):
+                if impression := data.get('impression') and toss(self.R, trans_conf.impression_prob):
                     conversation.append(
                         ConvTurn(
                             self.R.choice(REPORT_PROMPTS).format(referring),
