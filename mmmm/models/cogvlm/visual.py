@@ -35,7 +35,7 @@ class PatchEmbedding(nn.Module):
         self.position_embedding = ParameterWrapper(NoWeightDecayParameter(torch.zeros(1, config.hidden_size, *config.pos_embed_shape)))
 
     def _load_from_state_dict(self, state_dict: dict[str, torch.Tensor], prefix: str, *args, **kwargs):
-        if (pos_embed := state_dict.get(f'{prefix}position_embedding.weight')) is not None:
+        if (pos_embed := state_dict.get(f'{prefix}position_embedding.weight')) is not None and pos_embed.ndim == 2:
             cls_pos_embed, pos_embed = pos_embed[0:1], pos_embed[1:]
             h, w = self.pt_pos_embed_shape
             pos_embed = spadop.resample(
@@ -45,6 +45,14 @@ class PatchEmbedding(nn.Module):
             pos_embed = einops.repeat(pos_embed, '1 c h w -> 1 c d h w', d=self.pos_embed_shape[0])
             state_dict[f'{prefix}cls_pos_embed'] = cls_pos_embed
             state_dict[f'{prefix}position_embedding'] = pos_embed
+        elif (
+            (pos_embed := state_dict.get(f'{prefix}position_embedding.modules_to_save.default.weight')) is not None and
+            pos_embed.shape[2:] != (_shape := self.position_embedding.weight.shape[2:])
+        ):
+            # TODO: refactor here
+            pos_embed = spadop.resample(pos_embed, _shape)
+            state_dict[f'{prefix}position_embedding.modules_to_save.default.weight'] = pos_embed
+
         ParameterWrapper.wrap(self, state_dict, prefix)
         return super()._load_from_state_dict(state_dict, prefix, *args, **kwargs)
 

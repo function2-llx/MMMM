@@ -105,6 +105,14 @@ class PatchEmbeddingBlock(nn.Module):
                 self.position_embeddings.weight.shape[2:],
             )
             state_dict[f'{prefix}position_embeddings'] = pos_embed
+        elif (
+            (pos_embed := state_dict.get(f'{prefix}position_embedding.modules_to_save.default.weight')) is not None and
+            pos_embed.shape[2:] != (_shape := self.position_embedding.weight.shape[2:])
+        ):
+            # TODO: refactor here
+            pos_embed = spadop.resample(pos_embed, _shape)
+            state_dict[f'{prefix}position_embedding.modules_to_save.default.weight'] = pos_embed
+
         ParameterWrapper.wrap(self, state_dict, prefix)
         return super()._load_from_state_dict(state_dict, prefix, *args, **kwargs)
 
