@@ -251,22 +251,24 @@ class LlamaMetrics:
         response_texts = []
         scores = []
         for i, response in tqdm(enumerate(responses)):
-            if pd.isna(df['prediction'].iloc[i]) or not str(df['prediction'].iloc[i]).strip():
-                response_texts.append('skipped')
-                scores.append(0.0)
-            else:
-                while True:
-                    try:
-                        score = float(response.outputs[0].text.split('Rating: ')[1].strip().strip('.'))
+            retry = 0
+            while True:
+                try:
+                    score = float(response.outputs[0].text.split('Rating: ')[1].strip().strip('.'))
+                    response_texts.append(response.outputs[0].text)
+                    scores.append(score)
+                    break
+                except:   
+                    retry += 1
+                    if retry > 3:
                         response_texts.append(response.outputs[0].text)
-                        scores.append(score)
+                        scores.append(0.0)
                         break
-                    except:
-                        print(response.outputs[0].text)
-                        response = self.llama.generate(
-                            prompts=[conversations[i]],
-                            sampling_params=sampling_params,
-                        )[0]
+                    print(response.outputs[0].text)
+                    response = self.llama.generate(
+                        prompts=[conversations[i]],
+                        sampling_params=sampling_params,
+                    )[0]
 
         df['llama_responses'] = response_texts
         df['llama'] = scores
