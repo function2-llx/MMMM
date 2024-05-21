@@ -50,7 +50,7 @@ class Evaluator:
 
     def predict(
         self,
-        checkpoint: str,
+        checkpoint: Optional[str] = None,
         tokenizer: Optional[str] = None,
         start: Optional[int] = None,
         end: Optional[int] = None,

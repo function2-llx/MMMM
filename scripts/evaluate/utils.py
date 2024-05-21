@@ -69,7 +69,7 @@ class ReportTestDataset(Dataset):
         super().__init__()
         self.name = dataset
         self.transform = transform
-        with open(PROCESSED_VL_DATA_ROOT / dataset / 'test.json') as f:
+        with open(PROCESSED_VL_DATA_ROOT / dataset / 'validate.json') as f:
             self.dataset = [
                 {
                     'image': image,
