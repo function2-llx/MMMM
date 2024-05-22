@@ -702,7 +702,7 @@ def from_pretrained(conf_path: PathLike, adapter_dir: PathLike) -> tuple[MMMMFor
     model: MMMMForCausalLM = args.model
     lora_config.target_modules, lora_config.modules_to_save = get_lora_modules_default(model)
     peft_model = get_peft_model(model, lora_config)
-    peft_model.load_adapter(adapter_dir, 'default')
+    peft_model.load_adapter(str(adapter_dir), 'default')
     print(f'load adapter from {adapter_dir}')
     tokenizer: MMMMTokenizer = args.tokenizer
     return model, tokenizer
