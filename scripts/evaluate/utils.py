@@ -22,7 +22,9 @@ from constants import (
     LLAMA_SYSTEM_PROMPT,
     LLAMA_USER_PROMPT,
     CHEXBERT_PATH,
-    RADCLIQ_PATH,
+    NORMALIZER_PATH,
+    COMPOSITE_METRIC_V0_PATH,
+    COMPOSITE_METRIC_V1_PATH
 )
 
 
@@ -310,8 +312,14 @@ class CXRMetrics:
                     return CompositeMetric
                 return super().find_class(module, name)
 
-        with open(RADCLIQ_PATH, 'rb') as f:
-            self.radcliq = RadCliQUnpickler(f).load()
+        with open(NORMALIZER_PATH, 'rb') as f:
+            self.normalizer = pkl.load(f)
+
+        with open(COMPOSITE_METRIC_V0_PATH, 'rb') as f:
+            self.radcliq_v0 = RadCliQUnpickler(f).load()
+
+        with open(COMPOSITE_METRIC_V1_PATH, 'rb') as f:
+            self.radcliq_v1 = RadCliQUnpickler(f).load()
 
         self.bleu2 = evaluate.load('bleu')
 
@@ -466,11 +474,15 @@ class CXRMetrics:
         for key in results.keys():
             df[key] = results[key]
 
-        results['radcliq'] = self.radcliq.predict(
+        results['radcliq-v0'] = self.radcliq_v0.predict(
+            self.normalizer.transform(np.array(df[['radgraph', 'bertscore', 'chexbert', 'bleu2']]))
+        )
+
+        results['radcliq-v1'] = self.radcliq_v1.predict(
             np.array(df[['radgraph', 'bertscore', 'chexbert', 'bleu2']])
         )
-        df['radcliq'] = results['radcliq']
-        df = df.drop(columns=['bleu2'])
+        df['radcliq-v0'] = results['radcliq-v0']
+        df['radcliq-v1'] = results['radcliq-v1']
 
         for key in results.keys():
             summary[key] = sum(results[key]) / len(results[key])

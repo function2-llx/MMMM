@@ -9,7 +9,11 @@ from models.mmmm import (
     setup_mmmm,
     mmmm_vl_evaluate,
 )
-from models.cogvlm import CogVLMTransform, setup_cogvlm, cogvlm_vl_evaluate
+from models.cogvlm import (
+    CogVLMTransform,
+    setup_cogvlm,
+    cogvlm_vl_evaluate,
+)
 from models.instructblip import (
     InstructBlipTransform,
     setup_instructblip,
@@ -38,7 +42,7 @@ class Evaluator:
         dataset: str,
         setting: str,
         seed: int = 233,
-        output_dir: str = 'results/',
+        output_dir: str = '/data/MMMM/results/',
     ):
         self.model = model
         self.task = task
@@ -73,7 +77,7 @@ class Evaluator:
             transform = LlavaMedTransform(packed[0].config, *packed[1:])
             evaluate_fn = llavamed_vl_evaluate
         elif self.model == 'cogvlm':
-            packed = setup_cogvlm(checkpoint, tokenizer)
+            packed = setup_cogvlm(checkpoint, tokenizer, self.setting)
             transform = CogVLMTransform(
                 packed[0].build_conversation_input_ids, packed[1]
             )
@@ -100,7 +104,11 @@ class Evaluator:
             pin_memory=True,
         )
 
-        evaluate_fn(*packed, dataloader, f'{self.output_dir}/{self.task}_{self.dataset}_{self.model}_{self.setting}.csv')
+        evaluate_fn(
+            *packed,
+            dataloader,
+            f'{self.output_dir}/{self.task}_{self.dataset}_{self.model}_{self.setting}.csv',
+        )
 
     def evaluate(self, metrics: str):
         if metrics == 'generic':

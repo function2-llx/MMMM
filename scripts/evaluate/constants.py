@@ -1,6 +1,8 @@
 LLAMA3_PATH = '/data/llama3/Meta-Llama-3-70B-Instruct-hf'
 CHEXBERT_PATH = '/data/chexbert/chexbert.pth'
-RADCLIQ_PATH = 'third-party/CXR-Report-Metric/CXRMetric/radcliq-v1.pkl'
+NORMALIZER_PATH = 'third-party/CXR-Report-Metric/CXRMetric/normalizer.pkl'
+COMPOSITE_METRIC_V0_PATH = 'third-party/CXR-Report-Metric/CXRMetric/composite_metric_model.pkl'
+COMPOSITE_METRIC_V1_PATH = 'third-party/CXR-Report-Metric/CXRMetric/radcliq-v1.pkl'
 
 
 LLAMA_SYSTEM_PROMPT = '''
