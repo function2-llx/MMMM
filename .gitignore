@@ -168,3 +168,5 @@ cython_debug/
 pyrightconfig.json
 /debug_lib.py
 VinDr-CXR-plot
+
+results/

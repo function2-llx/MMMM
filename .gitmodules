@@ -1,3 +1,12 @@
 [submodule "third-party/LuoLib"]
 	path = third-party/LuoLib
 	url = https://github.com/function2-llx/LuoLib.git
+[submodule "third-party/RadFM"]
+	path = third-party/RadFM
+	url = git@github.com:chaoyi-wu/RadFM.git
+[submodule "third-party/LLaVA-Med"]
+	path = third-party/LLaVA-Med
+	url = git@github.com:microsoft/LLaVA-Med.git
+[submodule "third-party/CXR-Report-Metric"]
+	path = third-party/CXR-Report-Metric
+	url = git@github.com:rajpurkarlab/CXR-Report-Metric.git
