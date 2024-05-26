@@ -119,7 +119,7 @@ class Evaluator:
             metrics = CXRMetrics()
 
         metrics.process(
-            self.output_dir / f'{self.task}_{self.dataset}_{self.model}_{self.setting}'
+            self.task, self.output_dir / f'{self.task}_{self.dataset}_{self.model}_{self.setting}'
         )
 
 

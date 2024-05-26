@@ -20,7 +20,8 @@ from mmmm.data.defs import PROCESSED_VL_DATA_ROOT
 from constants import (
     LLAMA3_PATH,
     LLAMA_SYSTEM_PROMPT,
-    LLAMA_USER_PROMPT,
+    LLAMA_VQA_USER_PROMPT,
+    LLAMA_REPORT_USER_PROMPT,
     CHEXBERT_PATH,
     NORMALIZER_PATH,
     COMPOSITE_METRIC_V0_PATH,
@@ -203,7 +204,7 @@ class LlamaMetrics:
             model=LLAMA3_PATH, dtype='bfloat16', gpu_memory_utilization=0.9, tensor_parallel_size=2
         )
 
-    def process(self, run: Path):
+    def process(self, task: str, run: Path):
         from vllm import SamplingParams
 
         df = pd.read_csv(str(run) + '.csv')
@@ -220,8 +221,15 @@ class LlamaMetrics:
                     {'role': 'system', 'content': LLAMA_SYSTEM_PROMPT},
                     {
                         'role': 'user',
-                        'content': LLAMA_USER_PROMPT.format(
+                        'content': LLAMA_VQA_USER_PROMPT.format(
                             question=str(row['question']),
+                            answer=str(row['answer']),
+                            prediction=(
+                                str(row['prediction'])
+                                if pd.notna(row['prediction'])
+                                else ''
+                            ),
+                        ) if task == 'vqa' else LLAMA_REPORT_USER_PROMPT.format(
                             answer=str(row['answer']),
                             prediction=(
                                 str(row['prediction'])
