@@ -6,7 +6,7 @@ COMPOSITE_METRIC_V1_PATH = 'third-party/CXR-Report-Metric/CXRMetric/radcliq-v1.p
 
 
 LLAMA_SYSTEM_PROMPT = '''
-You are an AI assistant specialized in medical topics. 
+You are an AI assistant with expertise in radiology.
 '''
 
 LLAMA_VQA_USER_PROMPT = '''
