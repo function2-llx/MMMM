@@ -7,7 +7,6 @@ trainer:
   precision: bf16-true
   gradient_clip_val: 1
   gradient_clip_algorithm: norm
-  save_embedding_layers: true
   strategy: ddp
   callbacks:
   - class_path: luolib.lightning.callbacks.ModelCheckpoint
@@ -39,3 +38,4 @@ model:
   init_args:
     freeze_vg: true
     disable_vg: true
+lora: ../lora.yaml

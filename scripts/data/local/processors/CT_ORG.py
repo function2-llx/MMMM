@@ -3,6 +3,7 @@ from ._base import DefaultImageLoaderMixin, DefaultMaskLoaderMixin, MultiClassDa
 class CT_ORGProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor):
     name = 'CT-ORG'
     orientation = 'SRA'
+    semantic_targets = {'kidney', 'lung'}
 
     def get_data_points(self):
         ret = []

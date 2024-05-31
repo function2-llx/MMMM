@@ -32,7 +32,7 @@ local_labels = {
     'Consolidation': 'pulmonary consolidation',
     'Edema': 'pulmonary edema',
     'Emphysema': 'pulmonary emphysema',
-    'Enlarged PA': 'pulmonary artery  enlargement',
+    'Enlarged PA': 'pulmonary artery enlargement',
     'ILD': 'interstitial lung disease',
     'Infiltration': 'pulmonary infiltrate',
     'Lung cavity': 'pulmonary cavity',

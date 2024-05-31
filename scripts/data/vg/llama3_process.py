@@ -1,9 +1,9 @@
-import json
-from tqdm import tqdm
-from typing import List, Tuple
-from vllm import LLM, SamplingParams
-import os
 import sys
+
+import orjson
+from vllm import LLM, SamplingParams
+
+from mmmm.data.defs import PROCESSED_VG_DATA_ROOT, PROCESSED_VL_DATA_ROOT
 
 model_id = "/data/llama3/Meta-Llama-3-70B-Instruct-hf"
 # model_id = "/data/new_llm/Llama3-OpenBioLLM-70B"
@@ -11,29 +11,89 @@ model_id = "/data/llama3/Meta-Llama-3-70B-Instruct-hf"
 model_name = model_id.split("/")[-1]
 
 sampling_params = SamplingParams(
-    temperature=0., 
-    top_p=0.95,
-    max_tokens=8000,
-    stop = ["<|eot_id|>"],
+    temperature=0.,
+    max_tokens=1024,
+    stop=["<|eot_id|>"],
 )
 
 llm = LLM(
     model=model_id,
-    tensor_parallel_size=2,
+    tensor_parallel_size=4,
     disable_custom_all_reduce=True,
+    max_model_len=2048,
 )
 
-system_prompt1 = """You are an AI assistant with expertise in radiology. Your main task is to meticulously review a provided radiology report and accurately identify key anatomical structures mentioned within it. To highlight these structures, enclose each relevant word or phrase with "<p>" and "</p>" tags. Be sure to apply these tags only to the specified anatomical structures, and avoid tagging any terms that are clearly described as absent, negated, or uncertain in the findings. For example, do not highlight terms in statements such as "There is no pleural effusion or pneumothorax" and "No pleural effusion, pneumothorax, or focal consolidation is present."
+anatomy_lsit = [
+    "aorta",
+    'artery',
+    'colon',
+    'esophagus',
+    'gallbladder',
+    'atrium',
+    'ventricle',
+    'vena cava',
+    'vein',
+    'kidney',
+    'liver',
+    'lung',
+    'lung lobe',
+    'heart',
+    'pancreas',
+    'rib',
+    'scapula',
+    'spleen',
+    'stomach',
+    'trachea',
+    'bladder',
+    'vertebra',
+    'thyroid',
+    'adrenal gland',
+]
+anomaly_list = [
+    'atelectasis',
+    'cardiomegaly',
+    'edema',
+    'cardiomediastinum',
+    'fibrosis',
+    'hiatal hernia',
+    'pleural effusion',
+    'pneumothorax',
+    'pneumoperitoneum',
+    'pneumomediastinum',
+    'arterial wall calcification',
+    'pericardial effusion',
+    'coronary artery wall calcification',
+    'lymphadenopathy',
+    'emphysema',
+    'lung nodule',
+    'lung opacity',
+    'peribronchial thickening',
+    'consolidation',
+    'bronchiectasis',
+    'interlobular septal thickening',
+]
 
-Focus on tagging these anatomical structures, among others:
-["lung", "heart", "lobe", "atelectasis", "cardiomegaly", "edema", "emphysema", "cardiomediastinum", "fibrosis", "hernia", "pleural effusion", "pneumonia", "pneumothorax", "lung lesion", "pneumoperitoneum", "pneumomediastinum", "arterial wall calcification", "cardiomegaly", "pericardial effusion", "coronary artery wall calcification", "hiatal hernia", "lymphadenopathy", "emphysema", "atelectasis", "lung nodule", "lung opacity", "pulmonary fibrotic sequela", "pleural effusion", "mosaic attenuation pattern", "peribronchial thickening", "consolidation", "bronchiectasis", "interlobular septal thickening"].
+system_prompt1 = f"""You are an AI assistant with expertise in radiology. Your main task is to meticulously review a provided radiology report and accurately identify key anatomical structures and anomaly findings mentioned within it. Here are non-exclusive lists to be focused:
+Anatomy: {', '.join(anatomy_lsit)}
+Anomaly: {', '.join(anomaly_list)}
+You should not highlight any other entities, such as symptoms, diseases, scan orientation, body systems or treatments, such as "AP/PA view", "chest", 
+Below are requirements:
+1. Include anatomic modifiers essential for precise localization when highlighting anatomical structures, such as "right", "left", "upper", "lower", "anterior", "posterior", "pulmonary", etc., when highlighting anatomical structures. But you must not highlight them when they are not modifying any anatomical structures.
+2. Avoid highlighting any targets explicitly stated as absent, negated, or otherwise indicated as not present or uncertain in the findings. For example, do not highlight terms in statements such as "There is no pleural effusion or pneumothorax" and "No pleural effusion, pneumothorax, or focal consolidation is present."
+3. Do not highlight targets that are too coarse, ambiguous, or amorphous to be spatially localized. E.g., you should not highlight "free fluid", "chest".
+4. If the very same target occurs multiple times, highlight the first occurance. E.g., in the context of "The abdominal aorta is observed. An accessory hepatic artery arises from the abdominal aorta.", the second "abdominal aorta" should not be highlighted as it is the same target as the first one.
+5. Different targets, even with the same name, should be highlighted respectively. E.g., in "A lesion is observed upperside, another lesion is observed on the right", both two "lesions" should be highlighted respectively. 
+6. The output should be exactly the original text with additional tags, do not output any additional information. Even if no target is present in the text, the output should be the same as input.
 
-Here is an example to guide you:
-Example input:
-Frontal and lateral views of the chest were obtained. Rounded calcified nodule in the region of the posterior right lung base is seen and represents calcified granuloma on CTs dating back to ___, likely secondary to prior granulomatous disease. Previously seen pretracheal lymph node conglomerate and right hilar lymph nodes are better seen/evaluated on CT. No focal consolidation is seen. There is no pleural effusion or pneumothorax. Cardiac and mediastinal silhouettes are stable with possible slight decrease in right paratracheal prominence.
-
-Example output:
-Output: Frontal and lateral views of the chest were obtained. Rounded <p>calcified nodule</p> in the region of the posterior right <p>lung</p> base is seen and represents <p>calcified granuloma</p> on CTs dating back to ___, likely secondary to prior granulomatous disease. Previously seen <p>pretracheal lymph</p> <p>node conglomerate</p> and <p>right hilar lymph nodes</p> are better seen/evaluated on CT. No focal consolidation is seen. There is no pleural effusion or pneumothorax. <p>Cardiac</p> and <p>mediastinal silhouettes</p> are stable with possible slight decrease in right paratracheal prominence.
+Enclose each relevant phrase to be highlighted with "<p>" and "</p>" tags. Some examples:
+Example input 1:
+Trachea, both main bronchi are normal. The ascending aorta has a transverse diameter of 40 mm and is minimally enlarged. Heart size is within normal limits. There is no pericardial thickening or effusion. There are calcified lymph nodes smaller than 1 cm in the mediastinum and left pulmonary hilus. When examined in the lung parenchyma window; A linear fibrotic band is observed in the posterobasal segment of the lower lobe of the right lung. Within the sections, the density of stones with a diameter of 1 cm in the gallbladder draws attention.
+Example output 1:
+<p>Trachea</p>, both main <p>bronchi</p> are normal. The ascending <p>aorta</p> has a transverse diameter of 40 mm and is minimally enlarged. <p>Heart</p> size is within normal limits. There is no pericardial thickening or effusion. There are calcified <p>lymph nodes</p> smaller than 1 cm in the <p>mediastinum</p>. When examined in the lung parenchyma window; A <p>linear fibrotic</p> band is observed in the posterobasal segment of the <p>lower lobe of the right lung</p>. Within the sections, the density of <p>stones</p> with a diameter of 1 cm in the <p>gallbladder</p> draws attention.
+Example input 2:
+The lungs appear hyperexpanded suggestive of chronic obstructive pulmonary disease. A focal nodule is noted posterior to the sternum. Additionally, there is enlargement of the left main pulmonary artery.  Cardiac silhouette is normal. Bibasilar opacities are visualized likely representative of bronchiectasis and fibrosis.  Calcifications of the origin of the great vessels are noted.
+Example output 2
+The <p>lungs</p> appear hyperexpanded suggestive of chronic obstructive pulmonary disease. A focal nodule is noted posterior to the sternum. Additionally, there is enlargement of the left main pulmonary artery.  <p>Cardiac silhouette</p> is normal. <p>Bibasilar opacities</p> are visualized likely representative of bronchiectasis and fibrosis.  <p>Calcifications</p> of the origin of the great vessels are noted.
 """
 
 system_prompt2 = """
@@ -46,77 +106,54 @@ Example input:
 Lateral view somewhat limited due to overlying motion artifact. The <p>lungs</p> are low in volume.  There is no focal airspace consolidation to suggest\n <p>pneumonia</p>.  A 1.2-cm <p>calcified granuloma</p> just below the medial aspect of the\n right <p>hemidiaphragm</p> is unchanged from prior study.  No <p>pleural effusions</p> or\n <p>pulmonary edema</p>. There is no <p>pneumothorax</p>.\n\n The inferior <p>sternotomy wire</p> is fractured but unchanged. Surgical clips and\n vascular markers in the <p>thorax</p> are related to prior CABG surgery.
 
 Example output: 
-Output: Lateral view somewhat limited due to overlying motion artifact. The <p>lungs</p> are low in volume.  There is no focal airspace consolidation to suggest\n pneumonia.  A 1.2-cm <p>calcified granuloma</p> just below the medial aspect of the\n right <p>hemidiaphragm</p> is unchanged from prior study.  No pleural effusions or\n pulmonary edema. There is no pneumothorax.\n\n The inferior <p>sternotomy wire</p> is fractured but unchanged. Surgical clips and\n vascular markers in the <p>thorax</p> are related to prior CABG surgery.
+Lateral view somewhat limited due to overlying motion artifact. The <p>lungs</p> are low in volume.  There is no focal airspace consolidation to suggest\n pneumonia.  A 1.2-cm <p>calcified granuloma</p> just below the medial aspect of the\n right <p>hemidiaphragm</p> is unchanged from prior study.  No pleural effusions or\n pulmonary edema. There is no pneumothorax.\n\n The inferior <p>sternotomy wire</p> is fractured but unchanged. Surgical clips and\n vascular markers in the <p>thorax</p> are related to prior CABG surgery.
 """
 
-def llama3_user_prompt(item_key):
+def llama3_user_prompt(text: str):
     user_prompt = f"""
-Here is the input text for your task:
-Input: {item_key}
-
-Your output should be the complete original text with the appropriate annotations. Do not add any extraneous text.
+Your input: {text}
+Your output:
 """
     return user_prompt
-            
 
-def process(dataset: str, num_samples: Tuple[int] = None, FIRST: bool = True):
-    output_path = '/data/MMMM/data/processed/visual-grounding/' + dataset
-    os.makedirs(output_path, exist_ok=True)
-    if dataset in ['MIMIC-CXR']:
-        key_list = ['findings']
-    elif dataset in ['CT-RATE']:
-        key_list = ['Findings_EN']
-    if FIRST: 
-        prefix = '/data/MMMM/data/processed/vision-language/'
-    else:
-        prefix = '/data/MMMM/data/processed/visual-grounding/'
+def process(dataset: str, num_samples: tuple[int, int, int] = None, FIRST: bool = True):
+    output_dir = PROCESSED_VG_DATA_ROOT / dataset
+    llm.get_tokenizer()
+
+    output_dir.mkdir(exist_ok=True, parents=True)
+    src_dir = (PROCESSED_VL_DATA_ROOT if FIRST else PROCESSED_VG_DATA_ROOT) / dataset
     for i, split in enumerate(['validate', 'test', 'train']):
-        with open(prefix + dataset +  '/' + split + '.json', 'r') as f:
-            data = json.load(f)
-
-        if num_samples:
-            data = data[:num_samples[i]]
-        
+        if not (data_path := src_dir / f'{split}.json').exists():
+            continue
+        data = orjson.loads(data_path.read_bytes())
+        # if num_samples[i] >= 0:
+        #     data = data[:num_samples[i]]
         prompts = []
-
         for item in data:
-            for key in key_list:
-                if not FIRST:
-                    key = key + '_annotation1'
-                user_prompt = llama3_user_prompt(item[key])
-            
-                if FIRST:
-                    
-                    prompts.append(system_prompt1 + user_prompt)
-                else:
-                    prompts.append(system_prompt2 + user_prompt)
-            
+            user_prompt = llama3_user_prompt(item['findings'])
+            prompt = (system_prompt1 if FIRST else system_prompt2) + '\n' + user_prompt
+            prompts.append(prompt)
         responses = llm.generate(prompts, sampling_params)
 
-        for i, output in enumerate(responses):
+        for j, output in enumerate(responses):
             generated_text = output.outputs[0].text
-            generated_text = generated_text.replace("Output: ", '')
-            generated_text = generated_text.replace("```", '')
-            for key in key_list:
-                if FIRST:
-                    data[i][key+'_annotation1'] = generated_text
-                else:
-                    data[i][key+'_annotation2'] = generated_text
-                if i % 1000 == 0:
-                    with open(output_path + '/' + split + '.json', 'w') as f:
-                        json.dump(data, f, indent=4)
-        if len(prompts) > 0:
-            with open(output_path + '/' + split + '.json', 'w') as f:
-                json.dump(data, f, indent=4)
+            # generated_text = generated_text.replace("Output: ", '')
+            # generated_text = generated_text.replace("```", '')
+            if FIRST:
+                data[j]['findings-ann'] = generated_text
+            else:
+                data[j]['findings-ann-filtered'] = generated_text
+        (output_dir / f'{split}.json').write_bytes(orjson.dumps(data, option=orjson.OPT_INDENT_2))
 
 def main():
     datasets = [
-        ('MIMIC-CXR', (-1, -1, 10000)),
-        ('CT-RATE',   (-1, 0, 10000)),
+        ('MIMIC-CXR', (-1, -1, 5000)),
+        ('CT-RATE', (-1, -1, 5000)),
     ]
     FIRST = sys.argv[1] == '1'
     for dataset, num_samples in datasets:
         print(dataset)
         process(dataset, num_samples, FIRST)
+
 if __name__ == '__main__':
     main()
