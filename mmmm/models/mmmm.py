@@ -6,6 +6,7 @@ from typing import Literal
 import einops
 import einops.layers.torch as elt
 from jsonargparse import class_from_function
+from peft import PeftModel
 from scipy.optimize import linear_sum_assignment
 import torch
 from torch import nn
@@ -16,12 +17,11 @@ from luolib.lightning import LightningModule
 from luolib.losses import bce_neg, bce_pos, zero_loss
 from luolib.types import PathLike, param3_t, tuple2_t, tuple3_t
 from luolib.utils.misc import pairwise_forward
-from monai.data import box_pair_giou, convert_box_mode
-from monai.data.box_utils import CenterSizeMode
-
 from mmmm.data.defs import Batch
 from mmmm.tokenizer import MMMMTokenizer
 from mmmm.utils import apply_prefix, get_lora_modules_default, get_lora_modules_finetune_all
+from monai.data import box_pair_giou, convert_box_mode
+from monai.data.box_utils import CenterSizeMode
 from .cogvlm import CogVLMConfig, CogVLMForCausalLM
 from .loss import DiceFocalLoss
 from .segvol import Sam, SamArgs, build_sam_vit_3d
@@ -145,7 +145,6 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             nn.Linear(self.sam_model.mask_embed_dim, 1),
         )
         self.model.config.lora_lang = lora_lang
-        self.model.tokenizer = tokenizer
         self.check_grad = False
         self._setup_freeze(freeze_vg)
         self.disable_vg = disable_vg
@@ -687,22 +686,13 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
 build = class_from_function(MMMMForCausalLM.build, MMMMForCausalLM)
 
 def from_pretrained(conf_path: PathLike, adapter_dir: PathLike) -> tuple[MMMMForCausalLM, MMMMTokenizer]:
-    from jsonargparse import ArgumentParser, ActionConfigFile
-    from peft import LoraConfig, get_peft_model
+    from jsonargparse import ArgumentParser
     parser = ArgumentParser()
-    parser.add_argument('-c', action=ActionConfigFile)
     parser.add_subclass_arguments(MMMMForCausalLM, 'model')
-    parser.add_subclass_arguments(MMMMTokenizer, 'tokenizer')
-    parser.link_arguments('tokenizer', f'model.init_args.tokenizer', apply_on='instantiate')
-    # dataclass as class: https://github.com/omni-us/jsonargparse/issues/287
-    parser.add_class_arguments(LoraConfig, 'lora')
-    args = parser.parse_args(['-c', str(conf_path)])
+    args = parser.parse_args(['--model', str(conf_path)])
     args = parser.instantiate_classes(args)
-    lora_config: LoraConfig = args.lora
     model: MMMMForCausalLM = args.model
-    lora_config.target_modules, lora_config.modules_to_save = get_lora_modules_default(model)
-    peft_model = get_peft_model(model, lora_config)
-    peft_model.load_adapter(str(adapter_dir), 'default')
-    print(f'load adapter from {adapter_dir}')
-    tokenizer: MMMMTokenizer = args.tokenizer
+    peft_model = PeftModel.from_pretrained(model, adapter_dir)
+    model.set_peft_model(peft_model)
+    tokenizer = model.tokenizer
     return model, tokenizer

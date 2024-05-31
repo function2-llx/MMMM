@@ -1,4 +1,4 @@
-from __future__ import annotations
+from __future__ import annotations as _
 
 from dataclasses import dataclass
 from functools import cache
@@ -39,6 +39,7 @@ def get_target_tax() -> dict[str, TargetClass]:
     tax_dict = pd.read_excel(DATA_ROOT / 'target-tax.xlsx', ['anatomy', 'anomaly'])
     ret = {}
     for category, tax in tax_dict.items():
+        tax = tax[~pd.isna(tax['name'])]
         tax.set_index('name', inplace=True)
         category = TargetCategory(category)
         ret.update({
