@@ -30,10 +30,10 @@ patch_size_xy = 16
 max_vision_tokens = 100
 
 
-def setup_mmmm(checkpoint: str, tokenizer: str):
+def setup_mmmm(adapter: str):
     from mmmm.models.mmmm import from_pretrained
 
-    model, tokenizer = from_pretrained('conf/model.yaml', checkpoint)
+    model, tokenizer = from_pretrained('conf/model.yaml', adapter)
     model = model.to('cuda')
     model.eval()
 
