@@ -10,7 +10,6 @@ import torchvision.transforms.v2.functional as tvtf
 
 from luolib.types import tuple2_t
 from luolib.utils import save_pt_zst
-from monai.data import MetaTensor
 import monai.transforms as mt
 from monai.utils import GridSampleMode
 from scripts.data.local.processors._base import (
@@ -42,11 +41,6 @@ class Processor(DefaultImageLoaderMixin, _ProcessorBase):
     def case_data_root(self):
         return PROCESSED_VL_DATA_ROOT / f'CT-RATE/image'
 
-    def normalize_image(self, images: MetaTensor, *args, **kwargs):
-        zero_mask = images == 0
-        images[zero_mask] = images[~zero_mask].min()
-        return super().normalize_image(images, *args, **kwargs)
-
     def process_data_point(self, data_point: CT_RATEDataPoint, empty_cache: bool, raise_error: bool):
         self.key = key = data_point.key
         try:
@@ -61,7 +55,7 @@ class Processor(DefaultImageLoaderMixin, _ProcessorBase):
                 orient = mt.Orientation(self.get_orientation(image))
                 image = orient(image).contiguous()
                 # 2. clip intensity, and crop the images & masks
-                cropper = clip_intensity(image)
+                cropper = clip_intensity(image, exclude_min=True)
                 image = cropper(image)  # type: ignore
                 # 3. compute resize (default: adapt to self.max_smaller_edge and self.min_aniso_ratio)
                 resize_shape = get_resize(image.shape[1:])

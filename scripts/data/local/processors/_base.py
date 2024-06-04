@@ -74,7 +74,7 @@ class MultiClassDataPoint(SegDataPoint):
 _CLIP_LOWER = norm.cdf(-3)
 _CLIP_UPPER = norm.cdf(3)
 
-def clip_intensity(image: torch.Tensor) -> mt.SpatialCrop:
+def clip_intensity(image: torch.Tensor, exclude_min: bool = False) -> mt.SpatialCrop:
     """clip the intensity in-place
     Returns:
         the cropper
@@ -83,8 +83,12 @@ def clip_intensity(image: torch.Tensor) -> mt.SpatialCrop:
     if image.dtype == torch.uint8:
         minv = image.new_tensor(0.)
     else:
-        minv = lt.quantile(x, _CLIP_LOWER, 1, True)
-        maxv = lt.quantile(x, _CLIP_UPPER, 1, True)
+        ref = x
+        if exclude_min:
+            assert x.shape[0] == 1
+            ref = ref[ref > ref.min()][None]
+        minv = lt.quantile(ref, _CLIP_LOWER, 1, True)
+        maxv = lt.quantile(ref, _CLIP_UPPER, 1, True)
         x.clamp_(minv, maxv)
     select_mask = image.new_empty((1, *image.shape[1:]), dtype=torch.bool)
     torch.any(x > minv, dim=0, keepdim=True, out=select_mask.view(1, -1))
