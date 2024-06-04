@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import einops
 import nibabel as nib
 import numpy as np
 import torch
@@ -163,4 +164,16 @@ def convert_to_slicer(data_dir: PathLike, output_dir: PathLike | None = None, mu
     nib.save(
         nib.Nifti1Image(seg.numpy(), np.diag([*sparse.spacing, 1])),
         output_dir / 'seg.nii.gz',
+    )
+
+def save_as_nifti(path: PathLike, output_path: PathLike | None = None):
+    path = Path(path)
+    assert path.name.endswith('.pt.zst')
+    image = load_pt_zst(path)[0]
+    image = einops.rearrange(image, 'd h w -> h w d')
+    if output_path is None:
+        output_path = path.with_name(path.name[:-len('.pt.zst')] + '.nii.gz')
+    nib.save(
+        nib.Nifti1Image(image.numpy(), np.eye(4)),
+        output_path
     )

@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
 from dataclasses import dataclass
+from functools import partial
 import gc
 import itertools as it
 from logging import Logger
@@ -274,8 +275,8 @@ class Processor(ABC):
             self.logger.info(f'{len(pending_data_points)} data points to be processed')
             self.case_data_root.mkdir(parents=True, exist_ok=True)
             process_map(
-                self.process_data_point,
-                pending_data_points, it.repeat(empty_cache), it.repeat(raise_error),
+                partial(self.process_data_point, empty_cache=empty_cache, raise_error=raise_error),
+                pending_data_points,
                 max_workers=self.max_workers, chunksize=self.chunksize, ncols=80,
             )
         info_list: list[dict | None] = process_map(

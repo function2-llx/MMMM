@@ -8,6 +8,7 @@ import orjson
 import torch
 import torchvision.transforms.v2.functional as tvtf
 
+from luolib.types import tuple2_t
 from luolib.utils import save_pt_zst
 from monai.data import MetaTensor
 import monai.transforms as mt
@@ -101,9 +102,10 @@ class Processor(DefaultImageLoaderMixin, _ProcessorBase):
 def main():
     parser = ArgumentParser()
     parser.add_argument('--max_workers', type=int, default=8)
+    parser.add_argument('--range', type=tuple2_t[int | None], default=(None, None))
     args = parser.parse_args()
     processor = Processor(getLogger(), max_workers=args.max_workers, chunksize=1, override=True)
-    processor.process(empty_cache=True)
+    processor.process(empty_cache=True, limit=args.range)
 
 if __name__ == '__main__':
     main()
