@@ -9,6 +9,7 @@ import torch
 import torchvision.transforms.v2.functional as tvtf
 
 from luolib.utils import save_pt_zst
+from monai.data import MetaTensor
 import monai.transforms as mt
 from monai.utils import GridSampleMode
 from scripts.data.local.processors._base import (
@@ -39,6 +40,11 @@ class Processor(DefaultImageLoaderMixin, _ProcessorBase):
     @property
     def case_data_root(self):
         return PROCESSED_VL_DATA_ROOT / f'CT-RATE/image'
+
+    def normalize_image(self, images: MetaTensor, *args, **kwargs):
+        zero_mask = images == 0
+        images[zero_mask] = images[~zero_mask].min()
+        return super().normalize_image(images, *args, **kwargs)
 
     def process_data_point(self, data_point: CT_RATEDataPoint, empty_cache: bool, raise_error: bool):
         self.key = key = data_point.key

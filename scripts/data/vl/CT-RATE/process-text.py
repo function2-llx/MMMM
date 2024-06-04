@@ -8,8 +8,6 @@ from mmmm.data.target_tax import TargetCategory
 
 dataset_dir = ORIGIN_VL_DATA_ROOT / 'CT-RATE/dataset'
 
-max_slices = 256
-
 labels = [
     ('Arterial wall calcification', 'calcification'),
     ('Cardiomegaly', 'cardiomegaly'),
@@ -69,7 +67,9 @@ def main():
                     else:
                         assert cmp_series(ref_report, report_df.loc[image_path.name]), image_path.name
                         assert cmp_series(ref_label, label_df.loc[image_path.name]), image_path.name
-                study['findings'] = ref_report['Findings_EN'].strip()
+                if pd.isna(findings := ref_report['Findings_EN']):
+                    continue
+                study['findings'] = findings.strip()
                 if not pd.isna(impression := ref_report['Impressions_EN']):
                     study['impression'] = impression.strip()
                 for anomaly_key, anomaly_name in labels:
