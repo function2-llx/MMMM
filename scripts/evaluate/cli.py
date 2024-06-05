@@ -4,30 +4,6 @@ from jsonargparse import CLI
 from pathlib import Path
 from torch.utils.data import DataLoader
 
-from models.mmmm import (
-    MMMMTransform,
-    setup_mmmm,
-    mmmm_vl_evaluate,
-)
-from models.cogvlm import (
-    CogVLMTransform,
-    setup_cogvlm,
-    cogvlm_vl_evaluate,
-)
-from models.instructblip import (
-    InstructBlipTransform,
-    setup_instructblip,
-    instructblip_vl_evaluate,
-)
-from models.llavamed import LlavaMedTransform, setup_llavamed, llavamed_vl_evaluate
-from models.llavanext import (
-    LlavaNextTransform,
-    setup_llavanext,
-    llavanext_vl_evaluate,
-    build_conversation_input_ids,
-)
-from models.m3d import M3DTransform, setup_m3d, m3d_vl_evaluate
-from models.radfm import RadFMTransform, setup_radfm, radfm_vl_evaluate
 from utils import (
     collate_fn,
     setup_seed,
@@ -67,28 +43,47 @@ class Evaluator:
     ):
 
         if self.model == 'mmmm':
+            from models.mmmm import (
+                MMMMTransform,
+                setup_mmmm,
+                mmmm_vl_evaluate,
+            )
             packed = setup_mmmm(adapter)
             transform = MMMMTransform(packed[1])
             evaluate_fn = mmmm_vl_evaluate
         if self.model == 'radfm':
+            from models.radfm import RadFMTransform, setup_radfm, radfm_vl_evaluate
             packed = setup_radfm(checkpoint, tokenizer)
             transform = RadFMTransform(packed[1])
             evaluate_fn = radfm_vl_evaluate
         elif self.model == 'm3d':
+            from models.m3d import M3DTransform, setup_m3d, m3d_vl_evaluate
             packed = setup_m3d(checkpoint, tokenizer)
             transform = M3DTransform(packed[1])
             evaluate_fn = m3d_vl_evaluate
         elif self.model == 'llavamed':
+            from models.llavamed import LlavaMedTransform, setup_llavamed, llavamed_vl_evaluate
             packed = setup_llavamed(checkpoint, tokenizer)
             transform = LlavaMedTransform(packed[0].config, *packed[1:])
             evaluate_fn = llavamed_vl_evaluate
         elif self.model == 'cogvlm':
+            from models.cogvlm import (
+                CogVLMTransform,
+                setup_cogvlm,
+                cogvlm_vl_evaluate,
+            )
             packed = setup_cogvlm(checkpoint, adapter, tokenizer, self.setting)
             transform = CogVLMTransform(
                 packed[0].build_conversation_input_ids, packed[1]
             )
             evaluate_fn = cogvlm_vl_evaluate
         elif self.model == 'llavanext':
+            from models.llavanext import (
+                LlavaNextTransform,
+                setup_llavanext,
+                llavanext_vl_evaluate,
+                build_conversation_input_ids,
+            )
             packed = setup_llavanext(checkpoint, adapter, tokenizer, self.setting)
             transform = LlavaNextTransform(
                 (
@@ -99,6 +94,11 @@ class Evaluator:
             )
             evaluate_fn = llavanext_vl_evaluate
         elif self.model == 'instructblip':
+            from models.instructblip import (
+                InstructBlipTransform,
+                setup_instructblip,
+                instructblip_vl_evaluate,
+            )
             packed = setup_instructblip(checkpoint, tokenizer)
             transform = InstructBlipTransform(packed[1], self.setting,
             )

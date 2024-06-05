@@ -3,7 +3,7 @@ import pandas as pd
 from vllm import LLM, SamplingParams
 
 mimic_cxr_prompt_1 = '''
-You are an AI assistant with expertise in radiology. You are given a chest X-ray radiology report. You should:
+You are an AI assistant with expertise in radiology. You are given a chest X-ray radiology report consisting of findings and impression. You should:
 1. Remove clinical meta information about the imaging planes and techniques and the patient's position, like "AP and lateral views of the chest were provided", "evaluation is limited due to significant patient rotation to the right", "portable chest radiograph", "AP single view of the chest has been obtained with patient in sitting semi-upright position", "frontal images of the chest", "portable AP view of the chest", "on the lateral view", "is identified on both frontal and lateral views".
 2. If such contents imply key findings, do paraphrase to retain the key information while performing the removals as requested. For example, "portable chest radiograph shows improved aeration at the right lung base" should be paraphrased to "aeration is seen at the right lung base" and "portable chest radiograph demonstrates a right pneumothorax" should be paraphrased to "a right pneumothorax is seen".
 3. Keep the rest of the report exactly the same without any modification.
@@ -14,7 +14,7 @@ Your output should be exactly the processed report. Do not output anything else.
 '''
 
 mimic_cxr_prompt_2 = '''
-You are an AI assistant with expertise in radiology. You are given a chest X-ray radiology report. You should:
+You are an AI assistant with expertise in radiology. You are given a chest X-ray radiology report consisting of findings and impression. You should:
 1. Remove comparison with prior examinations and description of interval changes, like "no significant change compared to the prior radiograph", "are similar to prior", "are again noted", "are compared to previous exam from ___", "since the prior radiograph", "there has been little interval change", "continues to be", "is re-demonstrated", "persistent", "unchanged", "as expected", "stable", "with possible slight decrease in", "perhaps somewhat decreased", "there is increased", "new", "previously", "known", "no new focal consolidation is seen".
 2. Remove the medical history of the patient and judgements derived purely from it, like "the patient has had prior sternotomy and aortic valve repair", "is consistent with remote history of fracture", "which is compatible with provided clinical history of ILD", "the patient is status post median sternotomy, CABG, vascular stenting", "bilateral pleural catheters have been removed", "consistent with prior granulomatous disease", "the ETT has been removed", ""in view of history, a possibility of lymphangitic carcinomatosis also needs to be ruled out".
 3. If such contents imply key findings, do paraphrase to retain the key information while performing the removals as requested. For example, "as compared to the prior radiograph performed yesterday morning, there has been slight interval improvement in extent of interstitial pulmonary edema" should be paraphrased to "there is interstitial pulmonary edema", "portable chest radiograph shows improved aeration at the right lung base" should be paraphrased to "there is aeration at the right lung base", and "the right lower lobe opacification has decreased substantially" should be paraphrased to "right lower lobe opacification are present".
@@ -27,7 +27,7 @@ Your output should be exactly the processed report. Do not output anything else.
 '''
 
 ct_rate_prompt = '''
-You are an AI assistant with expertise in radiology. You are given a chest CT radiology report. You should:
+You are an AI assistant with expertise in radiology. You are given a chest CT radiology report consisting of findings and impression. You should:
 1. Remove comparison with prior examinations and description of interval changes, like "prior right rib fractures.", "newly developed", "newly emerged", "stable", "with the patient's previous examinations".
 2. Remove the medical history of the patient, like "in the case with a history of perforation during dilatation due to achalasia", "previous pleura in a patient with a history of previous TB", "mentioned in the patient's clinical information may cause these findings".
 3. Keep the rest of the report exactly the same without any modification! Do not add any new contents.
