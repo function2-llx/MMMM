@@ -19,23 +19,24 @@ __all__ = [
 from .defs import CE_IGNORE_INDEX, DataPoint
 
 def _collate_fn(batch: list[DataPoint]):
-    batch_vlm_inputs: list[dict] = []
-    list_data = {}
+    vlm_inputs: list[dict | None] = []
+    ret = {}
     for x in batch:
-        batch_vlm_inputs.append(x.pop('vlm_inputs'))
+        vlm_inputs.append(x.pop('vlm_inputs'))
         for key, value in x.items():
-            list_data.setdefault(key, []).append(value)
-    ret = {
-        **list_data,
-        'vlm_inputs': {
+            ret.setdefault(key, []).append(value)
+    if any(x is None for x in vlm_inputs):
+        assert all(x is None for x in vlm_inputs)
+    else:
+        ret['vlm_inputs'] = {
             key: pad_sequence(
-                [x[key] for x in batch_vlm_inputs],
+                [x[key] for x in vlm_inputs],
                 batch_first=True,
                 padding_value=CE_IGNORE_INDEX if key == 'labels' else 0,
             )
-            for key in batch_vlm_inputs[0].keys()
+            for key in vlm_inputs[0].keys()
         }
-    }
+
     return ret
 
 class MMMMRandomSampler(Sampler):

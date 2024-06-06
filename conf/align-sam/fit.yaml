@@ -2,7 +2,7 @@ data: data.yaml
 logger: logger.yaml
 trainer:
   max_steps: 50000
-  log_every_n_steps: 50
+  log_every_n_steps: 20
   precision: bf16-true
   gradient_clip_val: 1
   gradient_clip_algorithm: norm
@@ -33,9 +33,33 @@ optim:
         warmup_prefix: true
     interval: step
     frequency: 250
-mask_loss:
-  dice_weight: 2
-  focal_weight: 2
+model:
+  sam:
+    class_path: mmmm.models.build_sam
+    init_args:
+      patch_size: 16
+      pos_embed_shape: [ 8, 20, 20 ]
+      num_instances: 12
+      pt_in_channels: 1
+      pt_patch_size: [ 4, 16, 16 ]
+      pt_pos_embed_shape: [ 8, 16, 16 ]
+      checkpoint: pre-trained/SegVol/pytorch_model.bin
+      weight_prefix: model.
+  loss:
+    class_path: InstanceSamLoss
+    init_args:
+      mask_loss:
+        class_path: mmmm.models.loss.DiceFocalLoss
+        init_args:
+          dice_weight: 5
+          focal_weight: 5
+          focal_gamma: 2
+          focal_alpha: 0.8
+      use_neg_mask: false
+      box_l1_weight: 5
+      box_giou_weight: 2
+      disc_weight: 2
+      disc_focal_gamma: 2
+      disc_focal_alpha: 0.8
+  seg_vol_path: pre-trained/SegVol
 
-
-model: model.yaml

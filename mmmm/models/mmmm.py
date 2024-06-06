@@ -110,7 +110,6 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         Args:
             neg_mask_loss: whether to compute loss on negative instance masks
             lora_lang: whether to fine-tune language weights
-            vlm_only: do not perform vg during training
         """
         self: MMMMForCausalLM = super().from_pretrained(
             pretrained_model_name_or_path,

@@ -63,16 +63,13 @@ class MaskDecoder(nn.Module):
             resample.Upsample(transformer_dim // 4, transformer_dim // 8, cnt=1),
             activation(),
         )
+        # semantic & instance
         self.output_hypernetworks_mlps = nn.ModuleList(
             [
                 MLP(transformer_dim, transformer_dim, transformer_dim // 8, 3)
-                for _ in range(self.num_mask_tokens)
+                for _ in range(2)
             ]
         )
-        # we don't do that here
-        # self.iou_prediction_head = MLP(
-        #     transformer_dim, iou_head_hidden_dim, self.num_mask_tokens, iou_head_depth
-        # )
 
     def _load_from_state_dict(self, state_dict: dict[str, torch.Tensor], prefix: str, *args, **kwargs):
         ln_prefix = f'{prefix}output_upscaling.1.'
@@ -80,26 +77,11 @@ class MaskDecoder(nn.Module):
             bias = state_dict.get(f'{ln_prefix}bias')
             state_dict[f'{ln_prefix}weight'] = einops.reduce(weight, 'c ... -> c', 'mean')
             state_dict[f'{ln_prefix}bias'] = einops.reduce(bias, 'c ... -> c', 'mean')
-        pt_num_instances = 0
-        pattern = re.compile(rf'{prefix}output_hypernetworks_mlps\.(\d+)\.layers\.0\.weight')
-        for key in list(state_dict.keys()):
-            # match the number of different instances used in pre-training
-            if match := pattern.match(key):
-                pt_num_instances = max(int(match.group(1)), pt_num_instances)
-            if key.startswith(f'{prefix}iou_prediction_head'):
-                state_dict.pop(key)
-        if pt_num_instances > 0:
-            # reuse the output MLP weights for new ones
-            hyper_prefix = f'{prefix}output_hypernetworks_mlps.'
-            for i in range(1 + pt_num_instances, self.num_mask_tokens):
-                ref = 1 + (i - 1) % pt_num_instances
-                for key, _ in self.output_hypernetworks_mlps[i].named_parameters():
-                    state_dict[f'{hyper_prefix}{i}.{key}'] = state_dict[f'{hyper_prefix}{ref}.{key}']
-            # reinitialize new mask tokens weights
-            pt_mask_tokens_weight = state_dict[f'{prefix}mask_tokens.weight']
-            mask_tokens_weight_pad = self.mask_tokens.weight.clone()
-            mask_tokens_weight_pad[:pt_mask_tokens_weight.shape[0]] = pt_mask_tokens_weight
-            state_dict[f'{prefix}mask_tokens.weight'] = mask_tokens_weight_pad[:self.num_mask_tokens]
+        # reinitialize new additional mask tokens weights
+        pt_mask_tokens_weight = state_dict[f'{prefix}mask_tokens.weight']
+        mask_tokens_weight_pad = self.mask_tokens.weight.clone()
+        mask_tokens_weight_pad[:pt_mask_tokens_weight.shape[0]] = pt_mask_tokens_weight
+        state_dict[f'{prefix}mask_tokens.weight'] = mask_tokens_weight_pad[:self.num_mask_tokens]
         return super()._load_from_state_dict(state_dict, prefix, *args, **kwargs)
 
     def forward(
@@ -147,9 +129,9 @@ class MaskDecoder(nn.Module):
                 upscaled_embedding = module(upscaled_embedding, patch_size_z=patch_size_z)
             else:
                 upscaled_embedding = module(upscaled_embedding)
-        hyper_in_list: List[torch.Tensor] = []
+        hyper_in_list = []
         for i in range(self.num_mask_tokens):
-            hyper_in_list.append(self.output_hypernetworks_mlps[i](mask_tokens_out[:, i, :]))
+            hyper_in_list.append(self.output_hypernetworks_mlps[i > 0](mask_tokens_out[:, i, :]))
         hyper_in = torch.stack(hyper_in_list, dim=1)
         # masks = (hyper_in @ upscaled_embedding.view(b, c, h * w * d)).view(b, -1, h, w, d)
         masks = einops.einsum(hyper_in, upscaled_embedding, 'n m c, n c ... -> n m ...')

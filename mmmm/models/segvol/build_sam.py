@@ -7,6 +7,8 @@ import torch
 from luolib.types import tuple3_t
 
 from .modeling import ImageEncoderViT, MaskDecoder, PromptEncoder, InstanceSam, TwoWayTransformer
+from ..loss import DiceFocalLoss
+
 
 def _build_sam(
     *,
@@ -18,8 +20,6 @@ def _build_sam(
     patch_size: tuple3_t[int] | int = 16,
     pos_embed_shape: tuple3_t[int],
     num_instances: int,
-    disc_focal_gamma: float = 2.,
-    disc_focal_alpha: float | None = None,
     pt_in_channels: int | None = None,
     pt_patch_size: tuple3_t[int] | None = None,
     pt_pos_embed_shape: tuple3_t[int] | None = None,
@@ -52,8 +52,6 @@ def _build_sam(
             ),
             transformer_dim=embed_dim,
         ),
-        disc_focal_gamma=disc_focal_gamma,
-        disc_focal_alpha=disc_focal_alpha,
     )
 
     if checkpoint is not None:
@@ -63,8 +61,8 @@ def _build_sam(
             for key, value in state_dict.items() if key.startswith(weight_prefix) and not key.startswith(f'{weight_prefix}text_encoder')
         }
         missing_keys, unexpected_keys = sam.load_state_dict(state_dict, strict=False)
+        print(f'load pre-trained SAM checkpoint from {checkpoint}')
         if missing_keys or unexpected_keys:
-            print('load pre-trained SAM checkpoint')
             print('missing:', missing_keys)
             print('unexpected:', unexpected_keys)
 

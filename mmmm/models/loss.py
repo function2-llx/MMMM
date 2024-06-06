@@ -2,8 +2,7 @@ import einops
 import torch
 from torch import nn
 
-from luolib.losses import bce_with_binary_label
-from monai.losses.focal_loss import sigmoid_focal_loss
+from luolib.losses import bce_with_binary_label, sigmoid_focal_loss
 
 __all__ = [
     'DiceFocalLoss',
@@ -17,9 +16,9 @@ class DiceFocalLoss(nn.Module):
     """
     def __init__(
         self,
-        dice_weight: float = 1.,
-        focal_weight: float = 1.,
-        focal_gamma: float = 2.,
+        dice_weight: float,
+        focal_weight: float,
+        focal_gamma: float,
         focal_alpha: float | None = None,
     ):
         super().__init__()

@@ -81,6 +81,7 @@ class LocalTransConf:
     box_th: float = 0.5
     grounding_prob: float = 0.99
     neg_grounding_prob: float = 0.2
+    vlm: bool = True
 
 def get_local_transform(
     conf: _dataset.DatasetConf,
@@ -119,7 +120,6 @@ class SamplePatch(mt.Randomizable):
         tokenizer: MMMMTokenizer | None,
         inference: bool,
         device: Device = 'cpu',
-        vlm: bool = True,
     ):
         """
         Args:
@@ -128,10 +128,9 @@ class SamplePatch(mt.Randomizable):
         super().__init__()
         self.conf = conf
         self.trans_conf = conf.local_trans
-        if vlm:
+        if self.trans_conf.vlm:
             assert tokenizer is not None
         self.tokenizer = tokenizer
-        self.vlm = vlm
         self.device = device
         self.inference = inference
         self.target_tax = get_target_tax()
@@ -256,7 +255,9 @@ class SamplePatch(mt.Randomizable):
         return self.target_tax[name].category
 
     def _sample_targets(self, targets: Iterable[str], limit: int, category: str | None = None) -> list[str]:
-        if category is not None:
+        if category is None:
+            targets = list(targets)
+        else:
             targets = [*filter(lambda target: self._get_category(target) == category, targets)]
         if len(targets) > limit:
             targets = self.R.choice(targets, limit, replace=False).tolist()
@@ -382,7 +383,7 @@ class SamplePatch(mt.Randomizable):
                 }
 
         # 5. generate conversation
-        if self.vlm:
+        if trans_conf.vlm:
             conv = []
             grounding_classes = []
             grounding = toss(self.R, trans_conf.grounding_prob)
@@ -495,7 +496,7 @@ class SamplePatch(mt.Randomizable):
                 semantic_boxes[i] = torch.tensor([*_start, *_end])
             semantic_boxes = norm_boxes(semantic_boxes, patch.shape[1:])
 
-        data_point = {
+        data_point: DataPoint = {
             'src': (dataset_name, data['key']),
             'image': patch,
             # TODO: apply transform on grounding image
@@ -503,7 +504,7 @@ class SamplePatch(mt.Randomizable):
             'patch_size': tuple(vit_patch_size.tolist()),
             'pool_size': tuple(pool_size.tolist()),
             'vlm_inputs': vlm_inputs,
-            'grounding_classes': grounding_classes,
+            'grounding_classes': grounding_classes,  # oh
             'masks': patch_masks,
             'boxes': boxes,
             'semantic_masks': semantic_masks,
