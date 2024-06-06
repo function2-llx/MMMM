@@ -1,0 +1,41 @@
+data: data.yaml
+logger: logger.yaml
+trainer:
+  max_steps: 50000
+  log_every_n_steps: 50
+  precision: bf16-true
+  gradient_clip_val: 1
+  gradient_clip_algorithm: norm
+  strategy: ddp
+  callbacks:
+  - class_path: luolib.lightning.callbacks.ModelCheckpoint
+    init_args:
+      every_n_train_steps: 5000
+      filename: "{step}"
+      save_top_k: -1
+      save_last: true
+      verbose: true
+optim:
+  param_groups:
+  - prefix: ['']
+  optimizer:
+    class_path: torch.optim.AdamW
+    init_args:
+      lr: 1e-4
+      weight_decay: 0.01
+  lr_scheduler:
+    scheduler:
+      class_path: timm.scheduler.CosineLRScheduler
+      init_args:
+        t_initial: ${trainer.max_steps}
+        t_in_epochs: false
+        warmup_t: 250
+        warmup_prefix: true
+    interval: step
+    frequency: 250
+mask_loss:
+  dice_weight: 2
+  focal_weight: 2
+
+
+model: model.yaml

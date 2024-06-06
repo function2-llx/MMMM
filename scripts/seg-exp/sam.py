@@ -45,11 +45,10 @@ class SAMForSemanticSeg(PreTrainedModel, SemanticSegModel):
         for i in range(image.shape[0]):
             masks_logits, _ = sam.mask_decoder(
                 image_embeddings=image_embeddings[i:i + 1],
-                text_embedding=self.cls_embeds,  # make SegVol happy
+                text_embedding=None,
                 image_pe=sam.prompt_encoder.get_dense_pe(image_embeddings.shape[2:]),
                 sparse_prompt_embeddings=sparse_embeddings,
                 dense_prompt_embeddings=dense_embeddings,
-                multimask_output=False,
             )
             masks_logits_list.append(masks_logits)
         masks_logits = einops.rearrange(masks_logits_list, 'n c 1 ... -> n c ...')

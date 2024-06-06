@@ -14,17 +14,18 @@ _EPS = 1e-8
 class DiceFocalLoss(nn.Module):
     """
     fix smooth issue of dice
-    use BCE by default
     """
     def __init__(
         self,
         dice_weight: float = 1.,
         focal_weight: float = 1.,
-        focal_gamma: float = 0.,
+        focal_gamma: float = 2.,
+        focal_alpha: float | None = None,
     ):
         super().__init__()
         self.dice_weight = dice_weight
         self.focal_gamma = focal_gamma
+        self.focal_alpha = focal_alpha
         assert focal_gamma >= 0
         self.focal_weight = focal_weight
 
@@ -50,7 +51,7 @@ class DiceFocalLoss(nn.Module):
         else:
             if target is None:
                 target = torch.zeros_like(input)
-            return sigmoid_focal_loss(input, target)
+            return sigmoid_focal_loss(input, target, self.focal_gamma, self.focal_alpha)
 
     def forward(
         self,

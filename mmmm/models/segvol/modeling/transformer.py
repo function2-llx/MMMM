@@ -1,6 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
-
+import einops
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
@@ -67,7 +67,8 @@ class TwoWayTransformer(nn.Module):
         self,
         image_embedding: Tensor,
         image_pe: Tensor,
-        point_embedding: Tensor,
+        queries: torch.Tensor,
+        query_pe: torch.Tensor,
     ) -> Tuple[Tensor, Tensor]:
         """
         Args:
@@ -75,7 +76,7 @@ class TwoWayTransformer(nn.Module):
             B x embedding_dim x h x w for any h and w.
           image_pe (torch.Tensor): the positional encoding to add to the image. Must
             have the same shape as image_embedding.
-          point_embedding (torch.Tensor): the embedding to add to the query points.
+          query_pe (torch.Tensor): the embedding to add to the query points.
             Must have shape B x N_points x embedding_dim for any N_points.
 
         Returns:
@@ -88,7 +89,7 @@ class TwoWayTransformer(nn.Module):
         image_pe = image_pe.flatten(2).permute(0, 2, 1)
 
         # Prepare queries
-        queries = point_embedding
+        # queries = query_pe
         keys = image_embedding
 
         # Apply transformer blocks and final layernorm
@@ -99,12 +100,12 @@ class TwoWayTransformer(nn.Module):
                 self._gradient_checkpointing_func,
                 queries=queries,
                 keys=keys,
-                query_pe=point_embedding,
+                query_pe=query_pe,
                 key_pe=image_pe,
             )
 
         # Apply the final attention layer from the points to the image
-        q = queries + point_embedding
+        q = queries + query_pe
         k = keys + image_pe
         attn_out = self.final_attn_token_to_image(q=q, k=k, v=keys)
         queries = queries + attn_out
@@ -205,42 +206,33 @@ class Attention(nn.Module):
         self.embedding_dim = embedding_dim
         self.internal_dim = embedding_dim // downsample_rate
         self.num_heads = num_heads
-        assert self.internal_dim % num_heads == 0, "num_heads must divide embedding_dim."
+        head_dim, _rem = divmod(self.internal_dim, num_heads)
+        assert _rem == 0, "num_heads must divide embedding_dim."
 
         self.q_proj = nn.Linear(embedding_dim, self.internal_dim)
         self.k_proj = nn.Linear(embedding_dim, self.internal_dim)
         self.v_proj = nn.Linear(embedding_dim, self.internal_dim)
         self.out_proj = nn.Linear(self.internal_dim, embedding_dim)
+        self.scale = head_dim ** -0.5
 
-    def _separate_heads(self, x: Tensor, num_heads: int) -> Tensor:
-        b, n, c = x.shape
-        x = x.reshape(b, n, num_heads, c // num_heads)
-        return x.transpose(1, 2)  # B x N_heads x N_tokens x C_per_head
+    def _separate_heads(self, x: Tensor) -> Tensor:
+        return einops.rearrange(x, '... (h c) -> ... h c', h=self.num_heads)
 
     def _recombine_heads(self, x: Tensor) -> Tensor:
-        b, n_heads, n_tokens, c_per_head = x.shape
-        x = x.transpose(1, 2)
-        return x.reshape(b, n_tokens, n_heads * c_per_head)  # B x N_tokens x C
+        return einops.rearrange(x, '... h c -> ... (h c)')
 
     def forward(self, q: Tensor, k: Tensor, v: Tensor) -> Tensor:
         # Input projections
         q = self.q_proj(q)
         k = self.k_proj(k)
         v = self.v_proj(v)
-
         # Separate into heads
-        q = self._separate_heads(q, self.num_heads)
-        k = self._separate_heads(k, self.num_heads)
-        v = self._separate_heads(v, self.num_heads)
-
-        # Attention
-        _, _, _, c_per_head = q.shape
-        attn = q @ k.permute(0, 1, 3, 2)  # B x N_heads x N_tokens x N_tokens
-        attn = attn / math.sqrt(c_per_head)
-        attn = torch.softmax(attn, dim=-1)
-
-        # Get output
-        out = attn @ v
+        q = self._separate_heads(q)
+        k = self._separate_heads(k)
+        v = self._separate_heads(v)
+        # Attention & Get output
+        import xformers.ops as xops
+        out = xops.memory_efficient_attention(q, k, v, scale=self.scale)
         out = self._recombine_heads(out)
         out = self.out_proj(out)
 

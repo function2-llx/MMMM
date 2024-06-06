@@ -88,7 +88,7 @@ class MMMMDataModule(ExpDataModuleBase):
     def __init__(
         self,
         dataset: DatasetConf,
-        tokenizer: MMMMTokenizer,
+        tokenizer: MMMMTokenizer | None,
         *args, **kwargs,
     ):
         super().__init__(*args, **kwargs)
