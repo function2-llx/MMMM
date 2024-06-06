@@ -70,6 +70,10 @@ class AlignSam(PreTrainedModel, LightningModule):
         self.gradient_checkpointing_enable({'use_reentrant': False})
 
     def get_class_embeddings(self, class_lists: list[list[str]]):
+        class_lists = [
+            [f'An image of the {class_name}.' for class_name in class_list]
+            for class_list in class_lists
+        ]
         if self.freeze_clip:
             return [
                 torch.stack([
