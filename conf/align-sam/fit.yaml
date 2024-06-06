@@ -29,7 +29,7 @@ optim:
       init_args:
         t_initial: ${trainer.max_steps}
         t_in_epochs: false
-        warmup_t: 250
+        warmup_t: 0
         warmup_prefix: true
     interval: step
     frequency: 250
@@ -62,4 +62,4 @@ model:
       disc_focal_gamma: 2
       disc_focal_alpha: 0.8
   seg_vol_path: pre-trained/SegVol
-
+  freeze_clip: true

@@ -1,5 +1,6 @@
 from functools import cache
 
+import cytoolz
 import torch
 from torch import nn
 from transformers import AutoModel, AutoTokenizer, CLIPTextModel, CLIPTokenizerFast, PreTrainedModel, PretrainedConfig
@@ -17,8 +18,7 @@ class TextEncoder(nn.Module):
     tokenizer: CLIPTokenizerFast
     clip_text_model: CLIPTextModel
 
-    @cache
-    def forward(self, text: str, device: torch.device):
+    def forward(self, text: str | list[str], device: torch.device):
         inputs = self.tokenizer(text, padding=True, return_tensors='pt').to(device)
         clip_outputs: BaseModelOutputWithPooling = self.clip_text_model(**inputs, return_dict=True)
         text_embedding = clip_outputs.pooler_output
@@ -41,6 +41,7 @@ class AlignSam(PreTrainedModel, LightningModule):
         sam: InstanceSam,
         loss: InstanceSamLoss,
         seg_vol_path: str,
+        freeze_clip: bool,
         **kwargs,
     ):
         super().__init__(PretrainedConfig(), **kwargs)
@@ -56,11 +57,31 @@ class AlignSam(PreTrainedModel, LightningModule):
         text_encoder.tokenizer = tokenizer
         text_encoder.__class__ = TextEncoder
         self.text_encoder = text_encoder
-        self.text_encoder.requires_grad_(False)
+        self.freeze_clip = freeze_clip
+        if freeze_clip:
+            self.text_encoder.requires_grad_(False)
+            self.text_encoder.forward = cache(self.text_encoder.forward)
+        else:
+            self.text_encoder.requires_grad_(True)
+            self.text_encoder.train()
 
     def on_fit_start(self):
         super().on_fit_start()
         self.gradient_checkpointing_enable({'use_reentrant': False})
+
+    def get_class_embeddings(self, class_lists: list[list[str]]):
+        if self.freeze_clip:
+            return [
+                torch.stack([
+                    self.text_encoder(class_name, device=self.device)
+                    for class_name in class_list
+                ])
+                for class_list in class_lists
+            ]
+        else:
+            classes = list(cytoolz.concat(class_lists))
+            class_embeddings = self.text_encoder(classes)
+            return class_embeddings.split(list(map(len, class_lists)))
 
     def training_step(self, batch: Batch, *args, **kwargs):
         class_lists: list[list[str]] = batch['grounding_classes']  # type: ignore

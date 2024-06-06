@@ -76,9 +76,9 @@ class LocalTransConf:
     log2_vit_patch_size_z_std = 0.5  # 2-sigma, 95.45%
     num_pos: int
     num_neg: int
-    mask_th_abs: int = 1000
-    mask_th_rel: float = 0.5
-    box_th: float = 0.5
+    mask_th_abs: int = 500
+    mask_th_rel: float = 0.3
+    box_th: float = 0.4
     grounding_prob: float = 0.99
     neg_grounding_prob: float = 0.2
     vlm: bool = True
@@ -89,8 +89,6 @@ def get_local_transform(
     inference: bool,
 ) -> Callable[[dict], DataPoint]:
     return SamplePatch(conf, tokenizer, inference)
-
-_ignore_anomalies = {'nodule/mass', 'other lesion'}
 
 def _get_patch_size_xy(size: npt.NDArray[np.int64], scale: float, stride: int, max_tokens: int) -> tuple2_t[int]:
     size_scaled = size / scale
@@ -250,8 +248,6 @@ class SamplePatch(mt.Randomizable):
             return mask_indexes, boxes, num_uncertain
 
     def _get_category(self, name: str):
-        if name in _ignore_anomalies:
-            return TargetCategory.ANOMALY
         return self.target_tax[name].category
 
     def _sample_targets(self, targets: Iterable[str], limit: int, category: str | None = None) -> list[str]:
@@ -361,6 +357,7 @@ class SamplePatch(mt.Randomizable):
         # 4. determine positive & negative classes within the cropped patch
         targets = {}
         neg_targets = list(cytoolz.concat(sparse.neg_targets.values()))
+        complete_anomaly: bool = True
         for target in cytoolz.concat(sparse.targets.values()):
             target: Sparse.Target
             mask_indexes, boxes, num_uncertain = self.filter_target(
@@ -381,6 +378,9 @@ class SamplePatch(mt.Randomizable):
                     'num_uncertain': num_uncertain,
                     'semantic': target.semantic,
                 }
+            elif self._get_category(target.name) == TargetCategory.ANOMALY:
+                # no certain positive, and there is uncertain
+                complete_anomaly = False
 
         # 5. generate conversation
         if trans_conf.vlm:
@@ -402,7 +402,7 @@ class SamplePatch(mt.Randomizable):
             conv_anomaly, grounding_classes_anomaly = gen_anomaly_conv(
                 self._sample_targets(targets, trans_conf.num_pos, TargetCategory.ANOMALY),
                 self._sample_targets(neg_targets, trans_conf.num_neg, TargetCategory.ANOMALY),
-                sparse.complete_anomaly,
+                complete_anomaly and sparse.complete_anomaly,
                 grounding,
                 neg_grounding,
                 self.tokenizer,
@@ -428,6 +428,9 @@ class SamplePatch(mt.Randomizable):
             grounding = True
             pos_classes = self._sample_targets(targets, trans_conf.num_pos)
             neg_classes = self._sample_targets(neg_targets, trans_conf.num_neg)
+            if len(pos_classes) == 0 and len(neg_classes) == 0:
+                # avoid empty input
+                neg_classes = ['no object']
             grounding_classes = pos_classes + neg_classes
             vlm_inputs = None
 
