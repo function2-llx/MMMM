@@ -28,7 +28,8 @@ from constants import (
     COMPOSITE_METRIC_V1_PATH,
     CHEXGPT_CONFIG_PATH,
     CHEXGPT_PATH,
-    CONDITIONS
+    CONDITIONS,
+    MICRO
 )
 
 
@@ -516,6 +517,7 @@ class CXRMetrics:
             summary[condition.lower() + ' chexbert f1'] = f1s[i]
 
         summary['macro chexbert f1'] = sum(f1s) / len(f1s)
+        summary['micro chexbert f1'] = sum([f1 for i, f1 in enumerate(f1s) if i in MICRO]) / len(MICRO)
 
         for key in results.keys():
             summary[key] = sum(results[key]) / len(results[key])

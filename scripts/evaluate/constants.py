@@ -26,3 +26,5 @@ CONDITIONS = ['Enlarged Cardiomediastinum', 'Cardiomegaly', 'Lung Opacity',
               'Lung Lesion', 'Edema', 'Consolidation', 'Pneumonia', 'Atelectasis',
               'Pneumothorax', 'Pleural Effusion', 'Pleural Other', 'Fracture',
               'Support Devices', 'No Finding']
+
+MICRO = [1, 4, 5, 7, 9]
