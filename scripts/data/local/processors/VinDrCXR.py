@@ -39,8 +39,8 @@ local_labels = {
     'Lung cyst': 'pulmonary cyst',
     'Lung Opacity': 'pulmonary opacification',
     'Mediastinal shift': 'mediastinal shift',
-    'Nodule/Mass': 'nodule/mass',
-    'Other lesion': 'other lesion',
+    'Nodule/Mass': 'lung nodule',
+    # 'Other lesion': 'other lesion',
     'Pleural effusion': 'pleural effusion',
     'Pleural thickening': 'pleural thickening',
     'Pneumothorax': 'pneumothorax',
@@ -102,10 +102,6 @@ class VinDrCXRProcessor(DefaultImageLoaderMixin, Processor):
     # pydicom reader seems to produce reversed intensities
     image_reader = 'itkreader'
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._ignore_anomalies = {'nodule/mass', 'other lesion'}
-
     def image_loader(self, path: Path) -> MetaTensor:
         loader = mt.LoadImage(self.image_reader, image_only=True, dtype=self.image_dtype, ensure_channel_first=True)
         image = loader(path)
@@ -138,21 +134,15 @@ class VinDrCXRProcessor(DefaultImageLoaderMixin, Processor):
             boxes = torch.cat(boxes)
         return targets, neg_targets, None, boxes
 
-    def _check_targets(self, targets: Iterable[str]):
-        return super()._check_targets(filter(lambda x: x not in self._ignore_anomalies, targets))
-
-    def _get_category(self, name: str):
-        if name in self._ignore_anomalies:
-            return TargetCategory.ANOMALY
-        else:
-            return super()._get_category(name)
-
-    def get_data_points(self) -> list[DataPoint]:
+    def get_data_points(self):
+        # only process the training set here
         image_objects = {}
         objects_df = pd.read_csv(self.dataset_root / 'annotations/annotations_train.csv')
+        objects_df = objects_df[objects_df['class_name'] != 'Other lesion']
         for _, row in objects_df.iterrows():
             image_objects.setdefault(row['image_id'], []).append(row)
         labels_df = pd.read_csv(self.dataset_root / 'annotations/image_labels_train.csv')
+        labels_df.drop(columns='Other lesion', inplace=True)
         image_labels = {}
         for _, row in labels_df.iterrows():
             image_labels.setdefault(row['image_id'], []).append(row)
@@ -163,6 +153,6 @@ class VinDrCXRProcessor(DefaultImageLoaderMixin, Processor):
                 labels=labels,
                 objects=image_objects[key],
             )
-            for key, labels in image_labels.items()
+            for key, labels in image_labels.items() if key in image_objects
         ]
-        return ret
+        return ret, None
