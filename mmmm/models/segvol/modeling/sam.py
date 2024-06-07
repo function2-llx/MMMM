@@ -42,6 +42,7 @@ class InstanceSamLoss(nn.Module):
         disc_weight: float,
         disc_focal_gamma: float,
         disc_focal_alpha: float | None = None,
+        sem_only: bool = False,
     ):
         super().__init__()
         self.mask_loss = mask_loss
@@ -51,6 +52,7 @@ class InstanceSamLoss(nn.Module):
         self.disc_weight = disc_weight
         self.disc_focal_gamma = disc_focal_gamma
         self.disc_focal_alpha = disc_focal_alpha
+        self.sem_only = sem_only
 
     def box_loss(self, input: torch.Tensor, target: torch.Tensor, reduce_batch: bool = True, return_dict: bool = False):
         """input and target are in CenterSizeMode"""
@@ -199,6 +201,7 @@ class InstanceSamLoss(nn.Module):
                 return ret
 
             # 1. semantic part
+            # TODO: fix _valid_mask checking
             if sem_masks is not None and (_valid_mask := num_uncertain >= 0).any():
                 sem_masks = sem_masks[:num_targets]
                 sem_boxes = sem_boxes[:num_targets]
@@ -210,82 +213,82 @@ class InstanceSamLoss(nn.Module):
                     self.box_loss(boxes_reg[:, 0][_valid_mask], sem_boxes, return_dict=True),
                     'semantic', 'box',
                 )
+            if not self.sem_only:
+                # 2. instance part
+                # drop the semantic part
+                masks_logits_ds = masks_logits_ds[:, 1:]
+                masks_logits = masks_logits[:, 1:]
+                boxes_reg = boxes_reg[:, 1:]
+                disc_logit = disc_logit.float()
+                # downsample the mask for matching to save computation
+                if masks_label is None:
+                    masks_label_ds = None
+                else:
+                    masks_label_ds = nnf.interpolate(
+                        masks_label[None].byte(), masks_logits_ds.shape[2:], mode='nearest-exact',
+                    )[0].bool()
 
-            # 2. instance part
-            # drop the semantic part
-            masks_logits_ds = masks_logits_ds[:, 1:]
-            masks_logits = masks_logits[:, 1:]
-            boxes_reg = boxes_reg[:, 1:]
-            disc_logit = disc_logit.float()
-            # downsample the mask for matching to save computation
-            if masks_label is None:
-                masks_label_ds = None
-            else:
-                masks_label_ds = nnf.interpolate(
-                    masks_label[None].byte(), masks_logits_ds.shape[2:], mode='nearest-exact',
-                )[0].bool()
-
-            num_uncertain_list = num_uncertain.tolist()
-            offset_list = index_offsets[:, 0].tolist()
-            match = torch.full((num_targets, masks_logits.shape[1]), MATCH_UNCERTAIN, dtype=torch.long, device=masks_logits.device)
-            for i in range(num_targets):
-                if semantic[i] or (_num_uncertain := num_uncertain_list[i]) == -1:
-                    # we know that the target presents on the image, but no localized information available, skip
-                    continue
-                label_slice = slice(*index_offsets[i])
-                match[i] = self._match_instances(
-                    masks_logits_ds[i, :, None],
-                    boxes_reg[i],
-                    disc_logit[i],
-                    None if masks_label_ds is None else masks_label_ds[label_slice, None],
-                    boxes_label[label_slice],
-                    _num_uncertain,
-                    offset_list[i],
-                )
-            match_pos_mask: torch.BoolTensor = match >= 0  # type: ignore
-            match_pos = match[match_pos_mask]
-            match_neg_mask: torch.BoolTensor = match == MATCH_NEGATIVE  # type: ignore
-            match_certain_mask = match != MATCH_UNCERTAIN
-            loss += _accumulate(
-                self.disc_loss(
-                    disc_logit[match_certain_mask],
-                    match_pos_mask[match_certain_mask],
-                    return_dict=True,
-                ),
-                'instance', 'disc',
-            )
-            if match_pos.shape[0] > 0:
-                with torch.no_grad():
-                    _accumulate(
-                        self.disc_loss(disc_logit[match_pos_mask], True, return_dict=True),
-                        'instance', 'disc-pos',
+                num_uncertain_list = num_uncertain.tolist()
+                offset_list = index_offsets[:, 0].tolist()
+                match = torch.full((num_targets, masks_logits.shape[1]), MATCH_UNCERTAIN, dtype=torch.long, device=masks_logits.device)
+                for i in range(num_targets):
+                    if semantic[i] or (_num_uncertain := num_uncertain_list[i]) == -1:
+                        # we know that the target presents on the image, but no localized information available, skip
+                        continue
+                    label_slice = slice(*index_offsets[i])
+                    match[i] = self._match_instances(
+                        masks_logits_ds[i, :, None],
+                        boxes_reg[i],
+                        disc_logit[i],
+                        None if masks_label_ds is None else masks_label_ds[label_slice, None],
+                        boxes_label[label_slice],
+                        _num_uncertain,
+                        offset_list[i],
                     )
+                match_pos_mask: torch.BoolTensor = match >= 0  # type: ignore
+                match_pos = match[match_pos_mask]
+                match_neg_mask: torch.BoolTensor = match == MATCH_NEGATIVE  # type: ignore
+                match_certain_mask = match != MATCH_UNCERTAIN
                 loss += _accumulate(
-                    self.box_loss(
-                        boxes_reg[match_pos_mask], boxes_label[match_pos], return_dict=True,
+                    self.disc_loss(
+                        disc_logit[match_certain_mask],
+                        match_pos_mask[match_certain_mask],
+                        return_dict=True,
                     ),
-                    'instance', 'box',
+                    'instance', 'disc',
                 )
-                if masks_label is not None:
+                if match_pos.shape[0] > 0:
+                    with torch.no_grad():
+                        _accumulate(
+                            self.disc_loss(disc_logit[match_pos_mask], True, return_dict=True),
+                            'instance', 'disc-pos',
+                        )
                     loss += _accumulate(
-                        self.mask_loss(
-                            masks_logits[match_pos_mask][:, None], masks_label[match_pos, None], return_dict=True,
+                        self.box_loss(
+                            boxes_reg[match_pos_mask], boxes_label[match_pos], return_dict=True,
                         ),
-                        'instance', 'mask-pos',
+                        'instance', 'box',
                     )
-            if match_neg_mask.any():
-                with torch.no_grad():
-                    _accumulate(
-                        self.disc_loss(disc_logit[match_neg_mask], False, return_dict=True),
-                        'instance', 'disc-neg',
-                    )
-                with torch.set_grad_enabled(self.use_neg_mask):
-                    neg_mask_loss = _accumulate(
-                        self.mask_loss(masks_logits[match_neg_mask][:, None], return_dict=True),
-                        'instance', 'mask-neg',
-                    )
-                    if self.use_neg_mask:
-                        loss += neg_mask_loss
+                    if masks_label is not None:
+                        loss += _accumulate(
+                            self.mask_loss(
+                                masks_logits[match_pos_mask][:, None], masks_label[match_pos, None], return_dict=True,
+                            ),
+                            'instance', 'mask-pos',
+                        )
+                if match_neg_mask.any():
+                    with torch.no_grad():
+                        _accumulate(
+                            self.disc_loss(disc_logit[match_neg_mask], False, return_dict=True),
+                            'instance', 'disc-neg',
+                        )
+                    with torch.set_grad_enabled(self.use_neg_mask):
+                        neg_mask_loss = _accumulate(
+                            self.mask_loss(masks_logits[match_neg_mask][:, None], return_dict=True),
+                            'instance', 'mask-neg',
+                        )
+                        if self.use_neg_mask:
+                            loss += neg_mask_loss
         return loss, log_dict
 
     def forward(

@@ -7,7 +7,7 @@ from transformers import AutoModel, AutoTokenizer, CLIPTextModel, CLIPTokenizerF
 from transformers.modeling_outputs import BaseModelOutputWithPooling
 
 from luolib.lightning import LightningModule
-from mmmm.data.defs import Batch, mmmm_debug
+from mmmm.data.defs import Batch
 from mmmm.models import InstanceSam
 from mmmm.models.segvol.modeling.sam import InstanceSamLoss, InstanceSamOutput
 
@@ -43,6 +43,7 @@ class AlignSam(PreTrainedModel, LightningModule):
         seg_vol_path: str,
         freeze_clip: bool = True,
         loss: InstanceSamLoss | None = None,
+        num_classes: int | None = None,
         **kwargs,
     ):
         super().__init__(PretrainedConfig(), **kwargs)
@@ -66,27 +67,45 @@ class AlignSam(PreTrainedModel, LightningModule):
             self.text_encoder.requires_grad_(True)
             self.text_encoder.train()
 
+        if num_classes is None:
+            self.class_embeddings = None
+        else:
+            self.class_embeddings = nn.Embedding(num_classes, 768)
+            self._class_cnt = 0
+
     def on_fit_start(self):
         super().on_fit_start()
         self.gradient_checkpointing_enable({'use_reentrant': False})
 
+    @cache
+    def _get_class_idx(self, class_name: str):
+        ret = self._class_cnt
+        self._class_cnt += 1
+        return ret
+
     def get_class_embeddings(self, class_lists: list[list[str]]):
-        class_lists = [
-            [f'An image of the {class_name}.' for class_name in class_list]
-            for class_list in class_lists
-        ]
-        if self.freeze_clip:
-            return [
-                torch.stack([
-                    self.text_encoder(class_name, device=self.device)
-                    for class_name in class_list
-                ])
+        if self.class_embeddings is None:
+            class_lists = [
+                [f'An image of the {class_name}.' for class_name in class_list]
                 for class_list in class_lists
             ]
+            if self.freeze_clip:
+                return [
+                    torch.stack([
+                        self.text_encoder(class_name, device=self.device)
+                        for class_name in class_list
+                    ])
+                    for class_list in class_lists
+                ]
+            else:
+                classes = list(cytoolz.concat(class_lists))
+                class_embeddings = self.text_encoder(classes)
+                return class_embeddings.split(list(map(len, class_lists)))
         else:
-            classes = list(cytoolz.concat(class_lists))
-            class_embeddings = self.text_encoder(classes)
-            return class_embeddings.split(list(map(len, class_lists)))
+            return [
+                self.class_embeddings[[self._get_class_idx(class_name) for class_name in class_list]]
+                for class_list in class_lists
+            ]
 
     def forward(self, batch: Batch):
         class_lists: list[list[str]] = batch['grounding_classes']  # type: ignore
@@ -119,9 +138,13 @@ class AlignSam(PreTrainedModel, LightningModule):
         dice_pos = {}
         grounding_classes = batch['grounding_classes']  # type: ignore
         for batch_idx, targets in enumerate(grounding_classes):
-            masks_preds = output.masks_logits[batch_idx].sigmoid() > 0.5
-            for i, target in enumerate(targets):
-                dice_pos.setdefault(target, []).append(_dice(masks_preds[i, 0], batch['semantic_masks'][batch_idx][i]))
+            masks_preds = output.masks_logits[batch_idx].float().sigmoid() > 0.5
+            if sem_masks := batch['semantic_masks'][batch_idx]:
+                for i, target in enumerate(targets):
+                    if (label := sem_masks[i]).any():
+                        dice_pos.setdefault(target, []).append(
+                            _dice(masks_preds[i, 0], label) * 100,
+                        )
         dice_pos = {
             k: torch.stack(v).mean()
             for k, v in dice_pos.items()
