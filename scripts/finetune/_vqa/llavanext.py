@@ -95,14 +95,10 @@ class LLAVANVQATransform(VQATransform):
         # self.processor.image_processor.size = {"shortest_edge": 224}
 
     def __call__(self, data):
-        image = Image.open(data['image'])
-        image = tvtf.resize(image, self.resize)
-        image_size = torch.tensor(image.size)
-        # image = self.processor.image_processor(image)['pixel_values'][0]
-
         image = read_image(data['image'], ImageReadMode.RGB)
         image = tvtf.to_dtype(image, torch.float32, scale=True)
         image = tvtf.resize(image, self.resize)
+        image_size = torch.tensor(image.size)
         intensity_norm_(image)
 
         pairs = [(qa['question'], qa['answer']) for qa in data['vqa']]

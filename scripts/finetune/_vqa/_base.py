@@ -13,12 +13,12 @@ from mmmm.data.dataset.vl import get_vl_data_list
 from mmmm.data.defs import Split
 from monai import transforms as mt
 
-
 class VQATransform(mt.Randomizable):
     def __init__(self, tokenizer: PreTrainedTokenizer, resize: tuple2_t[int]):
         super().__init__()
         self.tokenizer = tokenizer
         self.resize = resize
+
 
     def __call__(self, data):
         image = read_image(data['image'], ImageReadMode.RGB)
