@@ -12,6 +12,7 @@ from utils import (
     GenericMetrics,
     LlamaMetrics,
     CXRMetrics,
+    CTMetrics
 )
 
 
@@ -129,6 +130,8 @@ class Evaluator:
             metrics = LlamaMetrics()
         elif metrics == 'cxr':
             metrics = CXRMetrics()
+        elif metrics == 'ct':
+            metrics = CTMetrics()
         metrics.process(
             self.output_dir / f'{self.task}_{self.dataset}_{self.model}_{self.setting}',
         )

@@ -3,9 +3,6 @@ CHEXBERT_PATH = '/data/chexbert/chexbert.pth'
 NORMALIZER_PATH = 'third-party/CXR-Report-Metric/CXRMetric/normalizer.pkl'
 COMPOSITE_METRIC_V0_PATH = 'third-party/CXR-Report-Metric/CXRMetric/composite_metric_model.pkl'
 COMPOSITE_METRIC_V1_PATH = 'third-party/CXR-Report-Metric/CXRMetric/radcliq-v1.pkl'
-CHEXGPT_CONFIG_PATH = "third-party/CheXGPT/configs/head/evaluation_chexgpt.yaml"
-CHEXGPT_PATH = "/data/chexgpt/model_mixed.ckpt"
-
 
 LLAMA_SYSTEM_PROMPT = '''
 You are an AI assistant with expertise in radiology.
@@ -30,9 +27,17 @@ Prediction: "{prediction}"
 Is the prediction correct? Provide a concise analysis and give a score of 0 or 1. Answer in the format "Analysis: ... Score: ...".
 '''
 
-CONDITIONS = ['Enlarged Cardiomediastinum', 'Cardiomegaly', 'Lung Opacity',
+CHEXPERT_CONDITIONS = ['Enlarged Cardiomediastinum', 'Cardiomegaly', 'Lung Opacity',
               'Lung Lesion', 'Edema', 'Consolidation', 'Pneumonia', 'Atelectasis',
               'Pneumothorax', 'Pleural Effusion', 'Pleural Other', 'Fracture',
               'Support Devices', 'No Finding']
 
-MICRO = [1, 4, 5, 7, 9]
+RADBERT_CONDITIONS = [
+    'Medical material','Arterial wall calcification', 'Cardiomegaly', 'Pericardial effusion',
+    'Coronary artery wall calcification', 'Hiatal hernia','Lymphadenopathy', 'Emphysema', 'Atelectasis',
+    'Lung nodule','Lung opacity', 'Pulmonary fibrotic sequela', 'Pleural effusion',
+    'Mosaic attenuation pattern','Peribronchial thickening', 'Consolidation', 'Bronchiectasis',
+    'Interlobular septal thickening'
+]
+
+CHEXPERT_MICRO = [1, 4, 5, 7, 9]

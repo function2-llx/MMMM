@@ -10,14 +10,15 @@ import pandas as pd
 import pickle as pkl
 from radgraph import F1RadGraph
 import random
+from scipy.special import expit
 from sklearn.metrics import f1_score
 import torch
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader, SequentialSampler
 from tqdm import tqdm
-from transformers import BertTokenizer
+from transformers import AutoTokenizer, BertTokenizer
 
 
-from mmmm.data.defs import PROCESSED_VL_DATA_ROOT
+from mmmm.data.defs import ORIGIN_VL_DATA_ROOT, PROCESSED_VL_DATA_ROOT
 from constants import (
     LLAMA3_PATH,
     LLAMA_SYSTEM_PROMPT,
@@ -26,10 +27,9 @@ from constants import (
     NORMALIZER_PATH,
     COMPOSITE_METRIC_V0_PATH,
     COMPOSITE_METRIC_V1_PATH,
-    CHEXGPT_CONFIG_PATH,
-    CHEXGPT_PATH,
-    CONDITIONS,
-    MICRO
+    CHEXPERT_CONDITIONS,
+    RADBERT_CONDITIONS,
+    CHEXPERT_MICRO
 )
 
 
@@ -86,7 +86,7 @@ class ReportTestDataset(Dataset):
                             else 'Can you provide the findings for this medical image?'
                     ),
                     'answer': (
-                        f'Findings: {x["findings"]}\nImpression: {x["impression"]}'
+                        f'Findings: {x["findings"]} Impression: {x["impression"]}'
                         if x.get('impression')
                         else x['findings']
                     ),
@@ -456,15 +456,15 @@ class CXRMetrics:
     def compute_chexbert_f1(self, df: pd.DataFrame):
         self.chexbert_model.logits = True
 
-        prediction_labels = [[] for _ in range(len(CONDITIONS))]
-        reference_labels = [[] for _ in range(len(CONDITIONS))]
+        prediction_labels = [[] for _ in range(len(CHEXPERT_CONDITIONS))]
+        reference_labels = [[] for _ in range(len(CHEXPERT_CONDITIONS))]
         for _, row in tqdm(df.iterrows(), total=df.shape[0]):
             prediction = self.chexbert_tokenize(
                 str(row['prediction']) if pd.notna(row['prediction']) else ''
             )
             attention_mask = torch.ones(1, prediction.shape[1]).to('cuda')
             prediction = self.chexbert_model(prediction, attention_mask)
-            for i in range(len(CONDITIONS)):
+            for i in range(len(CHEXPERT_CONDITIONS)):
                 prediction_labels[i].append(
                     torch.argmax(prediction[i], dim=1).item()
                 )
@@ -472,7 +472,7 @@ class CXRMetrics:
             reference = self.chexbert_tokenize(str(row['answer']))
             attention_mask = torch.ones(1, reference.shape[1]).to('cuda')
             reference = self.chexbert_model(reference, attention_mask)
-            for i in range(len(CONDITIONS)):
+            for i in range(len(CHEXPERT_CONDITIONS)):
                 reference_labels[i].append(
                     torch.argmax(reference[i], dim=1).item()
                 )
@@ -515,13 +515,13 @@ class CXRMetrics:
         df['radcliq-v0'], df['radcliq-v1'] = results['radcliq-v0'], results['radcliq-v1']
 
         prediction_labels, reference_labels, f1s = self.compute_chexbert_f1(df)
-        for i, condition in enumerate(CONDITIONS):
+        for i, condition in enumerate(CHEXPERT_CONDITIONS):
             df[condition.lower() + ' chexbert prediction'] = prediction_labels[i]
             df[condition.lower() + ' chexbert reference'] = reference_labels[i]
             summary[condition.lower() + ' chexbert f1'] = f1s[i]
 
         summary['macro chexbert f1'] = sum(f1s) / len(f1s)
-        summary['micro chexbert f1'] = sum([f1 for i, f1 in enumerate(f1s) if i in MICRO]) / len(MICRO)
+        summary['micro chexbert f1'] = sum([f1 for i, f1 in enumerate(f1s) if i in CHEXPERT_MICRO]) / len(CHEXPERT_MICRO)
 
         for key in results.keys():
             summary[key] = sum(results[key]) / len(results[key])
@@ -530,6 +530,55 @@ class CXRMetrics:
         with open(str(run) + '.json', 'w') as f:
             json.dump(summary, f, indent=4)
 
- 
+
 class CTMetrics:
-    pass
+    def __init__(self):
+        sys.path.append('third-party/CT-CLIP/text_classifier')
+        from classifier import RadBertClassifier
+
+        radbert = RadBertClassifier(n_classes=len(RADBERT_CONDITIONS))
+        radbert.load_state_dict(torch.load(ORIGIN_VL_DATA_ROOT / 'CT-RATE' / 'models' / 'RadBertClassifier.pth'), strict=False)
+        radbert = radbert.to('cuda')
+        radbert.eval()
+
+        self.radbert = radbert
+        self.tokenizer = AutoTokenizer.from_pretrained('zzxslp/RadBERT-RoBERTa-4m', do_lower_case=True)
+    
+    def process(self, run: Path):
+        sys.path.append('third-party/CT-CLIP/text_classifier')
+
+        df = pd.read_csv(str(run) + '.csv')
+        if os.path.exists(str(run) + '.json'):
+            with open(str(run) + '.json', 'r') as f:
+                summary = json.load(f)
+        else:
+            summary = {}
+
+        pred_logits = np.zeros(len(RADBERT_CONDITIONS)).reshape(1, len(RADBERT_CONDITIONS))
+
+        for _, row in tqdm(df.iterrows(), total=df.shape[0]):
+            inputs = self.tokenizer(row['prediction'].replace('\n', ' '), return_tensors='pt', max_length=512, padding='max_length', truncation=True)
+            logits = self.radbert(input_ids=inputs['input_ids'].to('cuda'), attn_mask=inputs['attention_mask'].to('cuda'))
+            pred_logits = np.concatenate((pred_logits, logits.detach().cpu().numpy()), axis=0)
+
+        pred_logits = pred_logits[1:]
+        prediction_labels = expit(pred_logits)
+        
+        prediction_labels[prediction_labels >= 0.5] = 1
+        prediction_labels[prediction_labels < 0.5] = 0
+
+        print(prediction_labels)
+
+        reference_labels = pd.read_csv(ORIGIN_VL_DATA_ROOT / 'CT-RATE' / 'dataset' / 'multi_abnormality_labels' / 'valid_predicted_labels.csv')
+
+        f1s = []
+        for i, condition in enumerate(RADBERT_CONDITIONS):
+            df[condition.lower() + ' radbert prediction'] = prediction_labels[:, i]
+            f1s.append(f1_score(prediction_labels[:, i], reference_labels[condition]))
+            summary[condition.lower() + ' radbert f1'] = f1s[i]
+
+        summary['macro radbert f1'] = sum(f1s) / len(f1s)
+
+        df.to_csv(str(run) + '.csv', index=False)
+        with open(str(run) + '.json', 'w') as f:
+            json.dump(summary, f, indent=4)

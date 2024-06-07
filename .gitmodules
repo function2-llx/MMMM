@@ -10,3 +10,6 @@
 [submodule "third-party/CXR-Report-Metric"]
 	path = third-party/CXR-Report-Metric
 	url = git@github.com:rajpurkarlab/CXR-Report-Metric.git
+[submodule "third-party/CT-CLIP"]
+	path = third-party/CT-CLIP
+	url = git@github.com:ibrahimethemhamamci/CT-CLIP.git
