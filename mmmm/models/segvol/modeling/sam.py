@@ -306,7 +306,7 @@ class InstanceSamLoss(nn.Module):
         loss_list = []
         log_dict = {}
         for i in range(batch_size):
-            _loss, _vg_log_dict = self._compute_loss(
+            _loss, _log_dict = self._compute_loss(
                 masks_logits[i], masks_logits_low_res[i],
                 boxes_reg[i], disc_logit[i],
                 masks_label[i], boxes_label[i],
@@ -314,7 +314,7 @@ class InstanceSamLoss(nn.Module):
                 index_offsets[i], semantic[i], num_uncertain[i],
             )
             loss_list.append(_loss)
-            for k, v in _vg_log_dict.items():
+            for k, v in _log_dict.items():
                 log_dict.setdefault(k, []).append(v)
         loss = torch.stack(loss_list).mean()
         with torch.no_grad():

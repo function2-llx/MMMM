@@ -38,11 +38,11 @@ model:
     class_path: mmmm.models.build_sam
     init_args:
       patch_size: 16
-      pos_embed_shape: [ 8, 20, 20 ]
+      pos_embed_shape: [8, 20, 20]
       num_instances: 12
       pt_in_channels: 1
-      pt_patch_size: [ 4, 16, 16 ]
-      pt_pos_embed_shape: [ 8, 16, 16 ]
+      pt_patch_size: [4, 16, 16]
+      pt_pos_embed_shape: [8, 16, 16]
       checkpoint: pre-trained/SegVol/pytorch_model.bin
       weight_prefix: model.
   loss:
