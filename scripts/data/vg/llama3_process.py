@@ -1,6 +1,7 @@
 import sys
 
 import orjson
+import torch
 from vllm import LLM, SamplingParams
 
 from mmmm.data.defs import PROCESSED_VG_DATA_ROOT, PROCESSED_VL_DATA_ROOT
@@ -18,9 +19,10 @@ sampling_params = SamplingParams(
 
 llm = LLM(
     model=model_id,
-    tensor_parallel_size=4,
+    tensor_parallel_size=torch.cuda.device_count(),
     disable_custom_all_reduce=True,
     max_model_len=2048,
+    enable_prefix_caching=True,
 )
 
 anatomy_lsit = [

@@ -1,21 +1,80 @@
+from einops import repeat
+from lightning.fabric.utilities import move_data_to_device
 from monai import transforms as mt
+from peft import PeftModel
 from PIL import Image
 import torch
 import torchvision.transforms as transforms
+from torchvision.transforms.v2 import functional as tvtf
 from tqdm import tqdm
 
+from luolib.types import tuple3_t
 from luolib.utils.zstd import load_pt_zst
 from scripts.evaluate.utils import dump_results
+from scripts.finetune._vqa.llavanext import MyLlavaNextForConditionalGeneration
 
 
-def setup_llavanext(checkpoint: str, tokenizer: str):
+def build_conversation_input_ids(tokenizer, prompt, image, return_tensors='pt'):
+    def intensity_norm_(
+        image: torch.Tensor,
+        mean: tuple3_t[float] = (0.48145466, 0.4578275, 0.40821073),
+        std: tuple3_t[float] = (0.26862954, 0.26130258, 0.27577711),
+    ):
+        """default mean and std is adopted from CogVLM (, which is from CLIP)"""
+        mean = image.new_tensor(mean)
+        std = image.new_tensor(std)
+        x = image.view(image.shape[0], -1)
+        x.sub_(mean[:, None]).div_(std[:, None])
+
+    image = tvtf.to_image(image)
+    image = tvtf.to_dtype(image, torch.float32, scale=True)
+    image = tvtf.resize(image, (224, 224))
+    image_size = torch.tensor((224, 224))
+    intensity_norm_(image)
+
+    prompt_ids = torch.tensor(tokenizer.encode(prompt, add_special_tokens=False))
+    input_ids = torch.cat([
+        torch.tensor([tokenizer.bos_token_id]).unsqueeze(1),
+        prompt_ids.unsqueeze(1),
+    ])
+
+    input_ids = input_ids.reshape(input_ids.shape[-1], input_ids.shape[0])
+    inputs = {
+        'input_ids': input_ids,
+        'pixel_values': repeat(image.unsqueeze(0), 'n ... -> n l2 ...', l2=2),
+        'image_sizes': image_size.unsqueeze(0),
+        'attention_mask': torch.ones_like(input_ids),
+    }
+    return inputs
+
+
+def setup_llavanext(checkpoint: str, adapter: str, tokenizer: str, setting: str):
     from transformers import LlavaNextProcessor, LlavaNextForConditionalGeneration
 
-    model = LlavaNextForConditionalGeneration.from_pretrained(
-        checkpoint, 
-        torch_dtype=torch.float16, 
-        low_cpu_mem_usage=True
-    )
+    if setting == 'finetuned':
+        model = MyLlavaNextForConditionalGeneration.from_pretrained(
+            checkpoint,
+            image_grid_pinpoints=[[224, 224]],
+            vision_config={
+                "hidden_size": 1024,
+                "image_size": 224,
+                "intermediate_size": 4096,
+                "model_type": "clip_vision_model",
+                "num_attention_heads": 16,
+                "num_hidden_layers": 24,
+                "patch_size": 14,
+                "projection_dim": 768,
+                "vocab_size": 32000
+            },
+        )
+        model = PeftModel.from_pretrained(model, adapter)
+    else:
+        model = LlavaNextForConditionalGeneration.from_pretrained(
+            checkpoint, 
+            torch_dtype=torch.float16, 
+            low_cpu_mem_usage=True
+        )
+
     model = model.to('cuda')
     model.eval()
 
@@ -52,7 +111,7 @@ class LlavaNextTransform(mt.RandomizableTransform):
         else:
             image = Image.open(data['image']).convert('RGB')
 
-        prompt = 'A chat between a curious human and an artificial intelligence assistant. The assistant gives helpful, detailed, and polite answers to the human\'s questions. USER: <image>\n' + data['question'] + ' ASSISTANT:'
+        prompt = '<image>\nQuestion: ' + data['question'] + ' Answer:'
 
         inputs = self.processor(prompt, image, return_tensors='pt')
 
@@ -69,13 +128,14 @@ def llavanext_vl_evaluate(model, processor, dataloader, output):
     for i, sample in enumerate(tqdm(dataloader)):
         
         with torch.inference_mode():
+            inputs = move_data_to_device(sample['inputs'], 'cuda')
             prediction = processor.decode(
                 model.generate(
-                    **sample['inputs'],
+                    **inputs,
                     max_new_tokens=256,
                 )[0],
                 skip_special_tokens=True,
-            ).split('ASSISTANT:')[1].strip()
+            ).split('Answer:')[1].strip()
 
         results.append(
             {

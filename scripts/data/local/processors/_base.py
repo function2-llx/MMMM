@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
 from dataclasses import dataclass
+from functools import partial
 import gc
 import itertools as it
 from logging import Logger
@@ -73,7 +74,7 @@ class MultiClassDataPoint(SegDataPoint):
 _CLIP_LOWER = norm.cdf(-3)
 _CLIP_UPPER = norm.cdf(3)
 
-def clip_intensity(image: torch.Tensor) -> mt.SpatialCrop:
+def clip_intensity(image: torch.Tensor, exclude_min: bool = False) -> mt.SpatialCrop:
     """clip the intensity in-place
     Returns:
         the cropper
@@ -82,8 +83,12 @@ def clip_intensity(image: torch.Tensor) -> mt.SpatialCrop:
     if image.dtype == torch.uint8:
         minv = image.new_tensor(0.)
     else:
-        minv = lt.quantile(x, _CLIP_LOWER, 1, True)
-        maxv = lt.quantile(x, _CLIP_UPPER, 1, True)
+        ref = x
+        if exclude_min:
+            assert x.shape[0] == 1
+            ref = ref[ref > ref.min()][None]
+        minv = lt.quantile(ref, _CLIP_LOWER, 1, True)
+        maxv = lt.quantile(ref, _CLIP_UPPER, 1, True)
         x.clamp_(minv, maxv)
     select_mask = image.new_empty((1, *image.shape[1:]), dtype=torch.bool)
     torch.any(x > minv, dim=0, keepdim=True, out=select_mask.view(1, -1))
@@ -274,8 +279,8 @@ class Processor(ABC):
             self.logger.info(f'{len(pending_data_points)} data points to be processed')
             self.case_data_root.mkdir(parents=True, exist_ok=True)
             process_map(
-                self.process_data_point,
-                pending_data_points, it.repeat(empty_cache), it.repeat(raise_error),
+                partial(self.process_data_point, empty_cache=empty_cache, raise_error=raise_error),
+                pending_data_points,
                 max_workers=self.max_workers, chunksize=self.chunksize, ncols=80,
             )
         info_list: list[dict | None] = process_map(

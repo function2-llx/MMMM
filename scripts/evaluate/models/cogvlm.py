@@ -15,9 +15,9 @@ from luolib.utils.zstd import load_pt_zst
 from scripts.evaluate.utils import dump_results
 
 
-def setup_cogvlm(checkpoint: str, tokenizer: str, setting: str):
+def setup_cogvlm(checkpoint: str, adapter: str, tokenizer: str, setting: str):
     model = AutoModelForCausalLM.from_pretrained(
-        'THUDM/cogvlm-chat-hf',
+        checkpoint,
         torch_dtype=torch.bfloat16,
         low_cpu_mem_usage=True,
         trust_remote_code=True,
@@ -33,8 +33,7 @@ def setup_cogvlm(checkpoint: str, tokenizer: str, setting: str):
             *pos_embed.shape[:2], _weight=pos_embed,
         )
         model.config.vision_config['image_size'] = 224
-    if checkpoint:
-        model = PeftModel.from_pretrained(model, checkpoint)
+        model = PeftModel.from_pretrained(model, adapter)
     tokenizer = LlamaTokenizer.from_pretrained(tokenizer if tokenizer else 'lmsys/vicuna-7b-v1.5')
 
     model = model.to('cuda')

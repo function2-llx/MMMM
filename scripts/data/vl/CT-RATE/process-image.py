@@ -8,6 +8,7 @@ import orjson
 import torch
 import torchvision.transforms.v2.functional as tvtf
 
+from luolib.types import tuple2_t
 from luolib.utils import save_pt_zst
 import monai.transforms as mt
 from monai.utils import GridSampleMode
@@ -54,7 +55,7 @@ class Processor(DefaultImageLoaderMixin, _ProcessorBase):
                 orient = mt.Orientation(self.get_orientation(image))
                 image = orient(image).contiguous()
                 # 2. clip intensity, and crop the images & masks
-                cropper = clip_intensity(image)
+                cropper = clip_intensity(image, exclude_min=True)
                 image = cropper(image)  # type: ignore
                 # 3. compute resize (default: adapt to self.max_smaller_edge and self.min_aniso_ratio)
                 resize_shape = get_resize(image.shape[1:])
@@ -95,9 +96,10 @@ class Processor(DefaultImageLoaderMixin, _ProcessorBase):
 def main():
     parser = ArgumentParser()
     parser.add_argument('--max_workers', type=int, default=8)
+    parser.add_argument('--range', type=tuple2_t[int | None], default=(None, None))
     args = parser.parse_args()
     processor = Processor(getLogger(), max_workers=args.max_workers, chunksize=1, override=True)
-    processor.process(empty_cache=True)
+    processor.process(empty_cache=True, limit=args.range)
 
 if __name__ == '__main__':
     main()

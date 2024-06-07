@@ -10,6 +10,7 @@ import pandas as pd
 import pickle as pkl
 from radgraph import F1RadGraph
 import random
+from sklearn.metrics import f1_score
 import torch
 from torch.utils.data import Dataset
 from tqdm import tqdm
@@ -20,12 +21,15 @@ from mmmm.data.defs import PROCESSED_VL_DATA_ROOT
 from constants import (
     LLAMA3_PATH,
     LLAMA_SYSTEM_PROMPT,
-    LLAMA_VQA_USER_PROMPT,
-    LLAMA_REPORT_USER_PROMPT,
+    LLAMA_USER_PROMPT,
     CHEXBERT_PATH,
     NORMALIZER_PATH,
     COMPOSITE_METRIC_V0_PATH,
-    COMPOSITE_METRIC_V1_PATH
+    COMPOSITE_METRIC_V1_PATH,
+    CHEXGPT_CONFIG_PATH,
+    CHEXGPT_PATH,
+    CONDITIONS,
+    MICRO
 )
 
 
@@ -201,7 +205,7 @@ class LlamaMetrics:
         from vllm import LLM
 
         self.llama = LLM(
-            model=LLAMA3_PATH, dtype='bfloat16', gpu_memory_utilization=0.9, tensor_parallel_size=2
+            model=LLAMA3_PATH, dtype='bfloat16', gpu_memory_utilization=0.9, tensor_parallel_size=4
         )
 
     def process(self, task: str, run: Path):
@@ -215,37 +219,8 @@ class LlamaMetrics:
             summary = {}
 
         tokenizer = self.llama.get_tokenizer()
-        conversations = [
-            tokenizer.apply_chat_template(
-                [
-                    {'role': 'system', 'content': LLAMA_SYSTEM_PROMPT},
-                    {
-                        'role': 'user',
-                        'content': LLAMA_VQA_USER_PROMPT.format(
-                            question=str(row['question']),
-                            answer=str(row['answer']),
-                            prediction=(
-                                str(row['prediction'])
-                                if pd.notna(row['prediction'])
-                                else ''
-                            ),
-                        ) if task == 'vqa' else LLAMA_REPORT_USER_PROMPT.format(
-                            answer=str(row['answer']),
-                            prediction=(
-                                str(row['prediction'])
-                                if pd.notna(row['prediction'])
-                                else ''
-                            ),
-                        ),
-                    },
-                ],
-                tokenize=False,
-            )
-            for _, row in df.iterrows()
-        ]
-
         sampling_params = SamplingParams(
-            max_tokens=256,
+            max_tokens=1024,
             min_tokens=1,
             temperature=0.1,
             stop_token_ids=[
@@ -253,6 +228,28 @@ class LlamaMetrics:
                 tokenizer.convert_tokens_to_ids('<|eot_id|>'),
             ],
         )
+
+        conversations = [
+            tokenizer.apply_chat_template(
+                [
+                    {'role': 'system', 'content': LLAMA_SYSTEM_PROMPT},
+                    {
+                        'role': 'user',
+                        'content': LLAMA_USER_PROMPT.format(
+                            question=str(row['question']),
+                            answer=str(row['answer']),
+                            prediction=(
+                                str(row['prediction'])
+                                if pd.notna(row['prediction'])
+                                else ''
+                            ),
+                        )
+                    },
+                ],
+                tokenize=False,
+            )
+            for _, row in df.iterrows()
+        ]
 
         responses = self.llama.generate(
             prompts=conversations,
@@ -338,39 +335,27 @@ class CXRMetrics:
         )
         self.setup_radcliq()
 
-    def compute_chexbert(self, prediction: str, reference: str):
+    def chexbert_tokenize(self, text: str):
+        text = self.chexbert_tokenizer.tokenize(text)
+        if text:
+            text = self.chexbert_tokenizer.encode_plus(text)['input_ids']
+            if len(text) > 512:
+                text = text[:511] + [self.chexbert_tokenizer.sep_token_id]
+        else:
+            text = [
+                self.chexbert_tokenizer.cls_token_id + self.chexbert_tokenizer.sep_token_id
+            ]
+        return torch.LongTensor(text).unsqueeze(0).to('cuda')
+
+    def compute_chexbert_similarity(self, prediction: str, reference: str):
         with torch.inference_mode():
-            prediction = self.chexbert_tokenizer.tokenize(prediction)
-            if prediction:
-                prediction = self.chexbert_tokenizer.encode_plus(prediction)[
-                    'input_ids'
-                ]
-                if len(prediction) > 512:
-                    prediction = prediction[:511] + [
-                        self.chexbert_tokenizer.sep_token_id
-                    ]
-            else:
-                prediction = [
-                    self.chexbert_tokenizer.cls_token_id
-                    + self.chexbert_tokenizer.sep_token_id
-                ]
-            prediction = torch.LongTensor(prediction).unsqueeze(0).to('cuda')
+            prediction = self.chexbert_tokenize(prediction)
             attention_mask = torch.ones(1, prediction.shape[1]).to('cuda')
             prediction = (
                 self.chexbert_model(prediction, attention_mask).squeeze(0).to('cpu')
             )
 
-            reference = self.chexbert_tokenizer.tokenize(reference)
-            if reference:
-                reference = self.chexbert_tokenizer.encode_plus(reference)['input_ids']
-                if len(reference) > 512:
-                    reference = reference[:511] + [self.chexbert_tokenizer.sep_token_id]
-            else:
-                reference = [
-                    self.chexbert_tokenizer.cls_token_id
-                    + self.chexbert_tokenizer.sep_token_id
-                ]
-            reference = torch.LongTensor(reference).unsqueeze(0).to('cuda')
+            reference = self.chexbert_tokenize(reference)
             attention_mask = torch.ones(1, reference.shape[1]).to('cuda')
             reference = (
                 self.chexbert_model(reference, attention_mask).squeeze(0).to('cpu')
@@ -452,10 +437,50 @@ class CXRMetrics:
 
     def compute(self, prediction: str, reference: str):
         return {
-            'chexbert': self.compute_chexbert(prediction, reference),
+            'chexbert similarity': self.compute_chexbert_similarity(prediction, reference),
             'radgraph': self.compute_radgraph(prediction, reference),
             'bleu2': self.compute_bleu2(prediction, reference),
         }
+
+    def compute_radcliq(self, df: pd.DataFrame):
+        return self.radcliq_v0.predict(
+            self.normalizer.transform(np.array(df[['radgraph', 'bertscore', 'chexbert', 'bleu2']]))
+        ), self.radcliq_v1.predict(
+            np.array(df[['radgraph', 'bertscore', 'chexbert', 'bleu2']])
+        )
+    
+    def compute_chexbert_f1(self, df: pd.DataFrame):
+        self.chexbert_model.logits = True
+
+        prediction_labels = [[] for _ in range(len(CONDITIONS))]
+        reference_labels = [[] for _ in range(len(CONDITIONS))]
+        for _, row in tqdm(df.iterrows(), total=df.shape[0]):
+            prediction = self.chexbert_tokenize(
+                str(row['prediction']) if pd.notna(row['prediction']) else ''
+            )
+            attention_mask = torch.ones(1, prediction.shape[1]).to('cuda')
+            prediction = self.chexbert_model(prediction, attention_mask)
+            for i in range(len(CONDITIONS)):
+                prediction_labels[i].append(
+                    torch.argmax(prediction[i], dim=1).item()
+                )
+            
+            reference = self.chexbert_tokenize(str(row['answer']))
+            attention_mask = torch.ones(1, reference.shape[1]).to('cuda')
+            reference = self.chexbert_model(reference, attention_mask)
+            for i in range(len(CONDITIONS)):
+                reference_labels[i].append(
+                    torch.argmax(reference[i], dim=1).item()
+                )
+
+        self.chexbert_model.logits = False
+
+        prediction_labels = [[1 if x == 1 or x == 3 else 0 for x in y] for y in prediction_labels]
+        reference_labels = [[1 if x == 1 or x == 3 else 0 for x in y] for y in reference_labels]
+
+        f1s = [f1_score(x, y) for x, y in zip(prediction_labels, reference_labels)]
+
+        return prediction_labels, reference_labels, f1s
 
     def process(self, run: Path):
         df = pd.read_csv(str(run) + '.csv')
@@ -466,7 +491,7 @@ class CXRMetrics:
             summary = {}
 
         results = {
-            'chexbert': [],
+            'chexbert similarity': [],
             'radgraph': [],
             'bleu2': [],
         }
@@ -482,15 +507,17 @@ class CXRMetrics:
         for key in results.keys():
             df[key] = results[key]
 
-        results['radcliq-v0'] = self.radcliq_v0.predict(
-            self.normalizer.transform(np.array(df[['radgraph', 'bertscore', 'chexbert', 'bleu2']]))
-        )
+        results['radcliq-v0'], results['radcliq-v1'] = self.compute_radcliq(df)
+        df['radcliq-v0'], df['radcliq-v1'] = results['radcliq-v0'], results['radcliq-v1']
 
-        results['radcliq-v1'] = self.radcliq_v1.predict(
-            np.array(df[['radgraph', 'bertscore', 'chexbert', 'bleu2']])
-        )
-        df['radcliq-v0'] = results['radcliq-v0']
-        df['radcliq-v1'] = results['radcliq-v1']
+        prediction_labels, reference_labels, f1s = self.compute_chexbert_f1(df)
+        for i, condition in enumerate(CONDITIONS):
+            df[condition.lower() + ' chexbert prediction'] = prediction_labels[i]
+            df[condition.lower() + ' chexbert reference'] = reference_labels[i]
+            summary[condition.lower() + ' chexbert f1'] = f1s[i]
+
+        summary['macro chexbert f1'] = sum(f1s) / len(f1s)
+        summary['micro chexbert f1'] = sum([f1 for i, f1 in enumerate(f1s) if i in MICRO]) / len(MICRO)
 
         for key in results.keys():
             summary[key] = sum(results[key]) / len(results[key])
@@ -498,3 +525,7 @@ class CXRMetrics:
         df.to_csv(str(run) + '.csv', index=False)
         with open(str(run) + '.json', 'w') as f:
             json.dump(summary, f, indent=4)
+
+ 
+class CTMetrics:
+    pass

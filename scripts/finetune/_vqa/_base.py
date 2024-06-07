@@ -5,7 +5,7 @@ from torchvision.io import read_image, ImageReadMode
 from torchvision.transforms.v2 import functional as tvtf
 from transformers import PreTrainedTokenizer
 
-from _utils import intensity_norm_, _pad_inputs, CE_IGNORE_INDEX
+from scripts.finetune._utils import intensity_norm_, _pad_inputs, CE_IGNORE_INDEX
 from luolib.data.utils import list_data_collate
 from luolib.datamodule import ExpDataModuleBase
 from luolib.types import tuple2_t

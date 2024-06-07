@@ -4,9 +4,9 @@ import torch.nn as nn
 import torch
 from torchvision.transforms.v2 import functional as tvtf
 from PIL import Image
-from _vqa._base import VQATransform, VQADataModule
+from scripts.finetune._vqa._base import VQATransform, VQADataModule
 from typing import Callable
-from _utils import CE_IGNORE_INDEX, intensity_norm_
+from scripts.finetune._utils import CE_IGNORE_INDEX, intensity_norm_
 from torchvision.io import read_image, ImageReadMode
 import einops
 
