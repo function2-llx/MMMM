@@ -125,20 +125,13 @@ class Evaluator:
     def evaluate(self, metrics: str):
         if metrics == 'generic':
             metrics = GenericMetrics()
-            metrics.process(
-                self.output_dir / f'{self.task}_{self.dataset}_{self.model}_{self.setting}',
-            )
         elif metrics == 'llama':
             metrics = LlamaMetrics()
-            metrics.process(
-                self.task,
-                self.output_dir / f'{self.task}_{self.dataset}_{self.model}_{self.setting}',
-            )
         elif metrics == 'cxr':
             metrics = CXRMetrics()
-            metrics.process(
-                self.output_dir / f'{self.task}_{self.dataset}_{self.model}_{self.setting}',
-            )
+        metrics.process(
+            self.output_dir / f'{self.task}_{self.dataset}_{self.model}_{self.setting}',
+        )
 
 
 if __name__ == '__main__':

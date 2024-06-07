@@ -21,7 +21,7 @@ from mmmm.data.defs import PROCESSED_VL_DATA_ROOT
 from constants import (
     LLAMA3_PATH,
     LLAMA_SYSTEM_PROMPT,
-    LLAMA_USER_PROMPT,
+    LLAMA_FINETUNED_USER_PROMPT,
     CHEXBERT_PATH,
     NORMALIZER_PATH,
     COMPOSITE_METRIC_V0_PATH,
@@ -205,10 +205,14 @@ class LlamaMetrics:
         from vllm import LLM
 
         self.llama = LLM(
-            model=LLAMA3_PATH, dtype='bfloat16', gpu_memory_utilization=0.9, tensor_parallel_size=4
+            model=LLAMA3_PATH,
+            dtype='bfloat16',
+            gpu_memory_utilization=0.82,
+            tensor_parallel_size=4,
+            enable_prefix_caching=True,
         )
 
-    def process(self, task: str, run: Path):
+    def process(self, run: Path):
         from vllm import SamplingParams
 
         df = pd.read_csv(str(run) + '.csv')
@@ -235,7 +239,7 @@ class LlamaMetrics:
                     {'role': 'system', 'content': LLAMA_SYSTEM_PROMPT},
                     {
                         'role': 'user',
-                        'content': LLAMA_USER_PROMPT.format(
+                        'content': LLAMA_FINETUNED_USER_PROMPT.format(
                             question=str(row['question']),
                             answer=str(row['answer']),
                             prediction=(
@@ -261,7 +265,7 @@ class LlamaMetrics:
             retry = 0
             while True:
                 try:
-                    score = float(response.outputs[0].text.split('Rating: ')[1].strip().strip('.'))
+                    score = float(response.outputs[0].text.split('Score: ')[1].strip().strip('.'))
                     response_texts.append(response.outputs[0].text)
                     scores.append(score)
                     break
