@@ -65,6 +65,7 @@ class LocalTransConf:
     """
     Attributes:
         neg_grounding_prob: the probability of negative targets are forced grounded
+        vlm: whether the transform is performed for VLM
     """
     max_vision_tokens: int
     scale_z: tuple2_t[float]
@@ -119,10 +120,6 @@ class SamplePatch(mt.Randomizable):
         inference: bool,
         device: Device = 'cpu',
     ):
-        """
-        Args:
-            vlm: whether the transform is performed for VLM
-        """
         super().__init__()
         self.conf = conf
         self.trans_conf = conf.local_trans

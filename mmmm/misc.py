@@ -15,6 +15,16 @@ from monai.utils import InterpolateMode, convert_to_tensor
 
 from mmmm.data.dataset.misc import get_max_resize, intensity_norm
 
+def load_image(image_path: PathLike):
+    image_path_str = str(image_path)
+    if image_path_str.endswith('.pt.zst'):
+        image = load_pt_zst(Path(image_path))
+    else:
+        image = read_image(image_path_str)
+        image = einops.rearrange(image, 'c h w -> c 1 h w')
+    image = tvtf.to_dtype(image, torch.float, scale=True)
+    return image
+
 def image_transform(
     image_path: PathLike,
     max_vision_tokens,
@@ -24,13 +34,7 @@ def image_transform(
     patch_size_xy: int = 16,
     pool_size_xy: int = 2,
 ):
-    image_path_str = str(image_path)
-    if image_path_str.endswith('.pt.zst'):
-        image = load_pt_zst(Path(image_path))
-    else:
-        image = read_image(image_path_str)
-        image = einops.rearrange(image, 'c h w -> c 1 h w')
-    image = tvtf.to_dtype(image, torch.float, scale=True)
+    image = load_image(image_path)
     if (size_z := image.shape[1]) <= max_tokens_z:
         patch_size_z = pool_size_z = stride_z = 1
         tokens_z = size_z
@@ -56,11 +60,13 @@ def image_transform(
     )
     if resize_shape != image.shape[1:]:
         resize = mt.Resize(resize_shape, mode=InterpolateMode.TRILINEAR, anti_aliasing=True)
-        image = resize(image)
-    image = mt.DivisiblePad(stride)(image)
-    image = convert_to_tensor(image)
-    image, _ = ensure_rgb(image, contiguous=True)
-    image = intensity_norm(image)
+        image_resized = resize(image)
+    else:
+        image_resized = image
+    image_resized = mt.DivisiblePad(stride)(image_resized)
+    image_resized = convert_to_tensor(image_resized)
+    image_resized, _ = ensure_rgb(image_resized, contiguous=True)
+    image_resized = intensity_norm(image_resized)
     pool_size = (pool_size_z, pool_size_xy, pool_size_xy)
-    num_vision_tokens = (np.array(image.shape[1:]) // stride).prod().item()
-    return image, patch_size, pool_size, num_vision_tokens
+    num_vision_tokens = (np.array(image_resized.shape[1:]) // stride).prod().item()
+    return image_resized, image, patch_size, pool_size, num_vision_tokens

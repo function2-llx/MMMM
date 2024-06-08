@@ -101,6 +101,7 @@ data:
       num_pos: 20
       num_neg: 20
       vlm: false
+      mask_th_abs: 1
 model:
   sam:
     init_args:

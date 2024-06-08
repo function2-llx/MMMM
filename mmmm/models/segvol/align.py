@@ -139,7 +139,7 @@ class AlignSam(PreTrainedModel, LightningModule):
         grounding_classes = batch['grounding_classes']  # type: ignore
         for batch_idx, targets in enumerate(grounding_classes):
             masks_preds = output.masks_logits[batch_idx].float().sigmoid() > 0.5
-            if sem_masks := batch['semantic_masks'][batch_idx]:
+            if (sem_masks := batch['semantic_masks'][batch_idx]) is not None:
                 for i, target in enumerate(targets):
                     if (label := sem_masks[i]).any():
                         dice_pos.setdefault(target, []).append(
