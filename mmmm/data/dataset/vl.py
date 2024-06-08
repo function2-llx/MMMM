@@ -1,12 +1,12 @@
 from __future__ import annotations as _
 
 from dataclasses import dataclass
-import json
 from typing import TypedDict
 
 import einops
 import math
 import numpy as np
+from orjson import orjson
 import torch
 from torchvision.io import read_image
 from torchvision.transforms import v2 as tvt
@@ -18,11 +18,11 @@ from monai.utils import InterpolateMode, convert_to_tensor
 
 import mmmm.data.dataset._dataset as _dataset
 from mmmm.tokenizer import MMMMTokenizer
-from .local.template import gen_anomaly_conv
 from ..defs import ConvTurn, DataPoint, PROCESSED_VL_DATA_ROOT, Split
 from ..target_tax import get_target_tax
 from ..utils import prepare_vlm_inputs
-from .misc import get_max_resize, gen_modality_conv, intensity_norm, toss
+from .local.template import gen_general_conv
+from .misc import gen_modality_conv, get_max_resize, intensity_norm, toss
 
 CAPTION_PROMPTS = [
     'Describe the following image in detail.',
@@ -109,26 +109,28 @@ COMPLETE_REFERRINGS = ['image', 'medical image', 'radiograph', 'scan', 'radiolog
 
 PARTIAL_REFERRINGS = [' image', ' scan', ' radiograph']
 
+_REPORT_DATASETS = {'MIMIC-CXR', 'CT-RATE', 'OpenI'}
 def get_vl_data_list(name: str, split: Split) -> list:
     dataset_dir = PROCESSED_VL_DATA_ROOT / name
-    if name == 'MIMIC-CXR':
-        split_filename = f'{split}-filtered.json'
+    if name in _REPORT_DATASETS:
+        # load cleaned data for report dataset
+        split_filename = f'{split}-processed.json'
     else:
         split_filename = f'{split}.json'
-    with open(dataset_dir / split_filename) as f:
-        info = json.load(f)
-    return info
+    data = orjson.loads((dataset_dir / split_filename).read_bytes())
+    for item in data:
+        item['dataset'] = name
+    return data
 
 @dataclass
 class VLTransConf:
     max_tokens: int
     max_tokens_z: int
     log2_patch_size_z_std: float = 0.5
-    report_ratio: float = 0.8
-    ad_ratio: float = 0.3
+    ac_ratio: float = 0.3
     modality_prob: float = 0.2
     plane_prob: float = 0.2
-    impression_prob: float = 0.8
+    report_ratio: float = 0.8
 
 class VLDataPoint(TypedDict):
     image: list[str]
@@ -155,7 +157,19 @@ class VLTransform(mt.RandomizableTransform):
     def __call__(self, data: dict) -> DataPoint:
         conf = self.conf
         trans_conf = conf.vl_trans
-        image_idx = self.R.randint(len(data['image']))
+        dataset: str = data['dataset']
+        # 1. sample image
+        image_candidates = np.arange(len(data['image']))
+        allow_report = True
+        if dataset == 'MIMIC-CXR':
+            # only use frontal view of MIMIC-CXR for report generation
+            frontal_mask = np.array([plane in {'PA', 'AP'} for plane in data['plane']])
+            if frontal_mask.any() and not frontal_mask.all() and toss(self.R, 0.9):
+                image_candidates = image_candidates[frontal_mask]
+            else:
+                image_candidates = image_candidates[~frontal_mask]
+                allow_report = False
+        image_idx = self.R.choice(image_candidates).item()
         image_path = data['image'][image_idx]
         if modalities := data.get('modality'):
             modality = modalities[image_idx]
@@ -165,6 +179,7 @@ class VLTransform(mt.RandomizableTransform):
             plane = planes[image_idx]
         else:
             plane = None
+        # 2. image transform
         if image_path.endswith('.pt'):
             image = torch.load(image_path)
         elif image_path.endswith('.pt.zst'):
@@ -205,58 +220,41 @@ class VLTransform(mt.RandomizableTransform):
         image = convert_to_tensor(image)
         image, _ = ensure_rgb(image, contiguous=True)
         image = intensity_norm(image)
+        # 3. generate conversation
         referring: str = self.R.choice(COMPLETE_REFERRINGS)
         conversation = []
-        if modality and toss(self.R, trans_conf.modality_prob):
+        if modality and (not allow_report or toss(self.R, trans_conf.modality_prob)):
             conversation.extend(gen_modality_conv(modality, self.R))
-        if plane and toss(self.R, trans_conf.plane_prob):
+        if plane and (not allow_report or toss(self.R, trans_conf.plane_prob)):
             _template: str = self.R.choice(PLANE_PROMPTS)
             conversation.append(
-                ConvTurn(
-                    _template.format(referring),
-                    plane,
-                )
+                ConvTurn(_template.format(referring), plane)
             )
-        findings = data.get('findings')
-        vqa = data.get('vqa')
-        assert findings or vqa
-        if findings and (not vqa or toss(self.R, trans_conf.report_ratio)):
+        report: str | None = data.get('processed_report') if allow_report else None
+        vqa: list[dict] | None = data.get('vqa')
+        assert not allow_report or report or vqa
+        if report and (not vqa or toss(self.R, trans_conf.report_ratio)):
             if (
                 (anomaly_pos := data.get('anomaly_pos')) is not None and
                 (anomaly_neg := data.get('anomaly_neg')) is not None and
                 (len(anomaly_pos) > 0 or len(anomaly_neg) > 0) and
-                toss(self.R, trans_conf.ad_ratio)
+                toss(self.R, trans_conf.ac_ratio)
             ):
-                grounding = toss(self.R, 0.1)
-                neg_grounding = grounding and toss(self.R, 0.2)
-                ad_conv, _ = gen_anomaly_conv(
+                ac_conv, _ = gen_general_conv(
                     anomaly_pos,
                     anomaly_neg,
-                    True,  # has no effect
-                    grounding,
-                    neg_grounding,
+                    False,
+                    False,
                     self.tokenizer,
                     self.target_tax,
-                    '',  # only affects BraTS
                     self.R,
                 )
-                conversation.extend(ad_conv)
+                conversation.extend(ac_conv)
             else:
-                if impression := data.get('impression') and toss(self.R, trans_conf.impression_prob):
-                    conversation.append(
-                        ConvTurn(
-                            self.R.choice(REPORT_PROMPTS).format(referring),
-                            f"Findings: {findings}\nImpression: {impression}",
-                        ),
-                    )
-                else:
-                    conversation.append(
-                        ConvTurn(
-                            self.R.choice(FINDINGS_PROMPTS).format(referring),
-                            findings,
-                        ),
-                    )
-        else:
+                conversation.append(
+                    ConvTurn(self.R.choice(REPORT_PROMPTS).format(referring), report),
+                )
+        elif vqa:
             conv_vqa = [ConvTurn(qa['question'], qa['answer']) for qa in vqa]
             self.R.shuffle(conv_vqa)
             conversation.extend(conv_vqa)
@@ -271,7 +269,7 @@ class VLTransform(mt.RandomizableTransform):
             bop_weight=1.,
         )
         data: DataPoint = {
-            'src': ('?', str(image_path)),
+            'src': (dataset, str(image_path)),
             'image': image,
             'grounding_image': torch.zeros(3, *patch_size),
             'patch_size': patch_size,

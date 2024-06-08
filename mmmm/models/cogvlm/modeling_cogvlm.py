@@ -2,6 +2,7 @@
 from typing import Any, Dict, List, Literal, Optional, TYPE_CHECKING, Tuple, Union
 import warnings
 
+import einops
 import math
 import torch
 from torch import nn
@@ -29,40 +30,6 @@ logger = get_logger(__name__)
 LANGUAGE_TOKEN_TYPE = 0
 VISION_TOKEN_TYPE = 1
 """tokens of `VISION_TOKEN_TYPE` will be processed by VE"""
-
-
-# Copied from transformers.models.bart.modeling_bart._make_causal_mask
-def _make_causal_mask(
-        input_ids_shape: torch.Size, dtype: torch.dtype, device: torch.device, past_key_values_length: int = 0
-):
-    """
-    Make causal mask used for bi-directional self-attention.
-    """
-    bsz, tgt_len = input_ids_shape
-    mask = torch.full((tgt_len, tgt_len), torch.finfo(dtype).min, device=device)
-    mask_cond = torch.arange(mask.size(-1), device=device)
-    mask.masked_fill_(mask_cond < (mask_cond + 1).view(mask.size(-1), 1), 0)
-    mask = mask.to(dtype)
-
-    if past_key_values_length > 0:
-        mask = torch.cat([torch.zeros(tgt_len, past_key_values_length, dtype=dtype, device=device), mask], dim=-1)
-    return mask[None, None, :, :].expand(bsz, 1, tgt_len, tgt_len + past_key_values_length)
-
-
-# Copied from transformers.models.bart.modeling_bart._expand_mask
-def _expand_mask(mask: torch.Tensor, dtype: torch.dtype, tgt_len: Optional[int] = None):
-    """
-    Expands attention_mask from `[bsz, seq_len]` to `[bsz, 1, tgt_seq_len, src_seq_len]`.
-    """
-    bsz, src_len = mask.size()
-    tgt_len = tgt_len if tgt_len is not None else src_len
-
-    expanded_mask = mask[:, None, None, :].expand(bsz, 1, tgt_len, src_len).to(dtype)
-
-    inverted_mask = 1.0 - expanded_mask
-
-    return inverted_mask.masked_fill(inverted_mask.to(torch.bool), torch.finfo(dtype).min)
-
 
 class RMSNorm(nn.Module):
     def __init__(self, hidden_size, eps=1e-6):
@@ -92,12 +59,18 @@ class MLP(nn.Module):
         down_proj = self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
         return down_proj
 
-def get_expert_mask(token_type_ids: "torch.LongTensor(B, L)") -> "[torch.BoolTensor(B, L), torch.BoolTensor(B, L)]":
-    # Why????
+def get_expert_mask(
+    token_type_ids: torch.LongTensor, padding_mask: torch.BoolTensor,
+) -> tuple[torch.BoolTensor, torch.BoolTensor]:
     vision_token_mask = torch.zeros_like(token_type_ids, dtype=torch.bool)
+    # I don't know why do authors of CogVLM use this. as a result, a token is masked as vision iff itself & the token after
+    # it have the vision type, which make eoi token have language mask
     vision_token_mask[:, :-1] = (token_type_ids[:, :-1] == VISION_TOKEN_TYPE) & (token_type_ids[:, 1:] == VISION_TOKEN_TYPE)
     # vision_token_mask = token_type_ids == VISION_TOKEN_TYPE
     language_token_mask = ~vision_token_mask
+    if token_type_ids.shape[1] > 1:
+        vision_token_mask &= padding_mask
+        language_token_mask &= padding_mask
     return vision_token_mask, language_token_mask
 
 class VisionExpertMLP(nn.Module):
@@ -115,46 +88,61 @@ class VisionExpertMLP(nn.Module):
                 self.vision_mlp, apply_prefix(prefix, 'vision_mlp'),
             )
 
-    def forward(self, hidden_states: "torch.Tensor(B, L, D)", token_type_ids: "torch.LongTensor(B, L)"):
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        *,
+        token_type_ids: torch.Tensor,
+        padding_mask: torch.BoolTensor,
+    ):
         output = torch.empty(hidden_states.shape, dtype=hidden_states.dtype, device=hidden_states.device)
-        vision_token_mask, language_token_mask = get_expert_mask(token_type_ids)
+        vision_token_mask, language_token_mask = get_expert_mask(token_type_ids, padding_mask)
         output[vision_token_mask] = self.vision_mlp(hidden_states[vision_token_mask])
         output[language_token_mask] = self.language_mlp(hidden_states[language_token_mask])
         return output
 
+def _to_tensor_list(x: torch.Tensor, padding_mask: torch.BoolTensor):
+    return [
+        x[i:i + 1, mask]
+        for i, mask in enumerate(padding_mask)
+    ]
 
 def attention_fn(
-        query_layer: "torch.tensor(B, H, L, HD)",
-        key_layer: "torch.tensor(B, H, L, HD)",
-        value_layer: "torch.tensor(B, H, L, HD)",
-        attention_mask: "torch.tensor(B, H, L, HD)",
-        *,
-        scaling_attention_score: bool = True,
-        attention_dropout: nn.Module = None
+    query_layer: "torch.tensor(B, H, L, HD)",
+    key_layer: "torch.tensor(B, H, L, HD)",
+    value_layer: "torch.tensor(B, H, L, HD)",
+    padding_mask: torch.BoolTensor,
+    dropout_p: float = 0.,
 ):
-    attention_mask_bool = (attention_mask == 0)
-    is_low_triangle = (attention_mask_bool == torch.ones_like(attention_mask_bool, dtype=torch.float).tril()).all()
-    is_full = (attention_mask_bool > 0).all()
-    if not (int(torch.__version__.split('.')[0]) >= 2):
-        warnings.warn("It's recommended to use torch2.0 or higher.")
-    if int(torch.__version__.split('.')[0]) >= 2 and scaling_attention_score and (is_full or is_low_triangle):
-        dropout_p = 0. if attention_dropout is None or not attention_dropout.training else attention_dropout.p
-        return torch.nn.functional.scaled_dot_product_attention(
-            query_layer, key_layer, value_layer,
-            attn_mask=None,
-            dropout_p=dropout_p,
-            is_causal=not is_full
+    import xformers.ops as xops
+    query_layer = einops.rearrange(query_layer, 'n h l d -> n l h d')
+    key_layer = einops.rearrange(key_layer, 'n h l d -> n l h d')
+    value_layer = einops.rearrange(value_layer, 'n h l d -> n l h d')
+    if padding_mask.shape[1] == query_layer.shape[1]:
+        from xformers.ops.fmha.attn_bias import BlockDiagonalCausalMask
+        output = torch.empty_like(query_layer)
+        attn_bias, query_layer, key_layer, value_layer = BlockDiagonalCausalMask.from_tensor_lists_qkv(
+            _to_tensor_list(query_layer, padding_mask),
+            _to_tensor_list(key_layer, padding_mask),
+            _to_tensor_list(value_layer, padding_mask),
+        )
+        output[padding_mask] = xops.memory_efficient_attention(
+            query_layer, key_layer, value_layer, attn_bias, dropout_p,
         )
     else:
-        if scaling_attention_score:
-            query_layer = query_layer / math.sqrt(query_layer.shape[-1])
-        attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2))
-        attention_scores = attention_scores + attention_mask
-        attention_scores = nn.functional.softmax(attention_scores, dim=-1, dtype=torch.float32).to(query_layer.dtype)
-        if attention_dropout is not None:
-            attention_scores = attention_dropout(attention_scores)
-        context_layer = torch.matmul(attention_scores, value_layer)
-        return context_layer
+        # for generation
+        assert query_layer.shape[1] == 1
+        query_layer *= query_layer.shape[-1] ** -0.5
+        # avoid NaN
+        key_layer[~padding_mask] = 0
+        value_layer[~padding_mask] = 0
+        attention_scores = einops.einsum(query_layer[:, 0], key_layer, 'n h d, n l h d -> n l h')
+        attention_scores[~padding_mask] = -torch.inf
+        attention_scores = attention_scores.softmax(dim=1, dtype=torch.float32).to(dtype=attention_scores.dtype)
+        if dropout_p > 0:
+            attention_scores = F.dropout(attention_scores, dropout_p)
+        output = einops.einsum(value_layer, attention_scores, 'n l h d, n l h -> n h d')[:, None]
+    return einops.rearrange(output, 'n l h d -> n h l d')
 
 
 class RotaryEmbedding(torch.nn.Module):
@@ -245,13 +233,13 @@ class VisionExpertAttention(nn.Module):
         hidden_states: torch.Tensor,
         token_type_ids: torch.LongTensor,
         position_ids: torch.LongTensor,
-        attention_mask: Optional[torch.Tensor] = None,
+        padding_mask: torch.BoolTensor,
         past_key_value: Optional[Tuple[torch.Tensor]] = None,
         output_attentions: bool = False,
         use_cache: bool = False,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
         bsz, q_len, _ = hidden_states.size()
-        vision_token_mask, language_token_mask = get_expert_mask(token_type_ids)
+        vision_token_mask, language_token_mask = get_expert_mask(token_type_ids, padding_mask)
 
         shape = list(hidden_states.shape)
         shape[-1] = shape[-1] * 3
@@ -277,8 +265,11 @@ class VisionExpertAttention(nn.Module):
         past_key_value = (key_states, value_states) if use_cache else None
 
         context_layer = attention_fn(
-            query_layer=query_states, key_layer=key_states, value_layer=value_states, attention_mask=attention_mask,
-            scaling_attention_score=True, attention_dropout=None)
+            query_states,
+            key_states,
+            value_states,
+            padding_mask,
+        )
         if context_layer.size() != (bsz, self.num_heads, q_len, self.head_dim):
             raise ValueError(
                 f"`attn_output` should be of size {(bsz, self.num_heads, q_len, self.head_dim)}, but is"
@@ -295,7 +286,6 @@ class VisionExpertAttention(nn.Module):
 
         return attn_output, None, past_key_value
 
-
 class CogVLMDecoderLayer(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -310,7 +300,7 @@ class CogVLMDecoderLayer(nn.Module):
         hidden_states: torch.Tensor,
         token_type_ids: torch.LongTensor,
         position_ids: torch.LongTensor,
-        attention_mask: Optional[torch.Tensor] = None,
+        padding_mask: torch.BoolTensor,
         past_key_value: Optional[Tuple[torch.Tensor]] = None,
         output_attentions: Optional[bool] = False,
         use_cache: Optional[bool] = False,
@@ -324,7 +314,7 @@ class CogVLMDecoderLayer(nn.Module):
             hidden_states=hidden_states,
             token_type_ids=token_type_ids,
             position_ids=position_ids,
-            attention_mask=attention_mask,
+            padding_mask=padding_mask,
             past_key_value=past_key_value,
             output_attentions=output_attentions,
             use_cache=use_cache,
@@ -334,7 +324,7 @@ class CogVLMDecoderLayer(nn.Module):
         # Fully Connected
         residual = hidden_states
         hidden_states = self.post_attention_layernorm(hidden_states)
-        hidden_states = self.mlp(hidden_states, token_type_ids=token_type_ids)
+        hidden_states = self.mlp(hidden_states, token_type_ids=token_type_ids, padding_mask=padding_mask)
         hidden_states = residual + hidden_states
 
         outputs = (hidden_states,)
@@ -424,16 +414,6 @@ class CogVLMModel(CogVLMPreTrainedModel):
             modules_to_save.extend(c_modules_to_save)
         return target_modules, modules_to_save
 
-    # def encode_images(self, image_lists: List[List[torch.Tensor]]) -> torch.Tensor:
-    #     images = []
-    #     for image_list in image_lists:
-    #         assert len(image_list) == 1  # only single image is supported
-    #         images.append(image_list[0])
-    #
-    #     images = torch.stack(images)
-    #     images_features = self.vision(images)
-    #     return images_features
-
     def forward(
         self,
         input_ids: torch.LongTensor = None,
@@ -472,8 +452,8 @@ class CogVLMModel(CogVLMPreTrainedModel):
                 assert not (token_type_ids == VISION_TOKEN_TYPE).any(), f"unexpected vision tokens for single-modality: {(token_type_ids == VISION_TOKEN_TYPE).sum()}"
                 inputs_embeds = self.embed_tokens(input_ids)
 
-            if position_ids is None:
-                position_ids = build_position_ids(token_type_ids, attention_mask)
+            # if position_ids is None:
+            #     position_ids = build_position_ids(token_type_ids, attention_mask)
             input_ids = None
 
         return self.llm_forward(
@@ -551,10 +531,7 @@ class CogVLMModel(CogVLMPreTrainedModel):
             attention_mask = torch.ones(
                 (batch_size, seq_length_with_past), dtype=torch.bool, device=inputs_embeds.device
             )
-        attention_mask = self._prepare_decoder_attention_mask(
-            attention_mask, (batch_size, seq_length), inputs_embeds, past_key_values_length
-        )
-
+        padding_mask = attention_mask.bool()
         hidden_states = inputs_embeds
 
         # decoder layers
@@ -572,7 +549,7 @@ class CogVLMModel(CogVLMPreTrainedModel):
                 self._gradient_checkpointing_func,
                 hidden_states,
                 token_type_ids=token_type_ids,
-                attention_mask=attention_mask,
+                padding_mask=padding_mask,
                 position_ids=position_ids,
                 past_key_value=past_key_value,
                 output_attentions=output_attentions,
@@ -607,32 +584,6 @@ class CogVLMModel(CogVLMPreTrainedModel):
 
     def set_input_embeddings(self, value):
         self.embed_tokens = value
-
-    # noinspection PyMethodMayBeStatic
-    # Copied from transformers.models.bart.modeling_bart.BartDecoder._prepare_decoder_attention_mask
-    def _prepare_decoder_attention_mask(self, attention_mask, input_shape, inputs_embeds, past_key_values_length):
-        # create causal mask
-        # [bsz, seq_len] -> [bsz, 1, tgt_seq_len, src_seq_len]
-        combined_attention_mask = None
-        if input_shape[-1] > 1:
-            combined_attention_mask = _make_causal_mask(
-                input_shape,
-                inputs_embeds.dtype,
-                device=inputs_embeds.device,
-                past_key_values_length=past_key_values_length,
-            )
-
-        if attention_mask is not None:
-            # [bsz, seq_len] -> [bsz, 1, tgt_seq_len, src_seq_len]
-            expanded_attn_mask = _expand_mask(attention_mask, inputs_embeds.dtype, tgt_len=input_shape[-1]).to(
-                inputs_embeds.device
-            )
-            combined_attention_mask = (
-                expanded_attn_mask if combined_attention_mask is None else expanded_attn_mask + combined_attention_mask
-            )
-
-        return combined_attention_mask
-
 
 def _history_to_prompt(signal_type, history, query):
     if signal_type == 'base':
@@ -780,7 +731,10 @@ class CogVLMForCausalLM(CogVLMPreTrainedModel):
         # build position_ids if needed
         position_ids = kwargs.get("position_ids", None)
         if position_ids is None:
-            position_ids = build_position_ids(token_type_ids, attention_mask)
+            position_ids = torch.zeros_like(input_ids)
+            for i in range(input_ids.shape[0]):
+                _mask = attention_mask[i].bool()
+                position_ids[i, _mask] = build_position_ids(token_type_ids[i, _mask][None])[0]
 
         if past_key_values:
             input_ids = input_ids[:, -1:]
