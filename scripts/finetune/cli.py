@@ -3,6 +3,7 @@ from transformers import AutoTokenizer
 
 from _vqa.cogvlm import FinetuneCogVLM
 from _vqa.llavanext import FinetuneLlavaNEXT
+from _vqa.llavamed import FinetuneLlavaMed
 from luolib.datamodule import ExpDataModuleBase
 from luolib.lightning import LightningModule
 from luolib.lightning.cli import LightningCLI
@@ -41,6 +42,9 @@ class CLI(LightningCLI):
             elif isinstance(model, FinetuneLlavaNEXT):
                 peft_model = get_peft_model(model.llavaN_model, lora_config)
                 model.set_peft_model(peft_model, prefix='llavaN_model')
+            elif isinstance(model, FinetuneLlavaMed):
+                peft_model = get_peft_model(model.llavaM_model, lora_config)
+                model.set_peft_model(peft_model, prefix='llavaM_model')
             else:
                 raise NotImplementedError
             # if (lora_adapter_path := config.lora_adapter_path) is not None:

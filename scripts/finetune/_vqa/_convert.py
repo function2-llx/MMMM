@@ -214,24 +214,89 @@ def llava_next():
     print(processor.decode(output[0], skip_special_tokens=True)[prefix_len + 1:])
 
 
-from transformers import AutoTokenizer
-from llava import LlavaLlamaForCausalLM
-device = "cuda" # the device to load the model onto
+import torch
+import einops
+import torch.nn as nn
+from llava.model.builder import load_pretrained_model
+from llava.mm_utils import tokenizer_image_token, get_model_name_from_path
+from llava.constants import IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_TOKEN
+from torchvision.io import read_image, ImageReadMode
+from torchvision.transforms.v2 import functional as tvtf
+from luolib.types import tuple3_t
+from peft import PeftModel
 
-model = LlavaLlamaForCausalLM.from_pretrained("microsoft/llava-med-v1.5-mistral-7b")
-tokenizer = AutoTokenizer.from_pretrained("microsoft/llava-med-v1.5-mistral-7b")
+model_id = "microsoft/llava-med-v1.5-mistral-7b"
+model_name = get_model_name_from_path(model_id)
+tokenizer, model, image_processor, context_len = load_pretrained_model(model_id, None, model_name)
 
-messages = [
-    {"role": "user", "content": "What is your favourite condiment?"},
-    {"role": "assistant", "content": "Well, I'm quite partial to a good squeeze of fresh lemon juice. It adds just the right amount of zesty flavour to whatever I'm cooking up in the kitchen!"},
-    {"role": "user", "content": "Do you have mayonnaise recipes?"}
-]
+pos_embed = model.model.vision_tower.vision_tower.vision_model.embeddings.position_embedding.weight
+cls_pos_embed, pos_embed = pos_embed[0:1], pos_embed[1:]
+pos_embed = einops.rearrange(pos_embed, '(h w) c -> 1 c h w', h=24, w=24)
+import torch.nn.functional as nnf
+pos_embed = nnf.interpolate(pos_embed, (16, 16), mode='area')
+pos_embed = torch.cat([cls_pos_embed, einops.rearrange(pos_embed, '1 c h w ->(h w) c')])
+model.model.vision_tower.vision_tower.vision_model.embeddings.position_embedding = nn.Embedding(
+    *pos_embed.shape[:2], _weight=pos_embed,
+)
+model.model.vision_tower.vision_tower.vision_model.embeddings.position_ids = torch.arange(257).expand((1, -1))
 
-encodeds = tokenizer.apply_chat_template(messages, return_tensors="pt")
+adapter_path = "/home/chenxuanzhong/MMMM/output/finetune/VQA-RAD/llava-med_vqa-rad/seed-42/run-20240608_204409-wobl572z/checkpoint/last.ckpt/adapter"
+inference_model = PeftModel.from_pretrained(model, adapter_path)
+inference_model.to('cuda')
 
-model_inputs = encodeds.to(device)
-model.to(device)
+query = "Are these small opacities in the right lung calcifications?"
 
-generated_ids = model.generate(model_inputs, max_new_tokens=1000, do_sample=True)
-decoded = tokenizer.batch_decode(generated_ids)
-print(decoded[0])
+# conv = conv_templates["vicuna_v1"].copy()
+# conv.append_message(conv.roles[0], prompt)
+# conv.append_message(conv.roles[1], None)
+# prompt = conv.get_prompt()
+
+def build_conversation_input_ids(tokenizer, image_path, query):
+    def intensity_norm_(
+            image: torch.Tensor,
+            mean: tuple3_t[float] = (0.48145466, 0.4578275, 0.40821073),
+            std: tuple3_t[float] = (0.26862954, 0.26130258, 0.27577711),
+    ):
+        """default mean and std is adopted from CogVLM (, which is from CLIP)"""
+        mean = image.new_tensor(mean)
+        std = image.new_tensor(std)
+        x = image.view(image.shape[0], -1)
+        x.sub_(mean[:, None]).div_(std[:, None])
+
+    image = read_image(image_path, ImageReadMode.RGB)
+    image = tvtf.to_dtype(image, torch.float32, scale=True)
+    image = tvtf.resize(image, (224, 224))
+    intensity_norm_(image)
+
+    prompt = f'{DEFAULT_IMAGE_TOKEN}\nQuestion: {query} Answer:'
+    prompt_ids = torch.tensor(tokenizer.encode(prompt, add_special_tokens=False))
+
+    input_ids = torch.cat([
+        torch.tensor([tokenizer.bos_token_id]).unsqueeze(1),
+        prompt_ids.unsqueeze(1),
+    ])
+
+    input_ids = input_ids.reshape(input_ids.shape[-1], input_ids.shape[0])
+
+    inputs = {
+        'input_ids': input_ids.to('cuda'),
+        'attention_mask': torch.ones_like(input_ids).to('cuda'),
+        'image': image.to('cuda').to(torch.bfloat16)
+    }
+    return inputs
+
+image_path = "/data/MMMM/data/processed/vision-language/VQA-RAD/images/synpic19118.jpg"
+
+inputs = build_conversation_input_ids(tokenizer, image_path, query)
+
+with torch.inference_mode():
+    output_ids = inference_model.generate(
+        inputs["input_ids"],
+        images=inputs["image"].unsqueeze(0).half().cuda(),
+        do_sample=False,
+        max_new_tokens=1024,
+        use_cache=True)
+
+outputs = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0].strip()
+
+print(outputs)

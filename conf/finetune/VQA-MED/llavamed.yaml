@@ -1,0 +1,19 @@
+model:
+  class_path: _vqa.llavamed.FinetuneLlavaMed
+data:
+  class_path: _vqa.llavamed.LLAVAMVQADataModule
+  init_args:
+    resize: [224, 224]
+logger:
+  class_path: lightning.pytorch.loggers.WandbLogger
+  init_args:
+    name: llava-med_vqa-med
+    save_dir: output/finetune/VQA-Med
+    project: MMMM-FT
+lora:
+  class_path: peft.LoraConfig
+  init_args:
+    r: 64
+    lora_alpha: 8
+    lora_dropout: 0.05
+    use_rslora: true
