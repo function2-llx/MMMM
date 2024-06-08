@@ -13,7 +13,7 @@ import random
 from scipy.special import expit
 from sklearn.metrics import f1_score
 import torch
-from torch.utils.data import Dataset, DataLoader, SequentialSampler
+from torch.utils.data import Dataset
 from tqdm import tqdm
 from transformers import AutoTokenizer, BertTokenizer
 
@@ -207,8 +207,8 @@ class LlamaMetrics:
         self.llama = LLM(
             model=LLAMA3_PATH,
             dtype='bfloat16',
-            gpu_memory_utilization=0.82,
-            tensor_parallel_size=4,
+            gpu_memory_utilization=0.95,
+            tensor_parallel_size=2,
             enable_prefix_caching=True,
         )
 

@@ -134,7 +134,7 @@ def main():
         gpu_memory_utilization=0.98,
     )
 
-    process(model, sampling_params, 'MIMIC-CXR', ['test', 'train'])
+    # process(model, sampling_params, 'MIMIC-CXR', ['test', 'train'])
     process(model, sampling_params, 'CT-RATE', ['test', 'train'])
     # process(model, sampling_params, 'OpenI', ['test', 'train'])
 

@@ -24,7 +24,7 @@ Your task is to evaluate the correctness of the prediction based on the question
 Question: "{question}"
 Ground truth: "{answer}"
 Prediction: "{prediction}"
-Is the prediction correct? Provide a concise analysis and give a score of 0 or 1. Answer in the format "Analysis: ... Score: ...".
+Is the prediction correct? Provide a concise analysis and give an integer score of 0 or 1. Answer in the format "Analysis: ... Score: ...".
 '''
 
 CHEXPERT_CONDITIONS = ['Enlarged Cardiomediastinum', 'Cardiomegaly', 'Lung Opacity',
