@@ -11,7 +11,7 @@ trainer:
   callbacks:
   - class_path: luolib.lightning.callbacks.ModelCheckpoint
     init_args:
-      every_n_train_steps: 2500
+      every_n_train_steps: 2000
       filename: "{step}"
       save_top_k: -1
       save_last: true
@@ -30,7 +30,7 @@ optim:
       init_args:
         t_initial: ${trainer.max_steps}
         t_in_epochs: false
-        warmup_t: 250
+        warmup_t: 0
         warmup_prefix: true
     interval: step
     frequency: 250

@@ -606,7 +606,6 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         past_key_values=None,
         attention_mask=None,
         inputs_embeds=None,
-        image_features_mask: torch.BoolTensor | None = None,
         patch_size,
         pool_size,
         **kwargs,
@@ -620,7 +619,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         if inputs_embeds is not None and past_key_values is None:
             model_inputs = {"inputs_embeds": inputs_embeds}
         else:
-            model_inputs = {"input_ids": input_ids, 'image_features_mask': image_features_mask}
+            model_inputs = {"input_ids": input_ids}
 
         model_inputs.update(
             {

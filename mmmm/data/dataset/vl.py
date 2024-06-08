@@ -127,7 +127,7 @@ class VLTransConf:
     max_tokens: int
     max_tokens_z: int
     log2_patch_size_z_std: float = 0.5
-    ac_ratio: float = 0.3
+    ac_ratio: float = 0.2
     modality_prob: float = 0.2
     plane_prob: float = 0.2
     report_ratio: float = 0.8

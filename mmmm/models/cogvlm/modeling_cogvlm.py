@@ -422,7 +422,6 @@ class CogVLMModel(CogVLMPreTrainedModel):
         patch_size: list[tuple3_t[int]] | None = None,
         pool_size: list[tuple3_t[int]],
         token_type_ids: Optional[torch.LongTensor] = None,
-        image_features_mask: list[torch.BoolTensor] | None = None,
         attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
         past_key_values: Optional[List[torch.FloatTensor]] = None,
@@ -440,12 +439,11 @@ class CogVLMModel(CogVLMPreTrainedModel):
             assert input_ids is not None and inputs_embeds is None
             if image is not None:  # multi-modality
                 assert token_type_ids is not None, f"multi-modality requires `token_type_ids`!"
-                assert image_features_mask is not None
                 assert len(input_ids) == len(image), f"batch size mismatch: {len(input_ids)} {len(image)}"
                 inputs_embeds = self.embed_tokens(input_ids)
                 image_features_list: list[torch.Tensor] = self.vision(image, patch_size, pool_size)
-                for i, (image_features, mask) in enumerate(zip(image_features_list, image_features_mask)):
-                    inputs_embeds[i, mask] = image_features[0]
+                for i, image_features in enumerate(image_features_list):
+                    inputs_embeds[i, 1:1 + image_features.shape[1]] = image_features[0]
             else:  # single-modality
                 if token_type_ids is None:
                     token_type_ids = torch.ones_like(input_ids, dtype=torch.long, device=input_ids.device) * LANGUAGE_TOKEN_TYPE
@@ -654,7 +652,6 @@ class CogVLMForCausalLM(CogVLMPreTrainedModel):
         self,
         input_ids: torch.LongTensor = None,
         *,
-        image_features_mask: torch.BoolTensor | None = None,
         image: list[torch.Tensor] = None,
         patch_size: list[tuple3_t[int]] = None,
         pool_size: list[tuple3_t[int]],
@@ -682,7 +679,6 @@ class CogVLMForCausalLM(CogVLMPreTrainedModel):
             image=image,
             patch_size=patch_size,
             pool_size=pool_size,
-            image_features_mask=image_features_mask,
             token_type_ids=token_type_ids,
             attention_mask=attention_mask,
             position_ids=position_ids,

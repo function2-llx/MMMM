@@ -106,8 +106,6 @@ def prepare_vlm_inputs(
         torch.tensor([tokenizer.grd_token_id if grounding else tokenizer.ngrd_token_id]),
         text_ids,
     ])
-    image_features_mask = torch.zeros(input_ids.shape[0], dtype=torch.bool)
-    image_features_mask[1:1 + num_image_tokens] = True
     token_type_ids = torch.cat([
         torch.tensor([LANGUAGE_TOKEN_TYPE]),
         torch.full((num_image_tokens, ), VISION_TOKEN_TYPE),
@@ -125,7 +123,6 @@ def prepare_vlm_inputs(
     attention_mask = torch.ones(input_ids.shape, dtype=dtype)
     inputs = {
         'input_ids': input_ids,
-        'image_features_mask': image_features_mask,
         'token_type_ids': token_type_ids,
         'position_ids': position_ids,
         'attention_mask': attention_mask,
