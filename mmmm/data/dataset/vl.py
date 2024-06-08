@@ -164,7 +164,7 @@ class VLTransform(mt.RandomizableTransform):
         if dataset == 'MIMIC-CXR':
             # only use frontal view of MIMIC-CXR for report generation
             frontal_mask = np.array([plane in {'PA', 'AP'} for plane in data['plane']])
-            if frontal_mask.any() and not frontal_mask.all() and toss(self.R, 0.9):
+            if frontal_mask.all() or (frontal_mask.any() and toss(self.R, 0.9)):
                 image_candidates = image_candidates[frontal_mask]
             else:
                 image_candidates = image_candidates[~frontal_mask]
