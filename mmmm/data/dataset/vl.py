@@ -25,24 +25,12 @@ from .local.template import gen_general_conv
 from .misc import gen_modality_conv, get_max_resize, intensity_norm, toss
 
 CAPTION_PROMPTS = [
-    'Describe the following image in detail.',
-    'Provide a detailed description of the given image.',
-    'Give an elaborate explanation of the image you see',
-    'Share a comprehensive rundown of the presented image.',
-    'Explain the various aspects of the image before you.',
-    'Clarify the contents of the displayed image with great detail.',
-    'Characterize the image using a well-detailed description.',
-    'Portray the image with a rich, descriptive narrative.',
-    'Narrate the contents of the image with precision.',
-    'Illustrate the image through a descriptive explanation.',
-    'Examine the image closely and share its details.',
-    'Write an exhaustive depiction of the given image.',
-    'Please caption this image.',
-    'What can you observe in this image?',
-    'Please provide a detailed description of the image.',
-    'What do you see in this image?',
-    'What can you observe in this image?',
-    'Offer a thorough and descriptive summary of the image.',
+    'Briefly describe this {}.',
+    'Please provide a brief description of this {}.',
+    'Can you provide a brief description of this {}?',
+    'Caption this {}.'
+    'Please provide a caption for this {}.',
+    'Can you provide a caption for this {}?',
 ]
 
 REPORT_PROMPTS = [
@@ -105,9 +93,7 @@ PLANE_PROMPTS = [
     'Which plane is the {} shown in?',
 ]
 
-COMPLETE_REFERRINGS = ['image', 'medical image', 'radiograph', 'scan', 'radiology image', 'radiology scan', 'medical scan']
-
-PARTIAL_REFERRINGS = [' image', ' scan', ' radiograph']
+REFERRINGS = ['image', 'medical image', 'radiograph', 'scan', 'radiology image', 'radiology scan', 'medical scan']
 
 _REPORT_DATASETS = {'MIMIC-CXR', 'CT-RATE', 'OpenI'}
 def get_vl_data_list(name: str, split: Split) -> list:
@@ -221,7 +207,7 @@ class VLTransform(mt.RandomizableTransform):
         image, _ = ensure_rgb(image, contiguous=True)
         image = intensity_norm(image)
         # 3. generate conversation
-        referring: str = self.R.choice(COMPLETE_REFERRINGS)
+        referring: str = self.R.choice(REFERRINGS)
         conversation = []
         if modality and (not allow_report or toss(self.R, trans_conf.modality_prob)):
             conversation.extend(gen_modality_conv(modality, self.R))
@@ -230,10 +216,15 @@ class VLTransform(mt.RandomizableTransform):
             conversation.append(
                 ConvTurn(_template.format(referring), plane)
             )
+        caption: str | None = data.get('caption')
         report: str | None = data.get('processed_report') if allow_report else None
         vqa: list[dict] | None = data.get('vqa')
         assert not allow_report or report or vqa
-        if report and (not vqa or toss(self.R, trans_conf.report_ratio)):
+        if caption:
+            conversation.append(
+                ConvTurn(self.R.choice(CAPTION_PROMPTS).format(referring), caption),
+            )
+        elif report and (not vqa or toss(self.R, trans_conf.report_ratio)):
             if (
                 (anomaly_pos := data.get('anomaly_pos')) is not None and
                 (anomaly_neg := data.get('anomaly_neg')) is not None and
