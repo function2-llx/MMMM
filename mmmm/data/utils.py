@@ -129,11 +129,14 @@ def prepare_vlm_inputs(
     }
     if not inference:
         # bos, (boi, *image, eoi), grounding
-        padding = torch.full((1 + num_image_tokens + 1, ), CE_IGNORE_INDEX)
-        labels = torch.cat([padding, labels])
-        inputs['labels'] = labels
-        weight = torch.cat([padding, weight])
-        inputs['weight'] = weight
+        inputs['labels'] = torch.cat([
+            torch.full((1 + num_image_tokens + 1, ), CE_IGNORE_INDEX),
+            labels,
+        ])
+        inputs['weight'] = torch.cat([
+            torch.full((1 + num_image_tokens + 1, ), 0.),
+            weight,
+        ])
     if max_seq_len is not None:
         for k, v in inputs.items():
             inputs[k] = v[:max_seq_len]

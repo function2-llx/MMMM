@@ -95,8 +95,8 @@ class VisionExpertMLP(nn.Module):
         token_type_ids: torch.Tensor,
         padding_mask: torch.BoolTensor,
     ):
-        output = torch.empty(hidden_states.shape, dtype=hidden_states.dtype, device=hidden_states.device)
         vision_token_mask, language_token_mask = get_expert_mask(token_type_ids, padding_mask)
+        output = torch.zeros_like(hidden_states)
         output[vision_token_mask] = self.vision_mlp(hidden_states[vision_token_mask])
         output[language_token_mask] = self.language_mlp(hidden_states[language_token_mask])
         return output
@@ -120,7 +120,7 @@ def attention_fn(
     value_layer = einops.rearrange(value_layer, 'n h l d -> n l h d')
     if padding_mask.shape[1] == query_layer.shape[1]:
         from xformers.ops.fmha.attn_bias import BlockDiagonalCausalMask
-        output = torch.empty_like(query_layer)
+        output = torch.zeros_like(query_layer)
         attn_bias, query_layer, key_layer, value_layer = BlockDiagonalCausalMask.from_tensor_lists_qkv(
             _to_tensor_list(query_layer, padding_mask),
             _to_tensor_list(key_layer, padding_mask),
@@ -130,7 +130,7 @@ def attention_fn(
             query_layer, key_layer, value_layer, attn_bias, dropout_p,
         )
     else:
-        # for generation
+        # for generation, implement attention manually
         assert query_layer.shape[1] == 1
         query_layer *= query_layer.shape[-1] ** -0.5
         # avoid NaN
@@ -243,7 +243,7 @@ class VisionExpertAttention(nn.Module):
 
         shape = list(hidden_states.shape)
         shape[-1] = shape[-1] * 3
-        mixed_raw_layer = torch.empty(shape, dtype=hidden_states.dtype, device=hidden_states.device)
+        mixed_raw_layer = torch.zeros(shape, dtype=hidden_states.dtype, device=hidden_states.device)
         mixed_raw_layer[vision_token_mask] = self.vision_expert_query_key_value(hidden_states[vision_token_mask])
         mixed_raw_layer[language_token_mask] = self.language_expert_query_key_value(hidden_states[language_token_mask])
 
@@ -307,7 +307,7 @@ class CogVLMDecoderLayer(nn.Module):
     ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
         residual = hidden_states
 
-        hidden_states = self.input_layernorm(hidden_states)
+        hidden_states = _mask_set(hidden_states, padding_mask, self.input_layernorm(hidden_states[padding_mask]))
 
         # Self Attention
         hidden_states, self_attn_weights, present_key_value = self.self_attn(
@@ -323,7 +323,7 @@ class CogVLMDecoderLayer(nn.Module):
 
         # Fully Connected
         residual = hidden_states
-        hidden_states = self.post_attention_layernorm(hidden_states)
+        hidden_states = _mask_set(hidden_states, padding_mask, self.post_attention_layernorm(hidden_states[padding_mask]))
         hidden_states = self.mlp(hidden_states, token_type_ids=token_type_ids, padding_mask=padding_mask)
         hidden_states = residual + hidden_states
 
@@ -385,6 +385,10 @@ def build_position_ids(x: "torch.BoolTensor(B, L)", attention_mask: Optional["to
     y = y.cumsum(dim=-1)
     return y
 
+def _mask_set(x: torch.Tensor, m: torch.BoolTensor, y: torch.Tensor):
+    x = x.clone()
+    x[m] = y
+    return x
 
 class CogVLMModel(CogVLMPreTrainedModel):
     def __init__(self, config):
@@ -443,6 +447,7 @@ class CogVLMModel(CogVLMPreTrainedModel):
                 inputs_embeds = self.embed_tokens(input_ids)
                 image_features_list: list[torch.Tensor] = self.vision(image, patch_size, pool_size)
                 for i, image_features in enumerate(image_features_list):
+                    inputs_embeds[i, 1:1 + image_features.shape[1]] = image_features[0]
                     inputs_embeds[i, 1:1 + image_features.shape[1]] = image_features[0]
             else:  # single-modality
                 if token_type_ids is None:
@@ -561,7 +566,7 @@ class CogVLMModel(CogVLMPreTrainedModel):
             if output_attentions:
                 all_self_attns += (layer_outputs[1],)
 
-        hidden_states = self.norm(hidden_states)
+        hidden_states = _mask_set(hidden_states, padding_mask, self.norm(hidden_states[padding_mask]))
 
         # add hidden states from the last decoder layer
         if output_hidden_states:
