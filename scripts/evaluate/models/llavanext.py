@@ -48,10 +48,10 @@ def build_conversation_input_ids(tokenizer, prompt, image, return_tensors='pt'):
     return inputs
 
 
-def setup_llavanext(checkpoint: str, adapter: str, tokenizer: str, setting: str):
+def setup_llavanext(checkpoint: str, adapter: str, tokenizer: str):
     from transformers import LlavaNextProcessor, LlavaNextForConditionalGeneration
 
-    if setting == 'finetuned':
+    if adapter:
         model = MyLlavaNextForConditionalGeneration.from_pretrained(
             checkpoint,
             image_grid_pinpoints=[[224, 224]],

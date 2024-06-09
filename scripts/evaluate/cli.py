@@ -64,8 +64,8 @@ class Evaluator:
             evaluate_fn = m3d_vl_evaluate
         elif self.model == 'llavamed':
             from models.llavamed import LlavaMedTransform, setup_llavamed, llavamed_vl_evaluate
-            packed = setup_llavamed(checkpoint, tokenizer)
-            transform = LlavaMedTransform(packed[0].config, *packed[1:])
+            packed = setup_llavamed(checkpoint, adapter, tokenizer)
+            transform = LlavaMedTransform(packed[0].config, *packed[1:], self.setting)
             evaluate_fn = llavamed_vl_evaluate
         elif self.model == 'cogvlm':
             from models.cogvlm import (
@@ -73,7 +73,7 @@ class Evaluator:
                 setup_cogvlm,
                 cogvlm_vl_evaluate,
             )
-            packed = setup_cogvlm(checkpoint, adapter, tokenizer, self.setting)
+            packed = setup_cogvlm(checkpoint, adapter, tokenizer)
             transform = CogVLMTransform(
                 packed[0].build_conversation_input_ids, packed[1]
             )
@@ -85,7 +85,7 @@ class Evaluator:
                 llavanext_vl_evaluate,
                 build_conversation_input_ids,
             )
-            packed = setup_llavanext(checkpoint, adapter, tokenizer, self.setting)
+            packed = setup_llavanext(checkpoint, adapter, tokenizer)
             transform = LlavaNextTransform(
                 (
                     partial(build_conversation_input_ids, packed[1].tokenizer)

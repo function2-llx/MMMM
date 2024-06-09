@@ -15,14 +15,14 @@ from luolib.utils.zstd import load_pt_zst
 from scripts.evaluate.utils import dump_results
 
 
-def setup_cogvlm(checkpoint: str, adapter: str, tokenizer: str, setting: str):
+def setup_cogvlm(checkpoint: str, adapter: str, tokenizer: str):
     model = AutoModelForCausalLM.from_pretrained(
         checkpoint,
         torch_dtype=torch.bfloat16,
         low_cpu_mem_usage=True,
         trust_remote_code=True,
     )
-    if setting == 'finetuned':
+    if adapter:
         pos_embed = model.model.vision.patch_embedding.position_embedding.weight
         cls_pos_embed, pos_embed = pos_embed[0:1], pos_embed[1:]
         pos_embed = rearrange(pos_embed, '(h w) c -> 1 c h w', h=35, w=35)

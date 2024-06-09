@@ -292,9 +292,7 @@ class LlamaMetrics:
 
 class CXRMetrics:
     def setup_chexbert(self):
-        sys.path.append('third-party/CXR-Report-Metric/CXRMetric/')
-        sys.path.append('third-party/CXR-Report-Metric/CXRMetric/CheXbert/src')
-        from CheXbert.src.models.bert_encoder import bert_encoder
+        from CheXbert.models.bert_encoder import bert_encoder
 
         model = bert_encoder(False)
 

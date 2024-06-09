@@ -1,93 +1,57 @@
 from PIL import Image
-from einops import repeat
+from einops import rearrange, repeat
+from regex import P
 from monai import transforms as mt
+from peft import PeftModel
 import torch
+import torch.nn as nn
+import torch.nn.functional as nnf
 import torchvision.transforms as transforms
+from torchvision.transforms.v2 import functional as tvtf
 from tqdm import tqdm
-from transformers import AutoTokenizer, AutoConfig, CLIPImageProcessor, StoppingCriteria
 import sys
 
+from luolib.types import tuple3_t
 from luolib.utils import load_pt_zst
 from scripts.evaluate.utils import dump_results
 
 
-class KeywordsStoppingCriteria(StoppingCriteria):
-    def __init__(self, keywords, tokenizer, input_ids):
-        self.keywords = keywords
-        self.tokenizer = tokenizer
-        self.start_len = None
-        self.input_ids = input_ids
+def setup_llavamed(checkpoint: str, adapter: str, tokenizer: str):
+    from scripts.finetune.llava.mm_utils import get_model_name_from_path
+    from scripts.finetune.llava.model.builder import load_pretrained_model
 
-    def __call__(self, output_ids: torch.LongTensor, scores: torch.FloatTensor, **kwargs) -> bool:
-        if self.start_len is None:
-            self.start_len = self.input_ids.shape[1]
-        else:
-            outputs = self.tokenizer.batch_decode(output_ids[:, self.start_len:], skip_special_tokens=True)[0]
-            for keyword in self.keywords:
-                if keyword in outputs:
-                    return True
-        return False
-
-
-def setup_llavamed(checkpoint: str, tokenizer: str):
-    sys.path.append('third-party/LLaVA-Med')
-    from llava import LlavaLlamaForCausalLM
-
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer)
-
-    patch_dict = {
-        'use_mm_proj': True,
-        'mm_vision_tower': 'openai/clip-vit-large-patch14',
-        'mm_hidden_size': 1024,
-    }
-
-    cfg = AutoConfig.from_pretrained(checkpoint)
-    if not hasattr(cfg, 'mm_vision_tower'):
-        print(
-            f'`mm_vision_tower` not found in `{checkpoint}`, applying patch and save to disk.'
+    model_name = get_model_name_from_path(checkpoint)
+    tokenizer, model, image_processor, context_len = load_pretrained_model(checkpoint, None, model_name)
+    
+    if adapter:
+        pos_embed = model.model.vision_tower.vision_tower.vision_model.embeddings.position_embedding.weight
+        cls_pos_embed, pos_embed = pos_embed[0:1], pos_embed[1:]
+        pos_embed = rearrange(pos_embed, '(h w) c -> 1 c h w', h=24, w=24)
+        pos_embed = nnf.interpolate(pos_embed, (16, 16), mode='area')
+        pos_embed = torch.cat([cls_pos_embed, rearrange(pos_embed, '1 c h w ->(h w) c')])
+        model.model.vision_tower.vision_tower.vision_model.embeddings.position_embedding = nn.Embedding(
+            *pos_embed.shape[:2], _weight=pos_embed,
         )
-        for k, v in patch_dict.items():
-            setattr(cfg, k, v)
-        cfg.save_pretrained(checkpoint)
+        model.model.vision_tower.vision_tower.vision_model.embeddings.position_ids = torch.arange(257).expand((1, -1))
+        model = PeftModel.from_pretrained(model, adapter)
 
-    model = LlavaLlamaForCausalLM.from_pretrained(
-        checkpoint, torch_dtype=torch.float16, use_cache=True
-    )
-    model = model.to('cuda')
+    model.to('cuda')
     model.eval()
 
-    image_processor = CLIPImageProcessor.from_pretrained(
-        model.config.mm_vision_tower, torch_dtype=torch.float16
-    )
-    vision_tower = model.model.vision_tower[0]
-    vision_tower.to(device='cuda', dtype=torch.float16)
-
-    mm_use_im_start_end = getattr(model.config, 'mm_use_im_start_end', False)
-    tokenizer.add_tokens(['<im_patch>'], special_tokens=True)
-    if mm_use_im_start_end:
-        tokenizer.add_tokens(['<im_start>', '<im_end>'], special_tokens=True)
-
-    vision_config = vision_tower.config
-    vision_config.im_patch_token = tokenizer.convert_tokens_to_ids(['<im_patch>'])[0]
-    vision_config.use_im_start_end = mm_use_im_start_end
-    if mm_use_im_start_end:
-        vision_config.im_start_token, vision_config.im_end_token = (
-            tokenizer.convert_tokens_to_ids(['<im_start>', '<im_end>'])
-        )
-    image_token_len = (vision_config.image_size // vision_config.patch_size) ** 2
-
-    return model, tokenizer, image_processor, image_token_len
+    return model, tokenizer, image_processor, context_len
 
 
 class LlavaMedTransform(mt.RandomizableTransform):
-    def __init__(self, config, processor, image_token_len):
+    def __init__(self, config, tokenizer, processor, image_token_len, setting):
         self.config = config
+        self.tokenizer = tokenizer
         self.processor = processor
         self.image_token_len = image_token_len
+        self.setting = setting
 
     def __call__(self, data: dict):
-        sys.path.append('third-party/LLaVA-Med')
-        from llava.conversation import conv_templates
+        from scripts.finetune.llava.mm_utils import process_images, tokenizer_image_token
+        from scripts.finetune.llava.constants import DEFAULT_IMAGE_TOKEN, IMAGE_TOKEN_INDEX
 
         if data['image'].endswith('.pt.zst'):
             transform = transforms.ToPILImage()
@@ -96,25 +60,32 @@ class LlavaMedTransform(mt.RandomizableTransform):
         else:
             image = Image.open(data['image'])
 
-        vision = self.processor.preprocess(image, return_tensors='pt')[
-            'pixel_values'
-        ][0]
-        vision = repeat(vision, 'c h w -> 1 c h w').half()
-
-        if getattr(self.config, 'mm_use_im_start_end', False):
-            question = (
-                question
-                + '\n'
-                + '<im_start>'
-                + '<im_patch>' * self.image_token_len
-                + '<im_end>'
-            )
+        if self.setting == 'finetuned':
+            def intensity_norm_(
+                image: torch.Tensor,
+                mean: tuple3_t[float] = (0.48145466, 0.4578275, 0.40821073),
+                std: tuple3_t[float] = (0.26862954, 0.26130258, 0.27577711),
+            ):
+                """default mean and std is adopted from CogVLM (, which is from CLIP)"""
+                mean = image.new_tensor(mean)
+                std = image.new_tensor(std)
+                x = image.view(image.shape[0], -1)
+                x.sub_(mean[:, None]).div_(std[:, None])
+            image = tvtf.to_image(image)
+            image = tvtf.to_dtype(image, torch.float32, scale=True)
+            image = tvtf.resize(image, (224, 224))
+            intensity_norm_(image)
+            vision = image.unsqueeze(0).half()
         else:
-            question = question + '\n' + '<im_patch>' * self.image_token_len
-        conv = conv_templates['simple'].copy()
-        conv.append_message(conv.roles[0], question)
-        prompt = conv.get_prompt()
-        language = torch.as_tensor(self.tokenizer([prompt]).input_ids)
+            vision = process_images([image], self.processor, self.config)[0]
+            vision = repeat(vision, 'c h w -> 1 c h w').half()
+
+        prompt = f'{DEFAULT_IMAGE_TOKEN}\nQuestion: {data["question"]} Answer:'
+        language = torch.cat([
+            torch.tensor([self.tokenizer.bos_token_id]).unsqueeze(1),
+            torch.tensor(self.tokenizer.encode(prompt, add_special_tokens=False)).unsqueeze(1),
+        ])
+        language = rearrange(language, 'n l -> l n')
 
         return {
             'vision': vision,
@@ -125,31 +96,21 @@ class LlavaMedTransform(mt.RandomizableTransform):
 
 
 def llavamed_vl_evaluate(model, tokenizer, processor, image_token_len, dataloader, output):
-    
-
     results = []
 
     for i, sample in enumerate(tqdm(dataloader)):
-        stopping_criteria = KeywordsStoppingCriteria(['###'], tokenizer, sample['language'])
 
         with torch.inference_mode():
             prediction = tokenizer.decode(
                 model.generate(
                     sample['language'].to('cuda'),
                     images=sample['vision'].to('cuda'),
-                    stopping_criteria=[stopping_criteria],
                     max_new_tokens=256,
-                )[0, sample['language'].shape[1] :],
+                    use_cache=True,
+                    pad_token_id=tokenizer.eos_token_id
+                )[0],
                 skip_special_tokens=True,
             )
-
-        try:
-            index = prediction.index('###')
-        except ValueError:
-            prediction += '###'
-            index = prediction.index('###')
-
-        prediction = prediction[:index].split('Assistant: ')[1].strip()
 
         results.append(
             {
@@ -161,7 +122,6 @@ def llavamed_vl_evaluate(model, tokenizer, processor, image_token_len, dataloade
 
         if i % 1000 == 0:
             dump_results(results, output)
-            results = []
 
         print(sample['question'])
         print(sample['answer'])
