@@ -97,7 +97,7 @@ def process(model: LLM, sampling_params: SamplingParams, dataset: str, splits: l
             df = pd.DataFrame({'original': reports, 'processed': processed})
             df.to_csv(f'/data/MMMM/data/processed/vision-language/{dataset}/{split}-processed.csv', index=False)
 
-            for i, x in enumerate(reports):
+            for i, x in enumerate(processed):
                 data[i]['processed_report'] = x
         elif dataset == 'OpenI':
             prompts = [tokenizer.apply_chat_template(
@@ -110,7 +110,7 @@ def process(model: LLM, sampling_params: SamplingParams, dataset: str, splits: l
             df = pd.DataFrame({'original': reports, 'processed': processed})
             df.to_csv(f'/data/MMMM/data/processed/vision-language/{dataset}/{split}-processed.csv', index=False)
 
-            for i, x in enumerate(reports):
+            for i, x in enumerate(processed):
                 data[i]['processed_report'] = x
 
         with open(f'/data/MMMM/data/processed/vision-language/{dataset}/{split}-processed.json', 'w') as f:

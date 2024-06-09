@@ -71,7 +71,7 @@ class Batch(TypedDict):
 
 class Split(StrEnum):
     TRAIN = 'train'
-    VAL = 'val'
+    VAL = 'validate'
     TEST = 'test'
 
 CE_IGNORE_INDEX = -100
