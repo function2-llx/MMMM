@@ -1,16 +1,17 @@
-from luolib.lightning import LightningModule
-import torch.nn as nn
-import torch
-from torchvision.transforms.v2 import functional as tvtf
-from scripts.finetune._vqa._base import VQATransform, VQADataModule
 from typing import Callable
-from scripts.finetune._utils import CE_IGNORE_INDEX, intensity_norm_
-from torchvision.io import read_image, ImageReadMode
+
 import einops
-from llava.conversation import conv_templates
+import torch
+import torch.nn as nn
+from torchvision.io import read_image, ImageReadMode
+from torchvision.transforms.v2 import functional as tvtf
+
+from llava.mm_utils import get_model_name_from_path
 from llava.model.builder import load_pretrained_model
-from llava.mm_utils import tokenizer_image_token, get_model_name_from_path
-from llava.constants import IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_TOKEN
+from luolib.lightning import LightningModule
+from scripts.finetune._utils import CE_IGNORE_INDEX, intensity_norm_
+from scripts.finetune._vqa._base import VQATransform, VQADataModule
+
 
 class FinetuneLlavaMed(LightningModule):
     def __init__(self, *, model_path: str):

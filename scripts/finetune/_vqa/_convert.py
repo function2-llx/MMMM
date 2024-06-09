@@ -224,6 +224,7 @@ from torchvision.io import read_image, ImageReadMode
 from torchvision.transforms.v2 import functional as tvtf
 from luolib.types import tuple3_t
 from peft import PeftModel
+from llava.conversation import conv_templates, SeparatorStyle
 
 model_id = "microsoft/llava-med-v1.5-mistral-7b"
 model_name = get_model_name_from_path(model_id)
@@ -240,7 +241,7 @@ model.model.vision_tower.vision_tower.vision_model.embeddings.position_embedding
 )
 model.model.vision_tower.vision_tower.vision_model.embeddings.position_ids = torch.arange(257).expand((1, -1))
 
-adapter_path = "/home/chenxuanzhong/MMMM/output/finetune/VQA-RAD/llava-med_vqa-rad/seed-42/run-20240608_204409-wobl572z/checkpoint/last.ckpt/adapter"
+adapter_path = "/data/MMMM/output/finetune/VQA-RAD/llava-med1.5/seed-42/run-20240608_204409-wobl572z/checkpoint/last.ckpt/adapter"
 inference_model = PeftModel.from_pretrained(model, adapter_path)
 inference_model.to('cuda')
 
