@@ -65,7 +65,7 @@ class Evaluator:
         elif self.model == 'llavamed':
             from models.llavamed import LlavaMedTransform, setup_llavamed, llavamed_vl_evaluate
             packed = setup_llavamed(checkpoint, adapter, tokenizer)
-            transform = LlavaMedTransform(packed[0].config, *packed[1:], self.setting)
+            transform = LlavaMedTransform(packed[0].config, *packed[1:], self.task, self.setting)
             evaluate_fn = llavamed_vl_evaluate
         elif self.model == 'cogvlm':
             from models.cogvlm import (

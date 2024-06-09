@@ -76,19 +76,15 @@ class ReportTestDataset(Dataset):
         super().__init__()
         self.name = dataset
         self.transform = transform
-        with open(PROCESSED_VL_DATA_ROOT / dataset / 'validate.json') as f:
+        with open(PROCESSED_VL_DATA_ROOT / dataset / 'test-processed.json') as f:
             self.dataset = [
                 {
                     'image': image,
                     'question': (
-                            'Can you provide a radiology report for this medical image?'
-                            if x.get('impression')
-                            else 'Can you provide the findings for this medical image?'
+                        'Can you provide a radiology report for this medical image?'
                     ),
                     'answer': (
-                        f'Findings: {x["findings"]} Impression: {x["impression"]}'
-                        if x.get('impression')
-                        else x['findings']
+                        x['processed_report']
                     ),
                 }
                 for x in json.load(f)

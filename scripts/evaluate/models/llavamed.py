@@ -42,11 +42,12 @@ def setup_llavamed(checkpoint: str, adapter: str, tokenizer: str):
 
 
 class LlavaMedTransform(mt.RandomizableTransform):
-    def __init__(self, config, tokenizer, processor, image_token_len, setting):
+    def __init__(self, config, tokenizer, processor, image_token_len, task, setting):
         self.config = config
         self.tokenizer = tokenizer
         self.processor = processor
         self.image_token_len = image_token_len
+        self.task = task
         self.setting = setting
 
     def __call__(self, data: dict):
@@ -56,6 +57,7 @@ class LlavaMedTransform(mt.RandomizableTransform):
         if data['image'].endswith('.pt.zst'):
             transform = transforms.ToPILImage()
             image = load_pt_zst(data['image'])
+            image = repeat(image, '1 1 h w -> 3 1 h w')
             image = transform(image.squeeze(1))
         else:
             image = Image.open(data['image'])
@@ -80,7 +82,10 @@ class LlavaMedTransform(mt.RandomizableTransform):
             vision = process_images([image], self.processor, self.config)[0]
             vision = repeat(vision, 'c h w -> 1 c h w').half()
 
-        prompt = f'{DEFAULT_IMAGE_TOKEN}\nQuestion: {data["question"]} Answer:'
+        if self.task == 'vqa':
+            prompt = f'{DEFAULT_IMAGE_TOKEN}\nQuestion: {data["question"]} Answer:'
+        elif self.task == 'report':
+            prompt = f'{DEFAULT_IMAGE_TOKEN}\nPlease write a radiology report for me:'
         language = torch.cat([
             torch.tensor([self.tokenizer.bos_token_id]).unsqueeze(1),
             torch.tensor(self.tokenizer.encode(prompt, add_special_tokens=False)).unsqueeze(1),
