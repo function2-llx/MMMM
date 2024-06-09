@@ -52,8 +52,22 @@ Input: {input}
 Your output should be exactly the processed report. Do not output anything else.
 '''
 
+roco_prompt = '''
+You are an AI assistant with expertise in radiology. You are given a caption of a radiograph. You should:
+1. Remove the patient's personal information, like "a 26-year-old male patient".
+2. Remove comparison with prior examinations and description of interval changes, like "comparing to prior studies", "in the previous CT", "previously noticed", "redemonstrated", "unchanged", "new".
+3. Remove the medical history of the patient, like "with no previous history of disease", "previous liver surgery".
+4. Remove references to figures and cases, like "in Figure 1", "for Case 2", but retain references to arrows.
+5. Remove the date of the imaging study, like "taken five days after", "six months postoperative".
+5. Keep the rest of the report exactly the same without any modification.
+Here is the input text for your task:
+Input: {input}
 
-def process(model: LLM, sampling_params: SamplingParams, dataset: str, splits: list[str]):
+Your output should be exactly the processed caption. Do not output anything else.
+'''
+
+
+def process_reports(model: LLM, sampling_params: SamplingParams, dataset: str, splits: list[str]):
     for split in splits:
         with open(f'/data/MMMM/data/processed/vision-language/{dataset}/{split}.json', 'r') as f:
             data = json.load(f)
@@ -117,6 +131,30 @@ def process(model: LLM, sampling_params: SamplingParams, dataset: str, splits: l
             json.dump(data, f, indent=4)
 
 
+def process_captions(model: LLM, sampling_params: SamplingParams, dataset: str, splits: list[str]):
+    for split in splits:
+        with open(f'/data/MMMM/data/processed/vision-language/{dataset}/{split}.json', 'r') as f:
+            data = json.load(f)
+        tokenizer = model.get_tokenizer()
+
+        captions = [x['caption'] for x in data]
+        prompts = [tokenizer.apply_chat_template(
+            [{'role': 'user', 'content': roco_prompt.format(input=x)}],
+            tokenize=False,
+        ) for x in captions]
+        responses = model.generate(prompts, sampling_params)
+        processed = [x.outputs[0].text for x in responses]
+
+        df = pd.DataFrame({'original': captions, 'processed': processed})
+        df.to_csv(f'/data/MMMM/data/processed/vision-language/{dataset}/{split}-processed.csv', index=False)
+
+        for i, x in enumerate(processed):
+            data[i]['processed_caption'] = x
+
+        with open(f'/data/MMMM/data/processed/vision-language/{dataset}/{split}-processed.json', 'w') as f:
+            json.dump(data, f, indent=4, ensure_ascii=False)
+
+
 def main():
     model = '/data/llama3/Meta-Llama-3-70B-Instruct-hf'
 
@@ -134,9 +172,7 @@ def main():
         gpu_memory_utilization=0.98,
     )
 
-    # process(model, sampling_params, 'MIMIC-CXR', ['test', 'train'])
-    process(model, sampling_params, 'CT-RATE', ['test', 'train'])
-    # process(model, sampling_params, 'OpenI', ['test', 'train'])
+    process_captions(model, sampling_params, 'ROCOv2', ['train'])
 
 
 if __name__ == '__main__':
