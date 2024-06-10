@@ -1,11 +1,22 @@
-from luolib.lightning.cli import LightningCLI
+from dataclasses import dataclass
 
-from mmmm.data import MMMMDataModule
+import torch
+
+from luolib.datamodule import ExpDataModuleBase
+from luolib.lightning.cli import LightningCLI
+from luolib.types import tuple2_t
+
+from mmmm.data.dataset import DatasetSpec
+from mmmm.data.dataset.local import get_local_data_list
 from mmmm.models.segvol.align import AlignSam
+
 
 class CLI(LightningCLI):
     model: AlignSam
     datamodule: MMMMDataModule
+
+class DataModule(ExpDataModuleBase):
+    pass
 
 def main():
     CLI(
