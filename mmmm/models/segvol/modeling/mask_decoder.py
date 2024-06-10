@@ -52,7 +52,7 @@ class MaskDecoder(nn.Module):
         self.iou_token = nn.Embedding(1, transformer_dim)
         self.num_mask_tokens = num_instances + 1
         self.mask_tokens = nn.Embedding(self.num_mask_tokens, transformer_dim)
-        self.position_embeddings = nn.Embedding(self.num_mask_tokens + 2, transformer_dim)
+        # self.position_embeddings = nn.Embedding(self.num_mask_tokens + 2, transformer_dim)
         self.output_upscaling = nn.Sequential(
             resample.Upsample(transformer_dim, transformer_dim // 4, cnt=0),
             # This is what SegVol originally used:
@@ -70,6 +70,8 @@ class MaskDecoder(nn.Module):
                 for _ in range(2)
             ]
         )
+
+        self.txt_align_upscaled_embedding = nn.Linear(transformer_dim, transformer_dim // 8)
 
     def _load_from_state_dict(self, state_dict: dict[str, torch.Tensor], prefix: str, *args, **kwargs):
         ln_prefix = f'{prefix}output_upscaling.1.'
@@ -90,6 +92,7 @@ class MaskDecoder(nn.Module):
         image_pe: torch.Tensor,
         sparse_prompt_embeddings: torch.Tensor,
         dense_prompt_embeddings: torch.Tensor,
+        text_embedding: torch.Tensor,
         patch_size_z: int,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
@@ -115,7 +118,7 @@ class MaskDecoder(nn.Module):
         b, c, h, w, d = src.shape
 
         # Run the transformer
-        hs, src = self.transformer(src, pos_src, tokens, self.position_embeddings.weight)
+        hs, src = self.transformer(src, pos_src, tokens, tokens)
         mask_tokens_out = hs[:, 1:1 + self.num_mask_tokens]
 
         # Upscale mask embeddings and predict masks using the mask tokens
@@ -133,8 +136,15 @@ class MaskDecoder(nn.Module):
         for i in range(self.num_mask_tokens):
             hyper_in_list.append(self.output_hypernetworks_mlps[i > 0](mask_tokens_out[:, i, :]))
         hyper_in = torch.stack(hyper_in_list, dim=1)
+        # b, c, h, w, d = upscaled_embedding.shape
         # masks = (hyper_in @ upscaled_embedding.view(b, c, h * w * d)).view(b, -1, h, w, d)
         masks = einops.einsum(hyper_in, upscaled_embedding, 'n m c, n c ... -> n m ...')
+        text_embedding_down = self.txt_align_upscaled_embedding(text_embedding)
+        # upscaled_embedding = upscaled_embedding.view(b, c, h * w * d)
+        # sim = (text_embedding_down @ upscaled_embedding).view(b, -1, h, w, d)
+        # sim = sim.repeat(1, masks.shape[1], 1, 1, 1)
+        sim = einops.einsum(text_embedding_down, upscaled_embedding, 'n c, n c ... -> n ...')
+        masks = masks + sim[:, None]
 
         return masks, mask_tokens_out
 

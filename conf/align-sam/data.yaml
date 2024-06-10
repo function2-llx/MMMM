@@ -96,15 +96,18 @@ dataset:
     type: local
   base_vit_patch_size_z: 16
   vit_patch_size_xy: 16
-  pool_size_xy: 2
-  base_pool_size_z: 2
-  local_trans:
-    max_vision_tokens: 100
+  trans:
+    max_vision_tokens: 864
+    max_vision_tokens_2d: 400
     scale_z: [1, 2]
-    scale_z_p: 0.5
-    max_tokens_z: 4
-    scale_xy: [0.9, 3]
-    scale_xy_p: 0.9
-    num_pos: 10
-    num_neg: 2
-    vlm: false
+    scale_z_p: 0.15
+    max_tokens_z: 6
+    scale_xy: [0.8, 2]
+    scale_xy_p: 0.25
+    num_pos: 12
+    num_neg: 4
+    full_size_ratio: 0.25
+    scale_intensity_prob: 0.15
+    scale_intensity_factor: 0.1
+    shift_intensity_prob: 0.15
+    shift_intensity_offset: 0.1

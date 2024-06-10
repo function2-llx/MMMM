@@ -1,5 +1,5 @@
 trainer:
-  log_every_n_steps: 10
+  log_every_n_steps: 5
 data:
   dataset:
     datasets:
@@ -97,11 +97,9 @@ data:
   #    weight: 0.6
   #  - name: WORD
   #    type: local
-    local_trans:
+    trans:
       num_pos: 20
       num_neg: 20
-      vlm: false
-      mask_th_abs: 1
 model:
   sam:
     init_args:

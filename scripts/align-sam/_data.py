@@ -58,12 +58,11 @@ class TransConf:
     max_tokens_z: int
     scale_xy: tuple2_t[float]
     scale_xy_p: float
-    aniso_ratio_range: tuple2_t[float] = (0.5, 4.)
-    log2_vit_patch_size_z_std = 0.5  # 2-sigma, 95.45%
+    aniso_ratio_range: tuple2_t[float] = (0.5, 3.)
+    log2_vit_patch_size_z_std = 0.4
     num_pos: int
     num_neg: int
-    box_th: float = 0.4
-    full_size_ratio: float = 0.25
+    full_size_ratio: float
     force_fg_ratio: float = 0.66
     scale_intensity_prob: float = 0.15
     scale_intensity_factor: float = 0.1
@@ -113,7 +112,7 @@ class SamplePatch(mt.Randomizable):
                 vit_patch_size_z = 1 << int(log2_vit_patch_size_z)
                 tokens_z = min(math.ceil(size_z / vit_patch_size_z), trans_conf.max_tokens_z)
             patch_size_z = tokens_z * vit_patch_size_z
-            tokens_xy_total = trans_conf.max_vision_tokens // tokens_z if size_z == 1 else trans_conf.max_vision_tokens_2d
+            tokens_xy_total = trans_conf.max_vision_tokens_2d if size_z == 1 else trans_conf.max_vision_tokens // tokens_z
             scale_xy = 1 / get_max_scale_for_size(
                 sparse.shape[1:],
                 conf.vit_patch_size_xy,
@@ -122,7 +121,7 @@ class SamplePatch(mt.Randomizable):
             scale_z = size_z / patch_size_z
         else:
             tokens_z = min(trans_conf.max_tokens_z, size_z)
-            tokens_xy_total = trans_conf.max_vision_tokens // tokens_z if size_z == 1 else trans_conf.max_vision_tokens_2d
+            tokens_xy_total = trans_conf.max_vision_tokens_2d if size_z == 1 else trans_conf.max_vision_tokens // tokens_z
             # 2. sample scale_xy
             min_scale_xy = trans_conf.scale_xy[0]
             max_scale_xy = min(
@@ -191,24 +190,20 @@ class SamplePatch(mt.Randomizable):
             - indexes among all instances for certain instances of this target
             - boxes for all instances
         """
-        conf = self.trans_conf
         # NOTE: boxes cropping is applied here
         origin_boxes = torch.from_numpy(target.boxes)
         boxes, keep = spatial_crop_boxes(origin_boxes, patch_start, patch_start + patch_size)
-        if boxes.shape[0] == 0:
-            return [], boxes, 0
+        if boxes.shape[0] == 0 or patch_masks is None:
+            # NOTE: when only bounding boxes are available, it must be 2D image and always uses full image
+            mask_indexes = []
         else:
-            if patch_masks is None:
-                mask_indexes = []
-                # NOTE: only 2D data have bounding boxes, and use full image
-            else:
-                _center = patch_size >> 1
-                mask_indexes = torch.arange(*target.index_offset)[keep]
-                patch_masks = patch_masks[slice(*target.index_offset)][keep]
-                keep = einops.reduce(patch_masks, 'n ... -> n', 'any')
-                mask_indexes = mask_indexes[keep].tolist()
+            _center = patch_size >> 1
+            mask_indexes = torch.arange(*target.index_offset)[keep]
+            patch_masks = patch_masks[slice(*target.index_offset)][keep]
+            keep = einops.reduce(patch_masks, 'n ... -> n', 'any')
+            mask_indexes = mask_indexes[keep].tolist()
             boxes = boxes[keep]
-            return mask_indexes, boxes
+        return mask_indexes, boxes
 
     def _get_category(self, name: str):
         return self.target_tax[name].category
@@ -466,13 +461,20 @@ class NestedRandomSampler(Sampler):
     def __len__(self):
         return self.num_samples
 
+def _collate_fn(batch: list):
+    ret = {}
+    for x in batch:
+        for key, value in x.items():
+            ret.setdefault(key, []).append(value)
+    return ret
+
 class DataModule(ExpDataModuleBase):
     def __init__(self, *, dataset: DatasetConf, **kwargs):
         super().__init__(**kwargs)
         self.dataset_conf = dataset
 
     def train_dataloader(self):
-        dataset = Dataset(self.dataset_conf, 'train', self.tokenizer, inference=False)
+        dataset = Dataset(self.dataset_conf)
         conf = self.dataloader_conf
         assert conf.train_batch_size is not None and conf.num_batches is not None
         sampler = NestedRandomSampler(dataset, conf.num_batches * conf.train_batch_size * self.world_size)
@@ -492,5 +494,5 @@ class DataModule(ExpDataModuleBase):
             pin_memory=conf.pin_memory,
             prefetch_factor=conf.prefetch_factor,
             persistent_workers=conf.persistent_workers,
-            collate_fn=self.get_train_collate_fn(),
+            collate_fn=_collate_fn,
         )

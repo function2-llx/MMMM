@@ -3,10 +3,11 @@ from functools import cache
 import cytoolz
 import torch
 from torch import nn
-from transformers import AutoModel, AutoTokenizer, CLIPTextModel, CLIPTokenizerFast, PreTrainedModel, PretrainedConfig
+from transformers import CLIPTokenizerFast, CLIPTextModel, PreTrainedModel, PretrainedConfig, AutoTokenizer, AutoModel
 from transformers.modeling_outputs import BaseModelOutputWithPooling
 
 from luolib.lightning import LightningModule
+
 from mmmm.data.defs import Batch
 from mmmm.models import InstanceSam
 from mmmm.models.segvol.modeling.sam import InstanceSamLoss, InstanceSamOutput
@@ -108,7 +109,7 @@ class AlignSam(PreTrainedModel, LightningModule):
             ]
 
     def forward(self, batch: Batch):
-        class_lists: list[list[str]] = batch['grounding_classes']  # type: ignore
+        class_lists: list[list[str]] = batch['classes']  # type: ignore
         class_embeddings = [
             torch.stack([
                 self.text_encoder(class_name, device=self.device)
@@ -116,7 +117,7 @@ class AlignSam(PreTrainedModel, LightningModule):
             ])
             for class_list in class_lists
         ]
-        output: InstanceSamOutput = self.sam(batch['grounding_image'], batch['patch_size'], class_embeddings)
+        output: InstanceSamOutput = self.sam(batch['image'], batch['patch_size'], class_embeddings)
         return output
 
     def training_step(self, batch: Batch, *args, **kwargs):
@@ -136,8 +137,8 @@ class AlignSam(PreTrainedModel, LightningModule):
         )
         self.log_dict(_add_prefix(log_dict, 'train'))
         dice_pos = {}
-        grounding_classes = batch['grounding_classes']  # type: ignore
-        for batch_idx, targets in enumerate(grounding_classes):
+        classes = batch['classes']  # type: ignore
+        for batch_idx, targets in enumerate(classes):
             masks_preds = output.masks_logits[batch_idx].float().sigmoid() > 0.5
             if (sem_masks := batch['semantic_masks'][batch_idx]) is not None:
                 for i, target in enumerate(targets):

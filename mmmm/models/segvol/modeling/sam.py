@@ -381,11 +381,12 @@ class InstanceSam(nn.Module):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         sparse_embeddings, dense_embeddings = self.prompt_encoder(image_embeddings.shape[2:], text_embedding=text_embedding)
         sparse_embeddings = sparse_embeddings.to(text_embedding.dtype)
-        masks_logits_low_res, masks_embeds = self.mask_decoder(
+        masks_logits_low_res, masks_embeds = self.mask_decoder.forward(
             image_embeddings=image_embeddings,
             image_pe=self.prompt_encoder.get_dense_pe(image_embeddings.shape[2:]),
             sparse_prompt_embeddings=sparse_embeddings,
             dense_prompt_embeddings=dense_embeddings,
+            text_embedding=text_embedding,
             patch_size_z=patch_size_z,
         )
         return masks_logits_low_res, masks_embeds
@@ -400,7 +401,6 @@ class InstanceSam(nn.Module):
             _masks_logits_low_res, masks_embeds = self._predict_masks(
                 text_embedding[i], image_embeddings[i], patch_size[i][0],
             )
-            from transformers import Mask2FormerModel
             # calling sigmoid here to restrict range (CenterSizeMode), following DETR
             _boxes = self.box_head(masks_embeds).float().sigmoid()
             _disc_logit = einops.rearrange(self.disc_head(masks_embeds[:, 1:]), 'nt ni 1 -> nt ni')

@@ -10,7 +10,7 @@ trainer:
   callbacks:
   - class_path: luolib.lightning.callbacks.ModelCheckpoint
     init_args:
-      every_n_train_steps: 5000
+      every_n_train_steps: 10
       filename: "{step}"
       save_top_k: -1
       save_last: true
@@ -38,7 +38,7 @@ model:
     class_path: mmmm.models.build_sam
     init_args:
       patch_size: 16
-      pos_embed_shape: [8, 20, 20]
+      pos_embed_shape: [6, 20, 20]
       num_instances: 12
       pt_in_channels: 1
       pt_patch_size: [4, 16, 16]
