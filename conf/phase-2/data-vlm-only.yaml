@@ -7,6 +7,9 @@ init_args:
     - name: CT-RATE
       type: vl
       weight: 1.5
+    - name: ROCOv2
+      type: vl
+      weight: 0.3
     mimic_cxr_neg_weight: 0.2
     base_vit_patch_size_z: 16
     vit_patch_size_xy: 16

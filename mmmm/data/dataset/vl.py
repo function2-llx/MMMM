@@ -216,7 +216,7 @@ class VLTransform(mt.RandomizableTransform):
             conversation.append(
                 ConvTurn(_template.format(referring), plane)
             )
-        caption: str | None = data.get('caption')
+        caption: str | None = data.get('processed_caption')
         report: str | None = data.get('processed_report') if allow_report else None
         vqa: list[dict] | None = data.get('vqa')
         assert not allow_report or report or vqa

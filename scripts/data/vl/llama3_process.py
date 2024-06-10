@@ -1,5 +1,8 @@
 import json
+
+import numpy as np
 import pandas as pd
+import torch
 from vllm import LLM, SamplingParams
 
 mimic_cxr_prompt_1 = '''
@@ -53,17 +56,18 @@ Your output should be exactly the processed report. Do not output anything else.
 '''
 
 roco_prompt = '''
-You are an AI assistant with expertise in radiology. You are given a caption of a radiograph. You should:
+You are an AI assistant with expertise in radiology. You are given a caption of a radiological image. You should:
 1. Remove the patient's personal information, like "a 26-year-old male patient".
 2. Remove comparison with prior examinations and description of interval changes, like "comparing to prior studies", "in the previous CT", "previously noticed", "redemonstrated", "unchanged", "new".
 3. Remove the medical history of the patient, like "with no previous history of disease", "previous liver surgery".
 4. Remove references to figures and cases, like "in Figure 1", "for Case 2", but retain references to arrows.
 5. Remove the date of the imaging study, like "taken five days after", "six months postoperative".
-5. Keep the rest of the report exactly the same without any modification.
-Here is the input text for your task:
+6. For the rest of the text that has no content to be removed, keep it exactly the same without any modification.
+7. If you find the provided input text does not appear to be a caption of a radiological image, such as it does not mention any radiology-related concepts or terms, then your output should be exactly "The provided input text does not appear to be a caption of a radiological image.".
+Here is the input text for your task: 
 Input: {input}
 
-Your output should be exactly the processed caption. Do not output anything else.
+Your output should be exactly the processed caption, or report that the input text does not appear to be a caption of a radiological image. Do not output anything else, such as other comments.
 '''
 
 
@@ -166,14 +170,13 @@ def main():
 
     model = LLM(
         model=model,
-        tensor_parallel_size=2,
+        tensor_parallel_size=torch.cuda.device_count(),
         disable_custom_all_reduce=True,
         enable_prefix_caching=True,
         gpu_memory_utilization=0.98,
     )
 
     process_captions(model, sampling_params, 'ROCOv2', ['train'])
-
 
 if __name__ == '__main__':
     main()
