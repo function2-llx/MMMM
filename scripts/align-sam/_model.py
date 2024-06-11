@@ -87,7 +87,8 @@ class AlignSam(PreTrainedModel, LightningModule):
     def get_class_embeddings(self, class_lists: list[list[str]]):
         if self.class_embeddings is None:
             class_lists = [
-                [f'An image of the {class_name}.' for class_name in class_list]
+                # [f'An image of the {class_name}.' for class_name in class_list]
+                [f'A computerized tomography of a {class_name}.' for class_name in class_list]
                 for class_list in class_lists
             ]
             if self.freeze_clip:

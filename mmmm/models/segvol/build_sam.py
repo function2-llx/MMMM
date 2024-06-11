@@ -29,7 +29,7 @@ def _build_sam(
     encoder_mlp_dim = embed_dim * encoder_mlp_ratio
     sam = InstanceSam(
         image_encoder=ImageEncoderViT(
-            in_channels=3,
+            in_channels=1,
             pos_embed_shape=pos_embed_shape,
             patch_size=patch_size,
             hidden_size=embed_dim,
