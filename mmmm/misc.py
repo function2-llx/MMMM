@@ -2,6 +2,10 @@ from pathlib import Path
 
 import einops
 import math
+import matplotlib
+from matplotlib import pyplot as plt
+from matplotlib.colors import ListedColormap
+from matplotlib.patches import Rectangle
 import numpy as np
 import torch
 from torchvision.io import read_image
@@ -10,6 +14,7 @@ import torchvision.transforms.v2.functional as tvtf
 from luolib.types import PathLike
 from luolib.utils import load_pt_zst
 from luolib.utils.misc import ensure_rgb
+from monai.config import NdarrayOrTensor
 import monai.transforms as mt
 from monai.utils import InterpolateMode, convert_to_tensor
 
@@ -70,3 +75,102 @@ def image_transform(
     pool_size = (pool_size_z, pool_size_xy, pool_size_xy)
     num_vision_tokens = (np.array(image_resized.shape[1:]) // stride).prod().item()
     return image_resized, image, patch_size, pool_size, num_vision_tokens
+
+class IndexTrackerBinary:
+    def __init__(
+        self,
+        img: NdarrayOrTensor,
+        seg: NdarrayOrTensor | None = None,
+        boxes: torch.Tensor | None = None,
+        block: bool = True,
+        title: str = "",
+        zyx: bool = True,
+        choose_max: bool = False,
+        vmin: float | None = None,
+        vmax: float | None = None,
+        labels: list[str] | None = None,
+    ):
+        img_t: torch.Tensor = convert_to_tensor(img, device='cpu')
+        if seg is not None:
+            seg: torch.Tensor = convert_to_tensor(seg, device='cpu')
+            if seg.ndim == 3:
+                labels = seg.unique()
+                masks = labels[:, None, None, None] == seg[None]
+            else:
+                masks = seg.bool()
+        else:
+            masks = torch.empty(0, *img_t.shape)
+        if boxes is None:
+            boxes = torch.empty(0, 6, dtype=torch.int64)
+        elif not zyx:
+            raise NotImplementedError
+        if not zyx:
+            img_t = einops.rearrange(img_t, '... h w d -> ... d h w')
+            masks = einops.rearrange(masks, 'c h w d -> c d h w')
+        if boxes.is_floating_point():
+            boxes = boxes * einops.repeat(torch.tensor(img_t.shape[-3:]), 'd -> (l2 d)', l2=2)
+            boxes = boxes.round().long()
+        # make matplotlib happy
+        img_t = img_t.mT
+        img_t = einops.rearrange(img_t, '... d w h -> d w h ...')
+        masks = masks.mT
+        img_cmap = 'gray' if img_t.ndim == 3 else None
+
+        fig, ax = plt.subplots()
+        fig: plt.Figure
+        ax: plt.Axes
+        ax.set_title('use scroll wheel to navigate images')
+        self.ax = ax
+        self.img = img_t.numpy()
+        self.masks = masks.numpy()
+        self.boxes = boxes.numpy()
+        self.slices = img_t.shape[0]
+        self.ind = self.slices // 2
+        if choose_max:
+            self.ind = einops.reduce(masks, 'c d h w -> d', 'sum').argmax().item()
+        self.ax_img = ax.imshow(self.img[self.ind], img_cmap, vmin=vmin, vmax=vmax)
+        colormap: ListedColormap = matplotlib.colormaps['tab20']
+        self.ax_masks = [
+            ax.imshow(
+                self.masks[c, self.ind],
+                ListedColormap(['none', colormap.colors[c]]),
+                # vmax=num_classes,
+                alpha=0.5,
+            )
+            for c in range(masks.shape[0])
+        ]
+        # from matplotlib.colorbar import Colorbar
+        # cbar: matplotlib.colorbar.Colorbar = fig.colorbar(self.ax_seg)
+        # cbar.set_ticks(np.arange(num_classes), labels=labels)
+
+        self.update()
+        fig.canvas.mpl_connect('scroll_event', self.on_scroll)
+        plt.title(title)
+        plt.show(block=block)
+
+    def on_scroll(self, event):
+        # print("%s %s" % (event.button, event.step))
+        last = self.ind
+        if event.button == 'up':
+            self.ind = min(self.slices - 1, self.ind + 1)
+        else:
+            self.ind = max(0, self.ind - 1)
+        if last != self.ind:
+            self.update()
+
+    def update(self):
+        self.ax.set_ylabel('slice %s' % self.ind)
+        for patch in list(self.ax.patches):
+            patch.remove()
+        for box in self.boxes:
+            if self.ind in range(box[0], box[3]):
+                self.ax.add_patch(
+                    Rectangle(
+                        (box[1], box[2]), (box[4] - box[1]), (box[5] - box[2]),
+                        linewidth=1, edgecolor='r', facecolor='none',
+                    ),
+                )
+        self.ax_img.set_data(self.img[self.ind])
+        for c, ax_mask in enumerate(self.ax_masks):
+            ax_mask.set_data(self.masks[c, self.ind])
+        self.ax.figure.canvas.draw()
