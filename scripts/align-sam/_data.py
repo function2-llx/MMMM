@@ -235,7 +235,8 @@ class SamplePatch(mt.Randomizable):
                     mt.RandFlipD(['image', 'masks'], 0.5, i, allow_missing_keys=True)
                     for i in range(3)
                 ],
-                mt.RandRotate90D(['image', 'masks'], 0.75, spatial_axes=(1, 2), allow_missing_keys=True),
+                mt.Rotate90D(['image', 'masks'], spatial_axes=(1, 2), allow_missing_keys=True),
+                # mt.RandRotate90D(['image', 'masks'], 0.75, spatial_axes=(1, 2), allow_missing_keys=True),
             ],
             lazy=True,
             overrides={
@@ -496,3 +497,6 @@ class DataModule(ExpDataModuleBase):
             persistent_workers=conf.persistent_workers,
             collate_fn=_collate_fn,
         )
+
+    def val_dataloader(self):
+        pass

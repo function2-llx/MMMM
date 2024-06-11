@@ -96,16 +96,16 @@ class PatchEmbeddingBlock(nn.Module):
             state_dict[f'{prefix}proj.weight'] = proj_weight
             state_dict[f'{prefix}proj.bias'] = state_dict.pop(f'{prefix}patch_embeddings.1.bias')
 
+            d, h, w = self.pt_pos_embed_shape
+            pos_embed = spadop.resample(
+                einops.rearrange(
+                    state_dict[f'{prefix}position_embeddings'],
+                    '1 (d h w) c -> 1 c d h w', d=d, h=h, w=w,
+                ),
+                self.position_embeddings.weight.shape[2:],
+            )
+            state_dict[f'{prefix}position_embeddings'] = pos_embed
             if self.pt_pos_embed_shape != self.position_embeddings.weight.shape[2:]:
-                d, h, w = self.pt_pos_embed_shape
-                pos_embed = spadop.resample(
-                    einops.rearrange(
-                        state_dict[f'{prefix}position_embeddings'],
-                        '1 (d h w) c -> 1 c d h w', d=d, h=h, w=w,
-                    ),
-                    self.position_embeddings.weight.shape[2:],
-                )
-                state_dict[f'{prefix}position_embeddings'] = pos_embed
                 print(f'resample {prefix}position_embeddings: {self.pt_pos_embed_shape} -> {self.position_embeddings.weight.shape[2:]}')
         elif (
             (pos_embed := state_dict.get(f'{prefix}position_embeddings.weight')) is not None and

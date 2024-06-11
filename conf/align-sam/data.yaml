@@ -97,11 +97,11 @@ dataset:
   base_vit_patch_size_z: 16
   vit_patch_size_xy: 16
   trans:
-    max_vision_tokens: 864
-    max_vision_tokens_2d: 400
+    max_vision_tokens: 2048
+    max_vision_tokens_2d: 1024
     scale_z: [1, 2]
     scale_z_p: 0.15
-    max_tokens_z: 6
+    max_tokens_z: 8
     scale_xy: [0.8, 2]
     scale_xy_p: 0.25
     num_pos: 12

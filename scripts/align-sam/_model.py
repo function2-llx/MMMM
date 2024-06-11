@@ -49,6 +49,7 @@ class AlignSam(PreTrainedModel, LightningModule):
     ):
         super().__init__(PretrainedConfig(), **kwargs)
         self.sam = sam
+        # not used
         sam.prompt_encoder.point_embeddings.requires_grad_(False)
         sam.prompt_encoder.not_a_point_embed.requires_grad_(False)
         sam.prompt_encoder.mask_downscaling.requires_grad_(False)
