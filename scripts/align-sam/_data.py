@@ -236,8 +236,8 @@ class SamplePatch(mt.Randomizable):
     ) -> tuple[torch.Tensor, torch.BoolTensor | None]:
         if use_full_size:
             maybe_scale_trans = []
-            patch = nnf.interpolate(patch, patch_size, mode='area')
-            patch_masks = nnf.interpolate(patch_masks.byte(), patch_size, mode='nearest-exact').bool()
+            patch = nnf.interpolate(patch[None], patch_size, mode='area')[0]
+            patch_masks = nnf.interpolate(patch_masks[None].byte(), patch_size, mode='nearest-exact')[0].bool()
         elif patch_size == patch.shape[1:]:
             maybe_scale_trans = []
         else:
