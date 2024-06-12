@@ -29,7 +29,7 @@ from constants import (
     COMPOSITE_METRIC_V1_PATH,
     CHEXPERT_CONDITIONS,
     RADBERT_CONDITIONS,
-    CHEXPERT_MICRO
+    CHEXPERT_MICRO,
 )
 
 
@@ -50,6 +50,7 @@ def dump_results(results: list[dict], output: Path):
 def combine_results(results: list[str], output: Path):
     combined = pd.concat([pd.read_csv(result) for result in results])
     combined.to_csv(output, index=False)
+
 
 class VQATestDataset(Dataset):
     def __init__(self, dataset: str, transform, start, end):
@@ -83,9 +84,7 @@ class ReportTestDataset(Dataset):
                     'question': (
                         'Can you provide a radiology report for this medical image?'
                     ),
-                    'answer': (
-                        x['processed_report']
-                    ),
+                    'answer': (x['processed_report']),
                 }
                 for x in json.load(f)
                 for i, image in enumerate(x['image'])
@@ -101,6 +100,7 @@ class ReportTestDataset(Dataset):
 
 def collate_fn(batch: list[dict]):
     return batch[0]
+
 
 class GenericMetrics:
     def __init__(self):
@@ -244,7 +244,7 @@ class LlamaMetrics:
                                 if pd.notna(row['prediction'])
                                 else ''
                             ),
-                        )
+                        ),
                     },
                 ],
                 tokenize=False,
@@ -262,11 +262,13 @@ class LlamaMetrics:
             retry = 0
             while True:
                 try:
-                    score = float(response.outputs[0].text.split('Score: ')[1].strip().strip('.'))
+                    score = float(
+                        response.outputs[0].text.split('Score: ')[1].strip().strip('.')
+                    )
                     response_texts.append(response.outputs[0].text)
                     scores.append(score)
                     break
-                except:   
+                except:
                     retry += 1
                     if retry > 3:
                         response_texts.append(response.outputs[0].text)
@@ -342,28 +344,10 @@ class CXRMetrics:
                 text = text[:511] + [self.chexbert_tokenizer.sep_token_id]
         else:
             text = [
-                self.chexbert_tokenizer.cls_token_id + self.chexbert_tokenizer.sep_token_id
+                self.chexbert_tokenizer.cls_token_id
+                + self.chexbert_tokenizer.sep_token_id
             ]
         return torch.LongTensor(text).unsqueeze(0).to('cuda')
-
-    def compute_chexbert_similarity(self, prediction: str, reference: str):
-        with torch.inference_mode():
-            prediction = self.chexbert_tokenize(prediction)
-            attention_mask = torch.ones(1, prediction.shape[1]).to('cuda')
-            prediction = (
-                self.chexbert_model(prediction, attention_mask).squeeze(0).to('cpu')
-            )
-
-            reference = self.chexbert_tokenize(reference)
-            attention_mask = torch.ones(1, reference.shape[1]).to('cuda')
-            reference = (
-                self.chexbert_model(reference, attention_mask).squeeze(0).to('cpu')
-            )
-
-        return (
-            (prediction * reference).sum()
-            / (torch.linalg.norm(prediction) * torch.linalg.norm(reference))
-        ).item()
 
     @staticmethod
     def exact_entity_token_if_rel_exists_reward(
@@ -436,50 +420,69 @@ class CXRMetrics:
 
     def compute(self, prediction: str, reference: str):
         return {
-            'chexbert similarity': self.compute_chexbert_similarity(prediction, reference),
             'radgraph': self.compute_radgraph(prediction, reference),
             'bleu2': self.compute_bleu2(prediction, reference),
         }
 
     def compute_radcliq(self, df: pd.DataFrame):
         return self.radcliq_v0.predict(
-            self.normalizer.transform(np.array(df[['radgraph', 'bertscore', 'chexbert', 'bleu2']]))
+            self.normalizer.transform(
+                np.array(df[['radgraph', 'bertscore', 'chexbert', 'bleu2']])
+            )
         ), self.radcliq_v1.predict(
             np.array(df[['radgraph', 'bertscore', 'chexbert', 'bleu2']])
         )
-    
-    def compute_chexbert_f1(self, df: pd.DataFrame):
-        self.chexbert_model.logits = True
 
+    def compute_chexbert(self, df: pd.DataFrame):
+        similarities = []
         prediction_labels = [[] for _ in range(len(CHEXPERT_CONDITIONS))]
         reference_labels = [[] for _ in range(len(CHEXPERT_CONDITIONS))]
         for _, row in tqdm(df.iterrows(), total=df.shape[0]):
+            self.chexbert_model.logits = True
             prediction = self.chexbert_tokenize(
                 str(row['prediction']) if pd.notna(row['prediction']) else ''
             )
-            attention_mask = torch.ones(1, prediction.shape[1]).to('cuda')
-            prediction = self.chexbert_model(prediction, attention_mask)
+            prediction_attention_mask = torch.ones(1, prediction.shape[1]).to('cuda')
+            logits = self.chexbert_model(prediction, prediction_attention_mask)
             for i in range(len(CHEXPERT_CONDITIONS)):
-                prediction_labels[i].append(
-                    torch.argmax(prediction[i], dim=1).item()
-                )
-            
+                prediction_labels[i].append(torch.argmax(logits[i], dim=1).item())
+
             reference = self.chexbert_tokenize(str(row['answer']))
-            attention_mask = torch.ones(1, reference.shape[1]).to('cuda')
-            reference = self.chexbert_model(reference, attention_mask)
+            reference_attention_mask = torch.ones(1, reference.shape[1]).to('cuda')
+            logits = self.chexbert_model(reference, reference_attention_mask)
             for i in range(len(CHEXPERT_CONDITIONS)):
-                reference_labels[i].append(
-                    torch.argmax(reference[i], dim=1).item()
-                )
+                reference_labels[i].append(torch.argmax(logits[i], dim=1).item())
+
+            self.chexbert_model.logits = False
+            prediction = (
+                self.chexbert_model(prediction, prediction_attention_mask)
+                .squeeze(0)
+                .to('cpu')
+            )
+            reference = (
+                self.chexbert_model(reference, reference_attention_mask)
+                .squeeze(0)
+                .to('cpu')
+            )
+            similarities.append(
+                (
+                    (prediction * reference).sum()
+                    / (torch.linalg.norm(prediction) * torch.linalg.norm(reference))
+                ).item()
+            )
 
         self.chexbert_model.logits = False
 
-        prediction_labels = [[1 if x == 1 or x == 3 else 0 for x in y] for y in prediction_labels]
-        reference_labels = [[1 if x == 1 or x == 3 else 0 for x in y] for y in reference_labels]
+        prediction_labels = [
+            [1 if x == 1 or x == 3 else 0 for x in y] for y in prediction_labels
+        ]
+        reference_labels = [
+            [1 if x == 1 or x == 3 else 0 for x in y] for y in reference_labels
+        ]
 
         f1s = [f1_score(x, y) for x, y in zip(prediction_labels, reference_labels)]
 
-        return prediction_labels, reference_labels, f1s
+        return similarities, prediction_labels, reference_labels, f1s
 
     def process(self, run: Path):
         df = pd.read_csv(str(run) + '.csv')
@@ -490,10 +493,22 @@ class CXRMetrics:
             summary = {}
 
         results = {
-            'chexbert similarity': [],
             'radgraph': [],
             'bleu2': [],
         }
+
+        results['chexbert'], prediction_labels, reference_labels, f1s = (
+            self.compute_chexbert(df)
+        )
+        for i, condition in enumerate(CHEXPERT_CONDITIONS):
+            df[condition.lower() + ' chexbert prediction'] = prediction_labels[i]
+            df[condition.lower() + ' chexbert reference'] = reference_labels[i]
+            summary[condition.lower() + ' chexbert f1'] = f1s[i]
+
+        summary['macro chexbert f1'] = sum(f1s) / len(f1s)
+        summary['micro chexbert f1'] = sum(
+            [f1 for i, f1 in enumerate(f1s) if i in CHEXPERT_MICRO]
+        ) / len(CHEXPERT_MICRO)
 
         for _, row in tqdm(df.iterrows(), total=df.shape[0]):
             score = self.compute(
@@ -507,16 +522,10 @@ class CXRMetrics:
             df[key] = results[key]
 
         results['radcliq-v0'], results['radcliq-v1'] = self.compute_radcliq(df)
-        df['radcliq-v0'], df['radcliq-v1'] = results['radcliq-v0'], results['radcliq-v1']
-
-        prediction_labels, reference_labels, f1s = self.compute_chexbert_f1(df)
-        for i, condition in enumerate(CHEXPERT_CONDITIONS):
-            df[condition.lower() + ' chexbert prediction'] = prediction_labels[i]
-            df[condition.lower() + ' chexbert reference'] = reference_labels[i]
-            summary[condition.lower() + ' chexbert f1'] = f1s[i]
-
-        summary['macro chexbert f1'] = sum(f1s) / len(f1s)
-        summary['micro chexbert f1'] = sum([f1 for i, f1 in enumerate(f1s) if i in CHEXPERT_MICRO]) / len(CHEXPERT_MICRO)
+        df['radcliq-v0'], df['radcliq-v1'] = (
+            results['radcliq-v0'],
+            results['radcliq-v1'],
+        )
 
         for key in results.keys():
             summary[key] = sum(results[key]) / len(results[key])
@@ -532,13 +541,20 @@ class CTMetrics:
         from classifier import RadBertClassifier
 
         radbert = RadBertClassifier(n_classes=len(RADBERT_CONDITIONS))
-        radbert.load_state_dict(torch.load(ORIGIN_VL_DATA_ROOT / 'CT-RATE' / 'models' / 'RadBertClassifier.pth'), strict=False)
+        radbert.load_state_dict(
+            torch.load(
+                ORIGIN_VL_DATA_ROOT / 'CT-RATE' / 'models' / 'RadBertClassifier.pth'
+            ),
+            strict=False,
+        )
         radbert = radbert.to('cuda')
         radbert.eval()
 
         self.radbert = radbert
-        self.tokenizer = AutoTokenizer.from_pretrained('zzxslp/RadBERT-RoBERTa-4m', do_lower_case=True)
-    
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            'zzxslp/RadBERT-RoBERTa-4m', do_lower_case=True
+        )
+
     def process(self, run: Path):
         sys.path.append('third-party/CT-CLIP/text_classifier')
 
@@ -549,22 +565,41 @@ class CTMetrics:
         else:
             summary = {}
 
-        pred_logits = np.zeros(len(RADBERT_CONDITIONS)).reshape(1, len(RADBERT_CONDITIONS))
+        pred_logits = np.zeros(len(RADBERT_CONDITIONS)).reshape(
+            1, len(RADBERT_CONDITIONS)
+        )
 
         for _, row in tqdm(df.iterrows(), total=df.shape[0]):
-            inputs = self.tokenizer(row['prediction'].replace('\n', ' '), return_tensors='pt', max_length=512, padding='max_length', truncation=True)
-            logits = self.radbert(input_ids=inputs['input_ids'].to('cuda'), attn_mask=inputs['attention_mask'].to('cuda'))
-            pred_logits = np.concatenate((pred_logits, logits.detach().cpu().numpy()), axis=0)
+            inputs = self.tokenizer(
+                row['prediction'].replace('\n', ' '),
+                return_tensors='pt',
+                max_length=512,
+                padding='max_length',
+                truncation=True,
+            )
+            logits = self.radbert(
+                input_ids=inputs['input_ids'].to('cuda'),
+                attn_mask=inputs['attention_mask'].to('cuda'),
+            )
+            pred_logits = np.concatenate(
+                (pred_logits, logits.detach().cpu().numpy()), axis=0
+            )
 
         pred_logits = pred_logits[1:]
         prediction_labels = expit(pred_logits)
-        
+
         prediction_labels[prediction_labels >= 0.5] = 1
         prediction_labels[prediction_labels < 0.5] = 0
 
         print(prediction_labels)
 
-        reference_labels = pd.read_csv(ORIGIN_VL_DATA_ROOT / 'CT-RATE' / 'dataset' / 'multi_abnormality_labels' / 'valid_predicted_labels.csv')
+        reference_labels = pd.read_csv(
+            ORIGIN_VL_DATA_ROOT
+            / 'CT-RATE'
+            / 'dataset'
+            / 'multi_abnormality_labels'
+            / 'valid_predicted_labels.csv'
+        )
 
         f1s = []
         for i, condition in enumerate(RADBERT_CONDITIONS):
