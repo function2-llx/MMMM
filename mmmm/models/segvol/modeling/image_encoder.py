@@ -83,14 +83,13 @@ class PatchEmbeddingBlock(nn.Module):
         if (proj_weight := state_dict.pop(f'{prefix}patch_embeddings.1.weight', None)) is not None and proj_weight.ndim == 2:
             # load from SegVol checkpoint
             p0, p1, p2 = self.pt_patch_size
-            proj_weight = spadop.resample(
-                einops.rearrange(
-                    proj_weight,
-                    'co (p0 p1 p2 ci) -> co ci p0 p1 p2', p0=p0, p1=p1, p2=p2, ci=self.pt_in_channels,
-                ),
-                self.proj.kernel_size,
-                scale=True,
+            proj_weight = einops.rearrange(
+                proj_weight,
+                'co (p0 p1 p2 ci) -> co ci p0 p1 p2', p0=p0, p1=p1, p2=p2, ci=self.pt_in_channels,
             )
+            if self.pt_patch_size != self.proj.kernel_size:
+                print(f'resample {prefix}patch_embeddings.1.weight, {self.pt_patch_size} -> {prefix}proj.weight, {self.proj.kernel_size}')
+                proj_weight = spadop.resample(proj_weight, self.proj.kernel_size, scale=True)
             if self.pt_in_channels == 1 and self.in_channels != 1:
                 proj_weight = einops.repeat(proj_weight, 'co 1 ... -> co ci ...', ci=self.in_channels) / self.in_channels
             state_dict[f'{prefix}proj.weight'] = proj_weight
@@ -105,11 +104,14 @@ class PatchEmbeddingBlock(nn.Module):
                 self.position_embeddings.weight.shape[2:],
             )
             state_dict[f'{prefix}position_embeddings'] = pos_embed
+            if self.pt_pos_embed_shape != self.position_embeddings.weight.shape[2:]:
+                print(f'resample {prefix}position_embeddings: {self.pt_pos_embed_shape} -> {self.position_embeddings.weight.shape[2:]}')
         elif (
             (pos_embed := state_dict.get(f'{prefix}position_embeddings.weight')) is not None and
             pos_embed.shape[2:] != (_shape := self.position_embeddings.weight.shape[2:])
         ):
             # TODO: refactor here
+            print(f'resample {prefix}position_embeddings.weight: {pos_embed.shape[2:]} -> {_shape}')
             pos_embed = spadop.resample(pos_embed, _shape)
             state_dict[f'{prefix}position_embeddings.weight'] = pos_embed
 

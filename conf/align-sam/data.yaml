@@ -1,0 +1,118 @@
+dataset:
+  datasets:
+  - name: ACDC
+    type: local
+  - name: AMOS22
+    weight: 4
+    type: local
+  - name: ATLAS
+    type: local
+  - name: ATM22
+    type: local
+  - name: autoPET-III
+    type: local
+    weight: 0.2
+  - name: BraTS2023-GLI
+    type: local
+    weight: 0.2
+  - name: BraTS2023-MEN
+    type: local
+    weight: 0.2
+  - name: BraTS2023-MET
+    type: local
+  - name: BraTS2023-PED
+    type: local
+  - name: BraTS2023-SSA
+    type: local
+  - name: BTCV-Abdomen
+    type: local
+  - name: BTCV-Cervix
+    type: local
+  - name: BUSI
+    type: local
+  - name: CHAOS
+    type: local
+  - name: CT-ORG
+    type: local
+    weight: 5
+  - name: CTPelvic1K
+    type: local
+    weight: 0.2
+  - name: CTSpine1K
+    type: local
+    weight: 0.2
+  - name: HaN-Seg
+    type: local
+  - name: ISLES22
+    type: local
+  - name: LiTS
+    type: local
+  - name: LIDC-IDRI
+    type: local
+    weight: 2
+  - name: LNQ2023
+    type: local
+  - name: MRSpineSeg
+    type: local
+  - name: MSD-Task02_Heart
+    type: local
+  - name: MSD-Task03_Liver
+    type: local
+  - name: MSD-Task04_Hippocampus
+    type: local
+  - name: MSD-Task05_Prostate
+    type: local
+  - name: MSD-Task06_Lung
+    type: local
+  - name: MSD-Task07_Pancreas
+    type: local
+  - name: MSD-Task08_HepaticVessel
+    type: local
+  - name: MSD-Task09_Spleen
+    type: local
+  - name: MSD-Task10_Colon
+    type: local
+  - name: PARSE2022
+    type: local
+  - name: PENGWIN-T1
+    type: local
+  - name: Prostate158
+    type: local
+  - name: RibFrac
+    type: local
+  - name: SEG.A.2023
+    type: local
+  - name: SegRap2023
+    type: local
+  - name: SegTHOR
+    type: local
+  - name: TotalSegmentator
+    type: local
+    weight: 2
+  - name: VerSe
+    type: local
+    weight: 0.4
+  - name: WORD
+    type: local
+  base_vit_patch_size_z: 16
+  vit_patch_size_xy: 16
+  trans:
+    max_vision_tokens: 2048
+    max_vision_tokens_lr: 600
+    max_tokens_z: 8
+    max_tokens_z_lr: 6
+    max_vision_tokens_2d: 1024
+    max_vision_tokens_2d_lr: 256
+    low_res_p: 0.4
+    scale_z: [0.9, 1.2]
+    scale_z_p: 0.1
+    scale_xy: [0.8, 1.4]
+    scale_xy_p: 0.2
+    num_pos: 14
+    num_neg: 2
+    full_size_ratio: 0.2
+    scale_intensity_prob: 0.15
+    scale_intensity_factor: 0.1
+    shift_intensity_prob: 0.15
+    shift_intensity_offset: 0.1
+    log2_vit_patch_size_z_std: 0.25

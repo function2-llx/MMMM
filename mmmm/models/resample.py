@@ -33,6 +33,7 @@ class Downsample(nn.Conv3d):
         weight_key = f'{prefix}weight'
         if (weight := state_dict.get(weight_key)) is not None and weight.ndim + 1 == self.weight.ndim:
             if weight.shape[2:] != self.kernel_size[1:] and self.interpolate_2d:
+                print(f'resample f{prefix}weight: {weight.shape[2:]} -> {self.kernel_size[1:]}')
                 weight = spadop.resample(weight, self.kernel_size[1:], scale=True)
             d = self.kernel_size[0]
             match self.inflation:

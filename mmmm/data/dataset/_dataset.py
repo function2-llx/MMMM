@@ -65,7 +65,7 @@ class MMMMDataset(Dataset):
         self,
         conf: DatasetConf,
         split: Split,
-        tokenizer: MMMMTokenizer,
+        tokenizer: MMMMTokenizer | None,
         inference: bool,
     ):
         super().__init__()

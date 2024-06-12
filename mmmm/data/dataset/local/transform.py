@@ -65,6 +65,7 @@ class LocalTransConf:
     """
     Attributes:
         neg_grounding_prob: the probability of negative targets are forced grounded
+        vlm: whether the transform is performed for VLM
     """
     max_vision_tokens: int
     scale_z: tuple2_t[float]
@@ -76,20 +77,19 @@ class LocalTransConf:
     log2_vit_patch_size_z_std = 0.5  # 2-sigma, 95.45%
     num_pos: int
     num_neg: int
-    mask_th_abs: int = 1000
-    mask_th_rel: float = 0.5
-    box_th: float = 0.5
+    mask_th_abs: int = 500
+    mask_th_rel: float = 0.3
+    box_th: float = 0.4
     grounding_prob: float = 0.99
     neg_grounding_prob: float = 0.2
+    vlm: bool = True
 
 def get_local_transform(
     conf: _dataset.DatasetConf,
-    tokenizer: MMMMTokenizer,
+    tokenizer: MMMMTokenizer | None,
     inference: bool,
 ) -> Callable[[dict], DataPoint]:
     return SamplePatch(conf, tokenizer, inference)
-
-_ignore_anomalies = {'nodule/mass', 'other lesion'}
 
 def _get_patch_size_xy(size: npt.NDArray[np.int64], scale: float, stride: int, max_tokens: int) -> tuple2_t[int]:
     size_scaled = size / scale
@@ -116,13 +116,15 @@ class SamplePatch(mt.Randomizable):
     def __init__(
         self,
         conf: _dataset.DatasetConf,
-        tokenizer: MMMMTokenizer,
+        tokenizer: MMMMTokenizer | None,
         inference: bool,
         device: Device = 'cpu',
     ):
         super().__init__()
         self.conf = conf
         self.trans_conf = conf.local_trans
+        if self.trans_conf.vlm:
+            assert tokenizer is not None
         self.tokenizer = tokenizer
         self.device = device
         self.inference = inference
@@ -243,12 +245,13 @@ class SamplePatch(mt.Randomizable):
             return mask_indexes, boxes, num_uncertain
 
     def _get_category(self, name: str):
-        if name in _ignore_anomalies:
-            return TargetCategory.ANOMALY
         return self.target_tax[name].category
 
-    def _sample_targets(self, category: str, targets: Iterable[str], limit: int) -> list[str]:
-        targets = [*filter(lambda target: self._get_category(target) == category, targets)]
+    def _sample_targets(self, targets: Iterable[str], limit: int, category: str | None = None) -> list[str]:
+        if category is None:
+            targets = list(targets)
+        else:
+            targets = [*filter(lambda target: self._get_category(target) == category, targets)]
         if len(targets) > limit:
             targets = self.R.choice(targets, limit, replace=False).tolist()
         return targets
@@ -351,6 +354,7 @@ class SamplePatch(mt.Randomizable):
         # 4. determine positive & negative classes within the cropped patch
         targets = {}
         neg_targets = list(cytoolz.concat(sparse.neg_targets.values()))
+        complete_anomaly: bool = True
         for target in cytoolz.concat(sparse.targets.values()):
             target: Sparse.Target
             mask_indexes, boxes, num_uncertain = self.filter_target(
@@ -359,7 +363,7 @@ class SamplePatch(mt.Randomizable):
             # NOTE: a target will be included for training if any:
             #   - totally negative in the patch
             #   - at least one instance certainly presents in the patch
-            #   - only know the target presents, but no localized information
+            #   - only the presence of the target is known, but no localized information
             #     - indicated with num_uncertain = -1
             #     - not applicable for local type data
             if boxes.shape[0] == 0 and num_uncertain == 0:
@@ -371,48 +375,61 @@ class SamplePatch(mt.Randomizable):
                     'num_uncertain': num_uncertain,
                     'semantic': target.semantic,
                 }
+            elif self._get_category(target.name) == TargetCategory.ANOMALY:
+                # no certain positive, and there is uncertain
+                complete_anomaly = False
 
         # 5. generate conversation
-        conv = []
-        grounding_classes = []
-        grounding = toss(self.R, trans_conf.grounding_prob)
-        neg_grounding = toss(self.R, trans_conf.neg_grounding_prob) if grounding else False
-        conv_anatomy, grounding_classes_anatomy = gen_general_conv(
-            self._sample_targets(TargetCategory.ANATOMY, targets, trans_conf.num_pos),
-            self._sample_targets(TargetCategory.ANATOMY, neg_targets, trans_conf.num_neg),
-            grounding,
-            neg_grounding,
-            self.tokenizer,
-            self.target_tax,
-            self.R,
-        )
-        conv.extend(conv_anatomy)
-        grounding_classes.extend(grounding_classes_anatomy)
-        conv_anomaly, grounding_classes_anomaly = gen_anomaly_conv(
-            self._sample_targets(TargetCategory.ANOMALY, targets, trans_conf.num_pos),
-            self._sample_targets(TargetCategory.ANOMALY, neg_targets, trans_conf.num_neg),
-            sparse.complete_anomaly,
-            grounding,
-            neg_grounding,
-            self.tokenizer,
-            self.target_tax,
-            dataset_name,
-            self.R,
-        )
-        conv.extend(conv_anomaly)
-        grounding_classes.extend(grounding_classes_anomaly)
-        if len(conv) == 0 or toss(self.R, 0.9):
-            # this also avoid an empty conversation
-            conv = gen_modality_conv(modality, self.R) + conv
-        vlm_inputs, conversation_text = prepare_vlm_inputs(
-            conv,
-            self.tokenizer,
-            patch_tokens.prod().item(),
-            inference=self.inference,
-            grounding=grounding,
-            max_seq_len=conf.max_seq_len,
-            bop_weight=conf.bop_weight,
-        )
+        if trans_conf.vlm:
+            conv = []
+            grounding_classes = []
+            grounding = toss(self.R, trans_conf.grounding_prob)
+            neg_grounding = toss(self.R, trans_conf.neg_grounding_prob) if grounding else False
+            conv_anatomy, grounding_classes_anatomy = gen_general_conv(
+                self._sample_targets(targets, trans_conf.num_pos, TargetCategory.ANATOMY),
+                self._sample_targets(neg_targets, trans_conf.num_neg, TargetCategory.ANATOMY),
+                grounding,
+                neg_grounding,
+                self.tokenizer,
+                self.target_tax,
+                self.R,
+            )
+            conv.extend(conv_anatomy)
+            grounding_classes.extend(grounding_classes_anatomy)
+            conv_anomaly, grounding_classes_anomaly = gen_anomaly_conv(
+                self._sample_targets(targets, trans_conf.num_pos, TargetCategory.ANOMALY),
+                self._sample_targets(neg_targets, trans_conf.num_neg, TargetCategory.ANOMALY),
+                complete_anomaly and sparse.complete_anomaly,
+                grounding,
+                neg_grounding,
+                self.tokenizer,
+                self.target_tax,
+                dataset_name,
+                self.R,
+            )
+            conv.extend(conv_anomaly)
+            grounding_classes.extend(grounding_classes_anomaly)
+            if len(conv) == 0 or toss(self.R, 0.9):
+                # this also avoid an empty conversation
+                conv = gen_modality_conv(modality, self.R) + conv
+            vlm_inputs, conversation_text = prepare_vlm_inputs(
+                conv,
+                self.tokenizer,
+                patch_tokens.prod().item(),
+                inference=self.inference,
+                grounding=grounding,
+                max_seq_len=conf.max_seq_len,
+                bop_weight=conf.bop_weight,
+            )
+        else:
+            grounding = True
+            pos_classes = self._sample_targets(targets, trans_conf.num_pos)
+            neg_classes = self._sample_targets(neg_targets, trans_conf.num_neg)
+            if len(pos_classes) == 0 and len(neg_classes) == 0:
+                # avoid empty input
+                neg_classes = ['no object']
+            grounding_classes = pos_classes + neg_classes
+            vlm_inputs = None
 
         # 6. prepare the data point!
         if grounding:
@@ -487,6 +504,7 @@ class SamplePatch(mt.Randomizable):
             'patch_size': tuple(vit_patch_size.tolist()),
             'pool_size': tuple(pool_size.tolist()),
             'vlm_inputs': vlm_inputs,
+            'grounding_classes': grounding_classes,  # oh
             'masks': patch_masks,
             'boxes': boxes,
             'semantic_masks': semantic_masks,
@@ -496,19 +514,3 @@ class SamplePatch(mt.Randomizable):
             'index_offsets': index_offsets,
         }
         return data_point
-
-# class InputTransformD(mt.Transform):
-#     def __call__(self, data: dict) -> DataPoint:
-#         data = dict(data)
-#         img = data['image']
-#         if isinstance(img, MetaTensor):
-#             img = img.as_tensor()
-#         data['image'], _ = ensure_rgb(img)
-#         masks = data['masks']
-#         if isinstance(masks, MetaTensor):
-#             masks = masks.as_tensor()
-#         if masks.dtype != torch.bool:
-#             masks = masks.round().bool()
-#         data['masks'] = masks
-#         return data
-

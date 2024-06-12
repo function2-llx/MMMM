@@ -29,7 +29,7 @@ class BTCVProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor):
                     class_mapping=self.class_mapping,
                 ),
             )
-        return ret
+        return ret, None
 
 class BTCVAbdomenProcessor(BTCVProcessor):
     name = 'BTCV/Abdomen'

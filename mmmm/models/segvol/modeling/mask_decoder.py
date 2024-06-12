@@ -1,19 +1,13 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
+# modified from SegVol (from SAM)
 import re
-# This source code is licensed under the license found in the
-# LICENSE file in the root directory of this source tree.
-
-from typing import List, Optional, Tuple, Type
+from typing import List, Type
 
 import einops
 import torch
 from torch import nn
-from torch.nn import functional as F
+import torch.nn.functional as nnf
 
-from luolib.models import spadop
 from luolib.utils import channel_first, channel_last
-from luolib.utils.misc import ceil_divide
 
 from mmmm.models import resample
 from .transformer import TwoWayTransformer
@@ -39,7 +33,6 @@ class MaskDecoder(nn.Module):
         transformer: TwoWayTransformer,
         num_instances: int = 3,
         activation: Type[nn.Module] = nn.GELU,
-        text_sim: bool = False,
     ) -> None:
         """
         Predicts masks given an image and prompt embeddings, using a
@@ -51,11 +44,6 @@ class MaskDecoder(nn.Module):
           num_instances (int): the number of queries for the instance branch
           activation (nn.Module): the type of activation to use when
             upscaling masks
-          iou_head_depth (int): the depth of the MLP used to predict
-            mask quality
-          iou_head_hidden_dim (int): the hidden dimension of the MLP
-            used to predict mask quality
-          text_sim (bool): whether to use text similarity, disable by default
         """
         super().__init__()
         self.transformer_dim = transformer_dim
@@ -64,7 +52,7 @@ class MaskDecoder(nn.Module):
         self.iou_token = nn.Embedding(1, transformer_dim)
         self.num_mask_tokens = num_instances + 1
         self.mask_tokens = nn.Embedding(self.num_mask_tokens, transformer_dim)
-
+        # self.position_embeddings = nn.Embedding(self.num_mask_tokens + 2, transformer_dim)
         self.output_upscaling = nn.Sequential(
             resample.Upsample(transformer_dim, transformer_dim // 4, cnt=0),
             # This is what SegVol originally used:
@@ -75,19 +63,15 @@ class MaskDecoder(nn.Module):
             resample.Upsample(transformer_dim // 4, transformer_dim // 8, cnt=1),
             activation(),
         )
+        # semantic & instance
         self.output_hypernetworks_mlps = nn.ModuleList(
             [
                 MLP(transformer_dim, transformer_dim, transformer_dim // 8, 3)
-                for _ in range(self.num_mask_tokens)
+                for _ in range(2)
             ]
         )
-        # we don't do that here
-        # self.iou_prediction_head = MLP(
-        #     transformer_dim, iou_head_hidden_dim, self.num_mask_tokens, iou_head_depth
-        # )
 
-        self.txt_align_upscaled_embedding = nn.Linear(768, 96)
-        self.text_sim = text_sim
+        self.txt_align_upscaled_embedding = nn.Linear(transformer_dim, transformer_dim // 8)
 
     def _load_from_state_dict(self, state_dict: dict[str, torch.Tensor], prefix: str, *args, **kwargs):
         ln_prefix = f'{prefix}output_upscaling.1.'
@@ -95,38 +79,20 @@ class MaskDecoder(nn.Module):
             bias = state_dict.get(f'{ln_prefix}bias')
             state_dict[f'{ln_prefix}weight'] = einops.reduce(weight, 'c ... -> c', 'mean')
             state_dict[f'{ln_prefix}bias'] = einops.reduce(bias, 'c ... -> c', 'mean')
-        pt_num_instances = 0
-        pattern = re.compile(rf'{prefix}output_hypernetworks_mlps\.(\d+)\.layers\.0\.weight')
-        for key in list(state_dict.keys()):
-            if match := pattern.match(key):
-                pt_num_instances = max(int(match.group(1)), pt_num_instances)
-            if key.startswith(f'{prefix}iou_prediction_head'):
-                state_dict.pop(key)
-        if pt_num_instances > 0:
-            hyper_prefix = f'{prefix}output_hypernetworks_mlps.'
-            for i in range(1 + pt_num_instances, self.num_mask_tokens):
-                ref = 1 + (i - 1) % pt_num_instances
-                for key, _ in self.output_hypernetworks_mlps[i].named_parameters():
-                    state_dict[f'{hyper_prefix}{i}.{key}'] = state_dict[f'{hyper_prefix}{ref}.{key}']
-            pt_mask_tokens_weight = state_dict[f'{prefix}mask_tokens.weight']
-            mask_tokens_weight_pad = torch.cat([
-                pt_mask_tokens_weight[0:1],
-                einops.repeat(
-                    pt_mask_tokens_weight[1:],
-                    'n ... -> (q n) ...',
-                    q=ceil_divide(self.num_instances, pt_num_instances),
-                ),
-            ])
-            state_dict[f'{prefix}mask_tokens.weight'] = mask_tokens_weight_pad[:self.num_mask_tokens]
+        # reinitialize new additional mask tokens weights
+        pt_mask_tokens_weight = state_dict[f'{prefix}mask_tokens.weight']
+        mask_tokens_weight_pad = self.mask_tokens.weight.clone()
+        mask_tokens_weight_pad[:pt_mask_tokens_weight.shape[0]] = pt_mask_tokens_weight
+        state_dict[f'{prefix}mask_tokens.weight'] = mask_tokens_weight_pad[:self.num_mask_tokens]
         return super()._load_from_state_dict(state_dict, prefix, *args, **kwargs)
 
     def forward(
         self,
         image_embeddings: torch.Tensor,
-        text_embedding: torch.Tensor,
         image_pe: torch.Tensor,
         sparse_prompt_embeddings: torch.Tensor,
         dense_prompt_embeddings: torch.Tensor,
+        text_embedding: torch.Tensor,
         patch_size_z: int,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
@@ -135,9 +101,10 @@ class MaskDecoder(nn.Module):
             - embeddings for each mask
         """
         # Concatenate output tokens
+        num_queries = sparse_prompt_embeddings.shape[0]
         output_tokens = torch.cat([self.iou_token.weight, self.mask_tokens.weight], dim=0)
-        output_tokens = output_tokens.unsqueeze(0).expand(sparse_prompt_embeddings.size(0), -1, -1)
-        # output_tokens = einops.repeat(output_tokens, '... -> n ...', n=num_queries)
+        # output_tokens = output_tokens.unsqueeze(0).expand(sparse_prompt_embeddings.size(0), -1, -1)
+        output_tokens = einops.repeat(output_tokens, '... -> n ...', n=num_queries)
         tokens = torch.cat((output_tokens, sparse_prompt_embeddings), dim=1)
         # Expand per-image data in batch direction to be per-mask
         if image_embeddings.shape[0] != tokens.shape[0]:
@@ -151,8 +118,8 @@ class MaskDecoder(nn.Module):
         b, c, h, w, d = src.shape
 
         # Run the transformer
-        hs, src = self.transformer(src, pos_src, tokens)
-        mask_tokens_out = hs[:, 1:1 + self.num_mask_tokens, :]
+        hs, src = self.transformer(src, pos_src, tokens, tokens)
+        mask_tokens_out = hs[:, 1:1 + self.num_mask_tokens]
 
         # Upscale mask embeddings and predict masks using the mask tokens
         src = src.transpose(1, 2).view(b, c, h, w, d)
@@ -165,21 +132,19 @@ class MaskDecoder(nn.Module):
                 upscaled_embedding = module(upscaled_embedding, patch_size_z=patch_size_z)
             else:
                 upscaled_embedding = module(upscaled_embedding)
-        hyper_in_list: List[torch.Tensor] = []
+        hyper_in_list = []
         for i in range(self.num_mask_tokens):
-            hyper_in_list.append(self.output_hypernetworks_mlps[i](mask_tokens_out[:, i, :]))
+            hyper_in_list.append(self.output_hypernetworks_mlps[i > 0](mask_tokens_out[:, i, :]))
         hyper_in = torch.stack(hyper_in_list, dim=1)
-        b, c, h, w, d = upscaled_embedding.shape
+        # b, c, h, w, d = upscaled_embedding.shape
         # masks = (hyper_in @ upscaled_embedding.view(b, c, h * w * d)).view(b, -1, h, w, d)
         masks = einops.einsum(hyper_in, upscaled_embedding, 'n m c, n c ... -> n m ...')
-
-        if self.text_sim and text_embedding is not None:
-            text_embedding_down = self.txt_align_upscaled_embedding(text_embedding).unsqueeze(dim=1)
-            upscaled_embedding = upscaled_embedding.view(b, c, h * w * d)
-            sim = (text_embedding_down @ upscaled_embedding).view(b, -1, h, w, d)
-            # sim = einops.einsum(text_embedding_down, upscaled_embedding, 'n 1 c, n c ... -> ')
-            sim = sim.repeat(1, masks.shape[1], 1, 1, 1)
-            masks = masks + sim
+        text_embedding_down = self.txt_align_upscaled_embedding(text_embedding)
+        # upscaled_embedding = upscaled_embedding.view(b, c, h * w * d)
+        # sim = (text_embedding_down @ upscaled_embedding).view(b, -1, h, w, d)
+        # sim = sim.repeat(1, masks.shape[1], 1, 1, 1)
+        sim = einops.einsum(text_embedding_down, upscaled_embedding, 'n c, n c ... -> n ...')
+        masks = masks + sim[:, None]
 
         return masks, mask_tokens_out
 
@@ -204,7 +169,7 @@ class MLP(nn.Module):
 
     def forward(self, x):
         for i, layer in enumerate(self.layers):
-            x = F.relu(layer(x)) if i < self.num_layers - 1 else layer(x)
+            x = nnf.relu(layer(x)) if i < self.num_layers - 1 else layer(x)
         if self.sigmoid_output:
-            x = F.sigmoid(x)
+            x = nnf.sigmoid(x)
         return x

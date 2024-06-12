@@ -24,7 +24,7 @@ from monai.data import box_pair_giou, convert_box_mode
 from monai.data.box_utils import CenterSizeMode
 from .cogvlm import CogVLMConfig, CogVLMForCausalLM
 from .loss import DiceFocalLoss
-from .segvol import Sam, SamArgs, build_sam_vit_3d
+from .segvol import InstanceSam
 
 __all__ = [
     'MMMMForCausalLM',
@@ -81,7 +81,7 @@ def _dice_metric(x: torch.BoolTensor, y: torch.BoolTensor):
 
 class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
     tokenizer: MMMMTokenizer
-    sam_model: Sam
+    sam_model: InstanceSam
     mask_loss: DiceFocalLoss | None
 
     @classmethod
@@ -96,7 +96,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         neg_mask_loss: bool = True,
         vision_override: VisionArgs,
         tokenizer: MMMMTokenizer,
-        sam: SamArgs,
+        sam: 'SamArgs',
         torch_dtype: str | torch.dtype = 'auto',
         mask_loss: DiceFocalLoss | None = None,
         lora_lang: bool = True,
@@ -110,7 +110,6 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         Args:
             neg_mask_loss: whether to compute loss on negative instance masks
             lora_lang: whether to fine-tune language weights
-            vlm_only: do not perform vg during training
         """
         self: MMMMForCausalLM = super().from_pretrained(
             pretrained_model_name_or_path,
