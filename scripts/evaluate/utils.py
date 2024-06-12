@@ -88,7 +88,8 @@ class ReportTestDataset(Dataset):
                     ),
                 }
                 for x in json.load(f)
-                for image in x['image']
+                for i, image in enumerate(x['image'])
+                if x['plane'][i] == 'AP' or x['plane'][i] == 'PA'
             ][start:end]
 
     def __getitem__(self, index: int):

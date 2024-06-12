@@ -1,6 +1,5 @@
 from PIL import Image
 from einops import rearrange, repeat
-from regex import P
 from monai import transforms as mt
 from peft import PeftModel
 import torch
@@ -10,6 +9,7 @@ import torchvision.transforms as transforms
 from torchvision.transforms.v2 import functional as tvtf
 from tqdm import tqdm
 import sys
+sys.path.append('scripts/finetune/')
 
 from luolib.types import tuple3_t
 from luolib.utils import load_pt_zst
@@ -17,8 +17,8 @@ from scripts.evaluate.utils import dump_results
 
 
 def setup_llavamed(checkpoint: str, adapter: str, tokenizer: str):
-    from scripts.finetune.llava.mm_utils import get_model_name_from_path
-    from scripts.finetune.llava.model.builder import load_pretrained_model
+    from llava.mm_utils import get_model_name_from_path
+    from llava.model.builder import load_pretrained_model
 
     model_name = get_model_name_from_path(checkpoint)
     tokenizer, model, image_processor, context_len = load_pretrained_model(checkpoint, None, model_name)
@@ -51,8 +51,8 @@ class LlavaMedTransform(mt.RandomizableTransform):
         self.setting = setting
 
     def __call__(self, data: dict):
-        from scripts.finetune.llava.mm_utils import process_images, tokenizer_image_token
-        from scripts.finetune.llava.constants import DEFAULT_IMAGE_TOKEN, IMAGE_TOKEN_INDEX
+        from llava.mm_utils import process_images
+        from llava.constants import DEFAULT_IMAGE_TOKEN
 
         if data['image'].endswith('.pt.zst'):
             transform = transforms.ToPILImage()
@@ -60,7 +60,7 @@ class LlavaMedTransform(mt.RandomizableTransform):
             image = repeat(image, '1 1 h w -> 3 1 h w')
             image = transform(image.squeeze(1))
         else:
-            image = Image.open(data['image'])
+            image = Image.open(data['image']).convert('RGB')
 
         if self.setting == 'finetuned':
             def intensity_norm_(

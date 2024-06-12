@@ -82,36 +82,24 @@ def setup_llavanext(checkpoint: str, adapter: str, tokenizer: str):
 
     return model, processor
 
-
-def llavanext_collate_fn(batch: list[dict]):
-    assert len(batch) == 1
-
-    if batch[0]['image'].endswith('.pt.zst'):
-        transform = transforms.ToPILImage()
-        image = load_pt_zst(batch[0]['image'])
-        image = transform(image.squeeze(1))
-    else:
-        image = Image.open(batch[0]['image']).convert('RGB')
-    return {
-        'image': image,
-        'question': batch[0]['question'],
-        'answer': batch[0]['answer'],
-    }
-
-
 class LlavaNextTransform(mt.RandomizableTransform):
-    def __init__(self, processor):
+    def __init__(self, processor, task):
         self.processor = processor
+        self.task = task
 
     def __call__(self, data: dict):
         if data['image'].endswith('.pt.zst'):
             transform = transforms.ToPILImage()
             image = load_pt_zst(data['image'])
+            image = repeat(image, '1 1 h w -> 3 1 h w')
             image = transform(image.squeeze(1))
         else:
             image = Image.open(data['image']).convert('RGB')
 
-        prompt = '<image>\nQuestion: ' + data['question'] + ' Answer:'
+        if self.task == 'vqa':
+            prompt = '<image>\nQuestion: ' + data['question'] + ' Answer:'
+        elif self.task == 'report':
+            prompt = f'<image>\nPlease write a radiology report for me:'
 
         inputs = self.processor(prompt, image, return_tensors='pt')
 
@@ -135,7 +123,11 @@ def llavanext_vl_evaluate(model, processor, dataloader, output):
                     max_new_tokens=256,
                 )[0],
                 skip_special_tokens=True,
-            ).split('Answer:')[1].strip()
+            )
+            try:
+                prediction = prediction.split('Answer:')[1].strip()
+            except:
+                prediction = prediction.split('for me:')[1].strip()
 
         results.append(
             {

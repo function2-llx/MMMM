@@ -91,7 +91,8 @@ class Evaluator:
                     partial(build_conversation_input_ids, packed[1].tokenizer)
                     if self.setting == 'finetuned'
                     else packed[1]
-                )
+                ),
+                self.task,
             )
             evaluate_fn = llavanext_vl_evaluate
         elif self.model == 'instructblip':
