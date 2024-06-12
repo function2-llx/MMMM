@@ -328,16 +328,20 @@ class SamplePatch(mt.Randomizable):
         pos_classes = self._sample_targets(targets, trans_conf.num_pos)
         neg_classes = self._sample_targets(neg_targets, trans_conf.num_neg)
         if len(pos_classes) > 0:
-            masks = torch.cat([targets[name] for name in pos_classes])
+            pos_masks = torch.cat([targets[name] for name in pos_classes])
         else:
-            masks = None
-        patch, masks = self._affine_transform(
-            patch, masks, tuple(patch_size.tolist()), tuple(scale.tolist()), use_full_size,
+            pos_masks = None
+        patch, pos_masks = self._affine_transform(
+            patch, pos_masks, tuple(patch_size.tolist()), tuple(scale.tolist()), use_full_size,
         )
 
         # TODO: maybe shuffle the classes, though it should have no effect
         classes = pos_classes + neg_classes
-        masks = torch.cat([masks, torch.zeros(len(neg_classes), *patch.shape[1:], dtype=torch.bool)])
+        neg_masks = torch.zeros(len(neg_classes), *patch.shape[1:], dtype=torch.bool)
+        if pos_masks is not None:
+            masks = torch.cat([pos_masks, neg_masks])
+        else:
+            masks = neg_masks
 
         if patch.shape[0] == 1:
             # ensure RGB
