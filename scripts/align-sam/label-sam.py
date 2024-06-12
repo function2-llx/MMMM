@@ -219,12 +219,8 @@ def main():
         ]
         image = load_pt_zst(image_path)
         image = tvtf.to_dtype(image, torch.float, scale=True)
-        roi_size = (32, 256, 256)
-        vit_patch_size = (4, 16, 16)
-        # image_resized, image, vit_patch_size, pool_size, num_vision_tokens = image_transform(
-        #     image_path, max_vision_tokens=args.max_vision_tokens,
-        # )
-        # roi_size = image_resized.shape[1:]
+        roi_size = (48, 192, 192)
+        vit_patch_size = (8, 16, 16)
         masks = load_pt_zst(case_dir / 'masks.pt.zst').cuda()
         # masks = nnf.interpolate(masks[None].float(), trans_image.shape[1:], mode='trilinear')[0] > 0.5
         targets_dict = {
@@ -241,7 +237,7 @@ def main():
             ]
         )
         batch = precision.convert_input(batch)
-        # image, _ = ensure_rgb(image, contiguous=True)
+        image, _ = ensure_rgb(image, contiguous=True)
         image_plot = image.clone()
         # image = intensity_norm(image)
         image = precision.convert_input(image).cuda()
@@ -253,48 +249,31 @@ def main():
             return output.masks_logits[0][None, :, 0]
 
         with torch.inference_mode():
-            masks_logits = sliding_window_inference(
-                image[None],
-                roi_size,
-                8,
-                _patch_infer,
-                0.8,
-                BlendMode.GAUSSIAN,
-                progress=True,
-            )[0]
-            # output: InstanceSamOutput = model(batch)
-            # print(output.disc_logit)
-            # vlm_output: CausalLMOutputWithPast = model(
-            #     **vlm_inputs,
-            #     image=batch['image'],
-            #     patch_size=batch['patch_size'],
-            #     pool_size=batch['pool_size'],
-            #     return_dict=True,
-            #     output_hidden_states=True,
-            # )
-            # vg_output = model.visual_grounding(
-            #     # shift as suggested by GLaMM: https://github.com/mbzuai-oryx/groundingLMM/issues/16
-            #     vlm_inputs['input_ids'][:, 1:],
-            #     vlm_output.hidden_states[-1][:, :-1],
-            #     batch['image'],
-            #     batch['patch_size'],
-            # )
-            # sem_masks_pred = output.masks_logits[0].sigmoid() > 0.5
-            sem_masks_pred = masks_logits.sigmoid() > 0.5
-            for i, target in enumerate(targets):
-                label = einops.reduce(masks[slice(*targets_dict[target].index_offset)], 'c ... -> ...', 'any')
-                dice = _dice(sem_masks_pred[i], label) * 100
-                print(target)
-                print('dice', dice.item())
-                IndexTracker(
-                    image_plot,
-                    torch.stack([label, sem_masks_pred[i]]),
-                    # sem_masks_pred[i, 0:1],
-                    # torch.stack([label[i], sem_masks_pred[i, 0]]),
-                    choose_max=True,
-                    title=f'{image_path}\n{target}\ndice={dice:.1f}',
-                    # title=f'{image_path}\n{target}',
-                )
+            for rotate in [0, 1]:
+                masks_logits = sliding_window_inference(
+                    image[None].rot90(dims=(-1, -2), k=rotate),
+                    roi_size,
+                    8,
+                    _patch_infer,
+                    0.8,
+                    BlendMode.GAUSSIAN,
+                    progress=True,
+                )[0]
+                sem_masks_pred = masks_logits.sigmoid() > 0.5
+                for i, target in enumerate(targets):
+                    label = einops.reduce(masks[slice(*targets_dict[target].index_offset)], 'c ... -> ...', 'any')
+                    label = label.rot90(dims=(-1, -2), k=rotate)
+                    dice = _dice(sem_masks_pred[i], label) * 100
+                    print(target, f'rotate={rotate}', f'{dice.item():.2f}')
+                    # IndexTracker(
+                    #     image_plot,
+                    #     torch.stack([label, sem_masks_pred[i]]),
+                    #     # sem_masks_pred[i, 0:1],
+                    #     # torch.stack([label[i], sem_masks_pred[i, 0]]),
+                    #     choose_max=True,
+                    #     title=f'{image_path}\n{target}\ndice={dice:.1f}',
+                    #     # title=f'{image_path}\n{target}',
+                    # )
 
 if __name__ == '__main__':
     main()
