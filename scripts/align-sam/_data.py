@@ -242,7 +242,7 @@ class SamplePatch(mt.Randomizable):
             maybe_scale_trans = []
         else:
             maybe_scale_trans = [
-                mt.AffineD(['image', 'masks'], scale_params=scale.tolist(), spatial_size=patch_size.tolist()),
+                mt.AffineD(['image', 'masks'], scale_params=scale, spatial_size=patch_size),
             ]
         affine_trans = mt.Compose(
             [
