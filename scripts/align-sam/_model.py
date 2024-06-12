@@ -136,9 +136,7 @@ class AlignSam(PreTrainedModel, LightningModule):
                 masks_preds = masks_logits[batch_idx].float().sigmoid() > 0.5
                 for i, target in enumerate(targets):
                     if (label := masks[batch_idx][i]).any():
-                        dice_pos.setdefault(target, []).append(
-                            _dice(masks_preds[i, 0], label) * 100,
-                        )
+                        dice_pos.setdefault(target, []).append(_dice(masks_preds[i], label) * 100)
             dice_pos_reduced = {
                 k: torch.stack(v).mean()
                 for k, v in dice_pos.items()
