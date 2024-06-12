@@ -59,7 +59,7 @@ class TransConf:
     scale_xy: tuple2_t[float]
     scale_xy_p: float
     aniso_ratio_range: tuple2_t[float] = (0.5, 3.)
-    log2_vit_patch_size_z_std = 0.4
+    log2_vit_patch_size_z_std: float = 0.4
     num_pos: int
     num_neg: int
     full_size_ratio: float
@@ -231,11 +231,11 @@ class SamplePatch(mt.Randomizable):
                     spatial_size=patch_size.tolist(),
                     allow_missing_keys=True,
                 ),
-                *[
-                    mt.RandFlipD(['image', 'masks'], 0.5, i, allow_missing_keys=True)
-                    for i in range(3)
-                ],
-                mt.Rotate90D(['image', 'masks'], spatial_axes=(1, 2), allow_missing_keys=True),
+                # *[
+                #     mt.RandFlipD(['image', 'masks'], 0.5, i, allow_missing_keys=True)
+                #     for i in range(3)
+                # ],
+                mt.Rotate90D(['image', 'masks'], spatial_axes=(1, 2), allow_missing_keys=True, k=3),
                 # mt.RandRotate90D(['image', 'masks'], 0.75, spatial_axes=(1, 2), allow_missing_keys=True),
             ],
             lazy=True,
@@ -254,7 +254,7 @@ class SamplePatch(mt.Randomizable):
             patch_masks_t = None
             boxes_t = apply_affine_to_boxes_int(boxes, patch_t.affine.inverse())
         else:
-            # generate new boxes from transformed boxes
+            # generate new boxes from transformed masks
             patch_masks_t = _dict_data['masks'].round().bool().as_tensor()
             boxes_t = torch.empty(patch_masks_t.shape[0], 6, dtype=torch.int64)
             for i, mask in enumerate(patch_masks_t):
@@ -497,6 +497,3 @@ class DataModule(ExpDataModuleBase):
             persistent_workers=conf.persistent_workers,
             collate_fn=_collate_fn,
         )
-
-    def val_dataloader(self):
-        pass

@@ -9,6 +9,7 @@ from transformers.modeling_outputs import BaseModelOutputWithPooling
 from luolib.lightning import LightningModule
 
 from mmmm.data.defs import Batch
+from mmmm.misc import IndexTrackerBinary
 from mmmm.models import InstanceSam
 from mmmm.models.segvol.modeling.sam import InstanceSamLoss, InstanceSamOutput
 
@@ -85,19 +86,18 @@ class AlignSam(PreTrainedModel, LightningModule):
         self._class_cnt += 1
         return ret
 
+    def apply_template(self, class_name: str):
+        return f'An image of the {class_name}.'
+
     def get_class_embeddings(self, class_lists: list[list[str]]):
         if self.class_embeddings is None:
             class_lists = [
-                # [f'An image of the {class_name}.' for class_name in class_list]
-                [f'A computerized tomography of a {class_name}.' for class_name in class_list]
+                [self.apply_template(class_name) for class_name in class_list]
                 for class_list in class_lists
             ]
             if self.freeze_clip:
                 return [
-                    torch.stack([
-                        self.text_encoder(class_name, device=self.device)
-                        for class_name in class_list
-                    ])
+                    torch.stack([self.text_encoder(class_name, device=self.device) for class_name in class_list])
                     for class_list in class_lists
                 ]
             else:
@@ -112,13 +112,7 @@ class AlignSam(PreTrainedModel, LightningModule):
 
     def forward(self, batch: Batch):
         class_lists: list[list[str]] = batch['classes']  # type: ignore
-        class_embeddings = [
-            torch.stack([
-                self.text_encoder(class_name, device=self.device)
-                for class_name in class_list
-            ])
-            for class_list in class_lists
-        ]
+        class_embeddings = self.get_class_embeddings(class_lists)
         output: InstanceSamOutput = self.sam(batch['image'], batch['patch_size'], class_embeddings)
         return output
 
@@ -141,16 +135,25 @@ class AlignSam(PreTrainedModel, LightningModule):
         dice_pos = {}
         classes = batch['classes']  # type: ignore
         for batch_idx, targets in enumerate(classes):
-            masks_preds = output.masks_logits[batch_idx].float().sigmoid() > 0.5
             if (sem_masks := batch['semantic_masks'][batch_idx]) is not None:
+                masks_preds = output.masks_logits[batch_idx].float().sigmoid() > 0.5
                 for i, target in enumerate(targets):
                     if (label := sem_masks[i]).any():
                         dice_pos.setdefault(target, []).append(
                             _dice(masks_preds[i, 0], label) * 100,
                         )
-        dice_pos = {
+        dice_pos_reduced = {
             k: torch.stack(v).mean()
             for k, v in dice_pos.items()
         }
-        self.log_dict(_add_prefix(dice_pos, 'train/dice-pos'))
+        self.log_dict(_add_prefix(dice_pos_reduced, 'train/dice-pos'))
+        # class_indexes = [classes[0].index(name) for name in ['left kidney', 'right kidney']]
+        # print(batch['src'][0])
+        # IndexTrackerBinary(
+        #     batch['image'][0][0].float(),
+        #     torch.cat([
+        #         batch['semantic_masks'][0][class_indexes, 0],
+        #         output.masks_logits[0].float().sigmoid()[class_indexes, 0] > 0.5,
+        #     ])
+        # )
         return loss
