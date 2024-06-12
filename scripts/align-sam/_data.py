@@ -338,10 +338,10 @@ class SamplePatch(mt.Randomizable):
         # TODO: maybe shuffle the classes, though it should have no effect
         classes = pos_classes + neg_classes
         neg_masks = torch.zeros(len(neg_classes), *patch.shape[1:], dtype=torch.bool)
-        if pos_masks is not None:
-            masks = torch.cat([pos_masks, neg_masks])
-        else:
+        if pos_masks is None:
             masks = neg_masks
+        else:
+            masks = torch.cat([pos_masks, neg_masks])
 
         if patch.shape[0] == 1:
             # ensure RGB
