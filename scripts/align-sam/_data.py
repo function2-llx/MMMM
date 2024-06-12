@@ -229,43 +229,48 @@ class SamplePatch(mt.Randomizable):
     def _affine_transform(
         self,
         patch: torch.Tensor,
-        patch_masks: torch.BoolTensor,
+        masks: torch.BoolTensor | None,
         patch_size: tuple3_t[int],
         scale: tuple3_t[float],
         use_full_size: bool,
     ) -> tuple[torch.Tensor, torch.BoolTensor | None]:
+        if masks is None:
+            keys = ['image']
+        else:
+            keys = ['image', 'masks']
         if use_full_size:
             maybe_scale_trans = []
             patch = nnf.interpolate(patch[None], patch_size, mode='area')[0]
-            patch_masks = nnf.interpolate(patch_masks[None].byte(), patch_size, mode='nearest-exact')[0].bool()
+            if masks is not None:
+                masks = nnf.interpolate(masks[None].byte(), patch_size, mode='nearest-exact')[0].bool()
         elif patch_size == patch.shape[1:]:
             maybe_scale_trans = []
         else:
             maybe_scale_trans = [
-                mt.AffineD(['image', 'masks'], scale_params=scale, spatial_size=patch_size),
+                mt.AffineD(keys, scale_params=scale, spatial_size=patch_size),
             ]
         affine_trans = mt.Compose(
             [
                 # NOTE: scaling should be performed firstly since spatial axis order might change after random rotation
                 *maybe_scale_trans,
                 *[
-                    mt.RandFlipD(['image', 'masks'], 0.5, i)
+                    mt.RandFlipD(keys, 0.5, i)
                     for i in range(3)
                 ],
-                mt.RandRotate90D(['image', 'masks'], 0.75, spatial_axes=(1, 2)),
+                mt.RandRotate90D(keys, 0.75, spatial_axes=(1, 2)),
             ],
             lazy=True,
             overrides={
                 'image': {'padding_mode': GridSamplePadMode.ZEROS},
                 'masks': {'padding_mode': GridSamplePadMode.ZEROS},
-            }
+            },
         )
         affine_trans.set_random_state(state=self.R)
-        _dict_data = {'image': patch, 'masks': patch_masks}
+        _dict_data = {'image': patch, 'masks': masks}
         _dict_data = affine_trans(_dict_data)
         patch_t = _dict_data['image'].as_tensor()
-        patch_masks_t = (_dict_data['masks'] > 0.5).as_tensor()
-        return patch_t, patch_masks_t
+        masks_t = None if masks is None else (_dict_data['masks'] > 0.5).as_tensor()
+        return patch_t, masks_t
 
     def __call__(self, data: dict):
         data = dict(data)
@@ -304,40 +309,39 @@ class SamplePatch(mt.Randomizable):
             modality_slice = slice(modality_idx, modality_idx + 1)
         images: torch.ByteTensor = load_pt_zst(data_dir / 'images.pt.zst')
         patch = tvtf.to_dtype(images[modality_slice, *patch_slice], scale=True)
-        if (mask_path := data_dir / 'masks.pt.zst').exists():
-            whole_masks: torch.BoolTensor = load_pt_zst(mask_path)
-            patch_masks = whole_masks[:, *patch_slice]
-        else:
-            assert sum(1 for _ in cytoolz.concat(sparse.targets.values())) == 0
-            patch_masks = torch.empty(0, *effective_patch_size.tolist(), dtype=torch.bool)
-
         # 4. determine positive & negative classes within the cropped patch
         targets = {}
         neg_targets = list(cytoolz.concat(sparse.neg_targets.values()))
-        for target in cytoolz.concat(sparse.targets.values()):
-            target: Sparse.Target
-            mask = einops.reduce(patch_masks[slice(*target.index_offset)], 'c ... -> 1 ...', 'any')
-            if mask.any():
-                targets[target.name] = mask
-            else:
-                neg_targets.append(target.name)
+        if (mask_path := data_dir / 'masks.pt.zst').exists():
+            whole_masks: torch.BoolTensor = load_pt_zst(mask_path)
+            patch_masks = whole_masks[:, *patch_slice]
+            for target in cytoolz.concat(sparse.targets.values()):
+                target: Sparse.Target
+                mask = einops.reduce(patch_masks[slice(*target.index_offset)], 'c ... -> 1 ...', 'any')
+                if mask.any():
+                    targets[target.name] = mask
+                else:
+                    neg_targets.append(target.name)
+        else:
+            assert sum(1 for _ in cytoolz.concat(sparse.targets.values())) == 0
 
         pos_classes = self._sample_targets(targets, trans_conf.num_pos)
         neg_classes = self._sample_targets(neg_targets, trans_conf.num_neg)
         if len(pos_classes) > 0:
             masks = torch.cat([targets[name] for name in pos_classes])
         else:
-            masks = torch.zeros(0, *effective_patch_size.tolist(), dtype=torch.bool)
+            masks = None
         patch, masks = self._affine_transform(
             patch, masks, tuple(patch_size.tolist()), tuple(scale.tolist()), use_full_size,
         )
-        if patch.shape[0] == 1:
-            patch = einops.repeat(patch, '1 ... -> c ...', c=3).contiguous()
 
         # TODO: maybe shuffle the classes, though it should have no effect
         classes = pos_classes + neg_classes
         masks = torch.cat([masks, torch.zeros(len(neg_classes), *patch.shape[1:], dtype=torch.bool)])
 
+        if patch.shape[0] == 1:
+            # ensure RGB
+            patch = einops.repeat(patch, '1 ... -> c ...', c=3).contiguous()
         data_point = {
             'src': (dataset_name, data['key']),
             'image': patch,
