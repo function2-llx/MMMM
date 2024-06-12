@@ -228,7 +228,7 @@ class SamplePatch(mt.Randomizable):
 
     def _affine_transform(
         self,
-        patch: torch.Tensor,
+        patch: torch.ByteTensor,
         masks: torch.BoolTensor | None,
         patch_size: tuple3_t[int],
         scale: tuple3_t[float],
@@ -240,7 +240,7 @@ class SamplePatch(mt.Randomizable):
             keys = ['image', 'masks']
         if use_full_size:
             maybe_scale_trans = []
-            patch = nnf.interpolate(patch[None], patch_size, mode='area')[0]
+            patch = nnf.interpolate(patch[None], patch_size, mode='nearest-exact')[0]
             if masks is not None:
                 masks = nnf.interpolate(masks[None].byte(), patch_size, mode='nearest-exact')[0].bool()
         elif patch_size == patch.shape[1:]:
@@ -249,6 +249,7 @@ class SamplePatch(mt.Randomizable):
             maybe_scale_trans = [
                 mt.AffineD(keys, scale_params=scale, spatial_size=patch_size),
             ]
+        patch = tvtf.to_dtype(patch, dtype=torch.float, scale=True)
         affine_trans = mt.Compose(
             [
                 # NOTE: scaling should be performed firstly since spatial axis order might change after random rotation
@@ -301,14 +302,6 @@ class SamplePatch(mt.Randomizable):
         ]
 
         # 3. crop patch & mask (without further affine transform)
-        if len(sparse.modalities) == 1:
-            modality_slice = slice(None)
-        else:
-            # NOTE: currently, it is assumed that there will not be multiple RGB images
-            modality_idx = self.R.randint(len(sparse.modalities))
-            modality_slice = slice(modality_idx, modality_idx + 1)
-        images: torch.ByteTensor = load_pt_zst(data_dir / 'images.pt.zst')
-        patch = tvtf.to_dtype(images[modality_slice, *patch_slice], scale=True)
         # 4. determine positive & negative classes within the cropped patch
         targets = {}
         neg_targets = list(cytoolz.concat(sparse.neg_targets.values()))
@@ -331,6 +324,14 @@ class SamplePatch(mt.Randomizable):
             pos_masks = torch.cat([targets[name] for name in pos_classes])
         else:
             pos_masks = None
+        if len(sparse.modalities) == 1:
+            modality_slice = slice(None)
+        else:
+            # NOTE: currently, it is assumed that there will not be multiple RGB images
+            modality_idx = self.R.randint(len(sparse.modalities))
+            modality_slice = slice(modality_idx, modality_idx + 1)
+        images: torch.ByteTensor = load_pt_zst(data_dir / 'images.pt.zst')
+        patch = images[modality_slice, *patch_slice]
         patch, pos_masks = self._affine_transform(
             patch, pos_masks, tuple(patch_size.tolist()), tuple(scale.tolist()), use_full_size,
         )
