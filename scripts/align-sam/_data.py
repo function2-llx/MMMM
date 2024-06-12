@@ -13,23 +13,20 @@ from torch.utils.data import Dataset as _TorchDataset, Sampler
 import torchvision.transforms.v2.functional as tvtf
 
 from luolib.datamodule import ExpDataModuleBase
-from luolib.transforms.box_ops import apply_affine_to_boxes_int
 from luolib.types import tuple2_t
 from luolib.utils import load_pt_zst
 from luolib.utils.misc import ceil_divide
-from mmmm.data.dataset.local.transform import norm_boxes
-from monai.data import DataLoader, MetaTensor
-from monai.data.box_utils import box_area, spatial_crop_boxes
-from monai.transforms import generate_spatial_bounding_box
+from monai.data import DataLoader
+from monai.data.box_utils import spatial_crop_boxes
 import monai.transforms as mt
 from monai.utils import GridSamplePadMode
 
 from mmmm.data import get_target_tax
-from mmmm.data.dataset.misc import get_max_scale_for_size, toss
-from mmmm.data.sparse import Sparse
 from mmmm.data.dataset import DatasetSpec
 from mmmm.data.dataset.local import get_local_data_list
+from mmmm.data.dataset.misc import get_max_scale_for_size, toss
 from mmmm.data.defs import Split
+from mmmm.data.sparse import Sparse
 
 def _is_power_of_2(x: int):
     return x & (x - 1) == 0
