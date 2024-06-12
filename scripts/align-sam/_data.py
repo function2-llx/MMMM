@@ -9,6 +9,7 @@ import math
 import numpy as np
 import numpy.typing as npt
 import torch
+import torch.nn.functional as nnf
 from torch.utils.data import Dataset as _TorchDataset, Sampler
 import torchvision.transforms.v2.functional as tvtf
 
@@ -106,7 +107,7 @@ class SamplePatch(mt.Randomizable):
             max_vision_tokens_2d = trans_conf.max_vision_tokens_2d
             max_tokens_z = trans_conf.max_tokens_z
         if size_z == 1 or toss(self.R, trans_conf.full_size_ratio):
-            # use full size
+            use_full_size = True
             if size_z <= max_tokens_z:
                 vit_patch_size_z = 1
                 tokens_z = size_z
@@ -129,6 +130,7 @@ class SamplePatch(mt.Randomizable):
             )
             scale_z = size_z / patch_size_z
         else:
+            use_full_size = False
             tokens_z = min(max_tokens_z, size_z)
             # I know, it is always 3D here
             tokens_xy_total = max_vision_tokens_2d if size_z == 1 else max_vision_tokens // tokens_z
@@ -180,7 +182,7 @@ class SamplePatch(mt.Randomizable):
             sparse.shape[1:], scale_xy, conf.vit_patch_size_xy, tokens_xy_total,
         )
         patch_size = np.array((patch_size_z, *patch_size_xy))
-        return patch_size, scale, vit_patch_size
+        return patch_size, scale, vit_patch_size, use_full_size
 
     def get_patch_start(self, ref_patch_center: npt.NDArray[np.int64], effective_patch_size: np.ndarray, shape: np.ndarray):
         # TODO: add randomization
@@ -230,11 +232,20 @@ class SamplePatch(mt.Randomizable):
         patch_masks: torch.BoolTensor,
         patch_size: Sequence[int],
         scale: Sequence[float],
+        use_full_size: bool,
     ) -> tuple[torch.Tensor, torch.BoolTensor | None]:
+        if use_full_size:
+            patch = nnf.interpolate(patch, patch_size, mode='area')
+            patch_masks = nnf.interpolate(patch_masks.byte(), patch_size, mode='nearest-exact').bool()
+            maybe_scale_trans = []
+        else:
+            maybe_scale_trans = [
+                mt.AffineD(['image', 'masks'], scale_params=scale.tolist(), spatial_size=patch_size.tolist()),
+            ]
         affine_trans = mt.Compose(
             [
-                # NOTE: scaling should be performed firstly since spatial axis order might change
-                mt.AffineD(['image', 'masks'], scale_params=scale.tolist(), spatial_size=patch_size.tolist()),
+                # NOTE: scaling should be performed firstly since spatial axis order might change after random rotation
+                *maybe_scale_trans,
                 *[
                     mt.RandFlipD(['image', 'masks'], 0.5, i)
                     for i in range(3)
@@ -251,7 +262,7 @@ class SamplePatch(mt.Randomizable):
         _dict_data = {'image': patch, 'masks': patch_masks}
         _dict_data = affine_trans(_dict_data)
         patch_t = _dict_data['image'].as_tensor()
-        patch_masks_t = _dict_data['masks'].round().bool().as_tensor()
+        patch_masks_t = (_dict_data['masks'] > 0.5).as_tensor()
         return patch_t, patch_masks_t
 
     def __call__(self, data: dict):
@@ -263,7 +274,7 @@ class SamplePatch(mt.Randomizable):
         sparse = Sparse.from_json((data_dir / 'sparse.json').read_bytes())
 
         # 1. generate patch information
-        patch_size, scale, vit_patch_size = self.gen_patch_size_info(sparse)
+        patch_size, scale, vit_patch_size, use_full_size = self.gen_patch_size_info(sparse)
         patch_tokens, _rem = np.divmod(patch_size, vit_patch_size)
         assert np.array_equiv(_rem, 0)
         effective_patch_size = np.minimum(np.ceil(patch_size * scale).astype(np.int64), sparse.shape)
@@ -316,7 +327,7 @@ class SamplePatch(mt.Randomizable):
         else:
             masks = torch.zeros(0, *effective_patch_size.tolist(), dtype=torch.bool)
         patch, masks = self._affine_transform(
-            patch, masks, patch_size, scale,
+            patch, masks, patch_size, scale, use_full_size,
         )
         if patch.shape[0] == 1:
             patch = einops.repeat(patch, '1 ... -> c ...', c=3).contiguous()
