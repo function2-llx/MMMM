@@ -14,7 +14,7 @@ from torch.utils.data import Dataset as _TorchDataset, Sampler
 import torchvision.transforms.v2.functional as tvtf
 
 from luolib.datamodule import ExpDataModuleBase
-from luolib.types import tuple2_t
+from luolib.types import tuple2_t, tuple3_t
 from luolib.utils import load_pt_zst
 from luolib.utils.misc import ceil_divide
 from monai.data import DataLoader
@@ -230,13 +230,15 @@ class SamplePatch(mt.Randomizable):
         self,
         patch: torch.Tensor,
         patch_masks: torch.BoolTensor,
-        patch_size: Sequence[int],
-        scale: Sequence[float],
+        patch_size: tuple3_t[int],
+        scale: tuple3_t[float],
         use_full_size: bool,
     ) -> tuple[torch.Tensor, torch.BoolTensor | None]:
         if use_full_size:
+            maybe_scale_trans = []
             patch = nnf.interpolate(patch, patch_size, mode='area')
             patch_masks = nnf.interpolate(patch_masks.byte(), patch_size, mode='nearest-exact').bool()
+        elif patch_size == patch.shape[1:]:
             maybe_scale_trans = []
         else:
             maybe_scale_trans = [
@@ -327,7 +329,7 @@ class SamplePatch(mt.Randomizable):
         else:
             masks = torch.zeros(0, *effective_patch_size.tolist(), dtype=torch.bool)
         patch, masks = self._affine_transform(
-            patch, masks, patch_size, scale, use_full_size,
+            patch, masks, tuple(patch_size.tolist()), tuple(scale.tolist()), use_full_size,
         )
         if patch.shape[0] == 1:
             patch = einops.repeat(patch, '1 ... -> c ...', c=3).contiguous()
