@@ -15,3 +15,5 @@ export BUILD_MONAI=1" \
 
 ```
 , and build xformers from source / install pre-built wheel.
+
+Manually modify `pad_nd` according to: https://github.com/Project-MONAI/MONAI/issues/7842

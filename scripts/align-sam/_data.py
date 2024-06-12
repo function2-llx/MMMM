@@ -107,7 +107,6 @@ class SamplePatch(mt.Randomizable):
             max_vision_tokens_2d = trans_conf.max_vision_tokens_2d
             max_tokens_z = trans_conf.max_tokens_z
         if size_z == 1 or toss(self.R, trans_conf.full_size_ratio):
-            use_full_size = True
             if size_z <= max_tokens_z:
                 vit_patch_size_z = 1
                 tokens_z = size_z
@@ -130,7 +129,6 @@ class SamplePatch(mt.Randomizable):
             )
             scale_z = size_z / patch_size_z
         else:
-            use_full_size = False
             tokens_z = min(max_tokens_z, size_z)
             # I know, it is always 3D here
             tokens_xy_total = max_vision_tokens_2d if size_z == 1 else max_vision_tokens // tokens_z
@@ -182,7 +180,7 @@ class SamplePatch(mt.Randomizable):
             sparse.shape[1:], scale_xy, conf.vit_patch_size_xy, tokens_xy_total,
         )
         patch_size = np.array((patch_size_z, *patch_size_xy))
-        return patch_size, scale, vit_patch_size, use_full_size
+        return patch_size, scale, vit_patch_size
 
     def get_patch_start(self, ref_patch_center: npt.NDArray[np.int64], effective_patch_size: np.ndarray, shape: np.ndarray):
         # TODO: add randomization
@@ -230,30 +228,23 @@ class SamplePatch(mt.Randomizable):
         self,
         patch: torch.ByteTensor,
         masks: torch.BoolTensor | None,
-        patch_size: tuple3_t[int],
-        scale: tuple3_t[float],
-        use_full_size: bool,
-    ) -> tuple[torch.Tensor, torch.BoolTensor | None]:
+        patch_size: np.ndarray,
+        scale: np.ndarray,
+    ) -> tuple[torch.FloatTensor, torch.BoolTensor | None]:
         if masks is None:
             keys = ['image']
         else:
             keys = ['image', 'masks']
-        if use_full_size:
-            maybe_scale_trans = []
-            patch = nnf.interpolate(patch[None], patch_size, mode='nearest-exact')[0]
+        resize = np.maximum((patch.shape[1:] / scale).round().astype(np.int64), 1)
+        if not np.array_equal(resize, patch.shape[1:]):
+            resize = resize.tolist()
+            patch = nnf.interpolate(patch[None], resize, mode='nearest-exact')[0]
             if masks is not None:
-                masks = nnf.interpolate(masks[None].byte(), patch_size, mode='nearest-exact')[0].bool()
-        elif patch_size == patch.shape[1:]:
-            maybe_scale_trans = []
-        else:
-            maybe_scale_trans = [
-                mt.AffineD(keys, scale_params=scale, spatial_size=patch_size),
-            ]
-        patch = tvtf.to_dtype(patch, dtype=torch.float, scale=True)
-        affine_trans = mt.Compose(
+                masks = nnf.interpolate(masks[None].byte(), resize, mode='nearest-exact')[0].bool()
+        flip_rotate_trans = mt.Compose(
             [
                 # NOTE: scaling should be performed firstly since spatial axis order might change after random rotation
-                *maybe_scale_trans,
+                mt.SpatialPadD(keys, patch_size),
                 *[
                     mt.RandFlipD(keys, 0.5, i)
                     for i in range(3)
@@ -266,9 +257,9 @@ class SamplePatch(mt.Randomizable):
                 'masks': {'padding_mode': GridSamplePadMode.ZEROS},
             },
         )
-        affine_trans.set_random_state(state=self.R)
+        flip_rotate_trans.set_random_state(state=self.R)
         _dict_data = {'image': patch, 'masks': masks}
-        _dict_data = affine_trans(_dict_data)
+        _dict_data = flip_rotate_trans(_dict_data)
         patch_t = _dict_data['image'].as_tensor()
         masks_t = None if masks is None else (_dict_data['masks'] > 0.5).as_tensor()
         return patch_t, masks_t
@@ -282,7 +273,7 @@ class SamplePatch(mt.Randomizable):
         sparse = Sparse.from_json((data_dir / 'sparse.json').read_bytes())
 
         # 1. generate patch information
-        patch_size, scale, vit_patch_size, use_full_size = self.gen_patch_size_info(sparse)
+        patch_size, scale, vit_patch_size = self.gen_patch_size_info(sparse)
         patch_tokens, _rem = np.divmod(patch_size, vit_patch_size)
         assert np.array_equiv(_rem, 0)
         effective_patch_size = np.minimum(np.ceil(patch_size * scale).astype(np.int64), sparse.shape)
@@ -332,9 +323,8 @@ class SamplePatch(mt.Randomizable):
             modality_slice = slice(modality_idx, modality_idx + 1)
         images: torch.ByteTensor = load_pt_zst(data_dir / 'images.pt.zst')
         patch = images[modality_slice, *patch_slice]
-        patch, pos_masks = self._affine_transform(
-            patch, pos_masks, tuple(patch_size.tolist()), tuple(scale.tolist()), use_full_size,
-        )
+        patch, pos_masks = self._affine_transform(patch, pos_masks, patch_size, scale)
+        patch = patch.float() / 255
 
         # TODO: maybe shuffle the classes, though it should have no effect
         classes = pos_classes + neg_classes
