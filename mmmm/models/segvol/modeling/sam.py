@@ -83,11 +83,17 @@ class InstanceSamLoss(nn.Module):
         label: torch.Tensor | bool,
         reduce_batch: bool = True,
         return_dict: bool = False,
+        alpha: bool = True,
     ):
         # disc_loss = (bce_pos if pos else bce_neg)(input)
         if isinstance(label, bool):
             label = (torch.ones_like if label else torch.zeros_like)(input)
-        disc_loss = sigmoid_focal_loss(input, label, self.disc_focal_gamma, self.disc_focal_alpha)
+
+        disc_loss = sigmoid_focal_loss(
+            input, label,
+            self.disc_focal_gamma,
+            self.disc_focal_alpha if alpha else None,
+        )
         if reduce_batch:
             disc_loss = disc_loss.mean()
         total = self.disc_weight * disc_loss
@@ -260,7 +266,9 @@ class InstanceSamLoss(nn.Module):
                 if match_pos.shape[0] > 0:
                     with torch.no_grad():
                         _accumulate(
-                            self.disc_loss(disc_logit[match_pos_mask], True, return_dict=True),
+                            self.disc_loss(
+                                disc_logit[match_pos_mask], True, return_dict=True, alpha=False,
+                            ),
                             'instance', 'disc-pos',
                         )
                     loss += _accumulate(
@@ -279,7 +287,9 @@ class InstanceSamLoss(nn.Module):
                 if match_neg_mask.any():
                     with torch.no_grad():
                         _accumulate(
-                            self.disc_loss(disc_logit[match_neg_mask], False, return_dict=True),
+                            self.disc_loss(
+                                disc_logit[match_neg_mask], False, return_dict=True, alpha=False,
+                            ),
                             'instance', 'disc-neg',
                         )
                     with torch.set_grad_enabled(self.use_neg_mask):

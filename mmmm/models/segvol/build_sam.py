@@ -17,7 +17,7 @@ def _build_sam(
     encoder_num_layers: int = 12,
     num_heads: int = 12,
     dropout_rate: float = 0.0,
-    patch_size: tuple3_t[int] | int = 16,
+    patch_size: tuple3_t[int] | int,
     pos_embed_shape: tuple3_t[int],
     num_instances: int,
     pt_in_channels: int | None = None,

@@ -110,7 +110,7 @@ class IndexTrackerBinary:
         if boxes.is_floating_point():
             boxes = boxes * einops.repeat(torch.tensor(img_t.shape[-3:]), 'd -> (l2 d)', l2=2)
             boxes = boxes.round().long()
-        # make matplotlib happy
+        # rotate to make matplotlib happy
         img_t = img_t.mT
         img_t = einops.rearrange(img_t, '... d w h -> d w h ...')
         masks = masks.mT

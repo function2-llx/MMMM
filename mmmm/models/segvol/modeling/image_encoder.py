@@ -83,14 +83,13 @@ class PatchEmbeddingBlock(nn.Module):
         if (proj_weight := state_dict.pop(f'{prefix}patch_embeddings.1.weight', None)) is not None and proj_weight.ndim == 2:
             # load from SegVol checkpoint
             p0, p1, p2 = self.pt_patch_size
-            proj_weight = spadop.resample(
-                einops.rearrange(
-                    proj_weight,
-                    'co (p0 p1 p2 ci) -> co ci p0 p1 p2', p0=p0, p1=p1, p2=p2, ci=self.pt_in_channels,
-                ),
-                self.proj.kernel_size,
-                scale=True,
+            proj_weight = einops.rearrange(
+                proj_weight,
+                'co (p0 p1 p2 ci) -> co ci p0 p1 p2', p0=p0, p1=p1, p2=p2, ci=self.pt_in_channels,
             )
+            if self.pt_patch_size != self.proj.kernel_size:
+                print(f'resample {prefix}patch_embeddings.1.weight, {self.pt_patch_size} -> {prefix}proj.weight, {self.proj.kernel_size}')
+                proj_weight = spadop.resample(proj_weight, self.proj.kernel_size, scale=True)
             if self.pt_in_channels == 1 and self.in_channels != 1:
                 proj_weight = einops.repeat(proj_weight, 'co 1 ... -> co ci ...', ci=self.in_channels) / self.in_channels
             state_dict[f'{prefix}proj.weight'] = proj_weight
