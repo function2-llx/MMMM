@@ -42,14 +42,6 @@ class Sam(nn.Module):
         self.prompt_encoder = prompt_encoder
         self.mask_decoder = mask_decoder
 
-        self.box_head = nn.Sequential(
-            nn.Linear(self.mask_embed_dim, self.mask_embed_dim),
-            nn.ReLU(inplace=True),
-            nn.Linear(self.mask_embed_dim, self.mask_embed_dim),
-            nn.ReLU(inplace=True),
-            nn.Linear(self.mask_embed_dim, 6),
-        )
-
     @property
     def prompt_dim(self):
         return self.prompt_encoder.embed_dim
