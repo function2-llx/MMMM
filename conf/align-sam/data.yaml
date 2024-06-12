@@ -11,13 +11,13 @@ dataset:
     type: local
   - name: autoPET-III
     type: local
-    weight: 0.4
+    weight: 0.2
   - name: BraTS2023-GLI
     type: local
-    weight: 0.4
+    weight: 0.2
   - name: BraTS2023-MEN
     type: local
-    weight: 0.4
+    weight: 0.2
   - name: BraTS2023-MET
     type: local
   - name: BraTS2023-PED
@@ -37,8 +37,10 @@ dataset:
     weight: 5
   - name: CTPelvic1K
     type: local
+    weight: 0.2
   - name: CTSpine1K
     type: local
+    weight: 0.2
   - name: HaN-Seg
     type: local
   - name: ISLES22
@@ -47,7 +49,7 @@ dataset:
     type: local
   - name: LIDC-IDRI
     type: local
-    weight: 5
+    weight: 2
   - name: LNQ2023
     type: local
   - name: MRSpineSeg
@@ -86,28 +88,31 @@ dataset:
     type: local
   - name: TotalSegmentator
     type: local
-    weight: 5
+    weight: 2
   - name: VerSe
     type: local
-  - name: VinDr-CXR
-    type: local
-    weight: 0.6
+    weight: 0.4
   - name: WORD
     type: local
   base_vit_patch_size_z: 16
   vit_patch_size_xy: 16
   trans:
     max_vision_tokens: 2048
-    max_vision_tokens_2d: 1024
-    scale_z: [1, 2]
-    scale_z_p: 0.15
+    max_vision_tokens_lr: 600
     max_tokens_z: 8
-    scale_xy: [0.8, 2]
-    scale_xy_p: 0.25
-    num_pos: 12
-    num_neg: 4
-    full_size_ratio: 0.25
+    max_tokens_z_lr: 6
+    max_vision_tokens_2d: 1024
+    max_vision_tokens_2d_lr: 256
+    low_res_p: 0.4
+    scale_z: [0.9, 1.2]
+    scale_z_p: 0.1
+    scale_xy: [0.8, 1.4]
+    scale_xy_p: 0.2
+    num_pos: 14
+    num_neg: 2
+    full_size_ratio: 0.2
     scale_intensity_prob: 0.15
     scale_intensity_factor: 0.1
     shift_intensity_prob: 0.15
     shift_intensity_offset: 0.1
+    log2_vit_patch_size_z_std: 0.25

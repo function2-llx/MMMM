@@ -20,6 +20,79 @@ from .image_encoder import ImageEncoderViT
 from .mask_decoder import MaskDecoder
 from .prompt_encoder import PromptEncoder
 
+class Sam(nn.Module):
+    def __init__(
+        self,
+        image_encoder: ImageEncoderViT,
+        prompt_encoder: PromptEncoder,
+        mask_decoder: MaskDecoder,
+    ) -> None:
+        """
+        SAM predicts object masks from an image and input prompts.
+
+        Arguments:
+          image_encoder (ImageEncoderViT): The backbone used to encode the
+            image into image embeddings that allow for efficient mask prediction.
+          prompt_encoder (PromptEncoder): Encodes various types of input prompts.
+          mask_decoder (MaskDecoder): Predicts masks from the image embeddings
+            and encoded prompts.
+        """
+        super().__init__()
+        self.image_encoder = image_encoder
+        self.prompt_encoder = prompt_encoder
+        self.mask_decoder = mask_decoder
+
+        self.box_head = nn.Sequential(
+            nn.Linear(self.mask_embed_dim, self.mask_embed_dim),
+            nn.ReLU(inplace=True),
+            nn.Linear(self.mask_embed_dim, self.mask_embed_dim),
+            nn.ReLU(inplace=True),
+            nn.Linear(self.mask_embed_dim, 6),
+        )
+
+    @property
+    def prompt_dim(self):
+        return self.prompt_encoder.embed_dim
+
+    @property
+    def mask_embed_dim(self):
+        return self.mask_decoder.transformer_dim
+
+    @property
+    def num_mask_tokens(self):
+        return self.mask_decoder.num_mask_tokens
+
+    def _predict_masks(
+        self, text_embedding: torch.Tensor, image_embeddings: torch.Tensor, patch_size_z: int
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        sparse_embeddings, dense_embeddings = self.prompt_encoder(image_embeddings.shape[2:], text_embedding=text_embedding)
+        sparse_embeddings = sparse_embeddings.to(text_embedding.dtype)
+        masks_logits_low_res, masks_embeds = self.mask_decoder(
+            image_embeddings=image_embeddings,
+            image_pe=self.prompt_encoder.get_dense_pe(image_embeddings.shape[2:]),
+            sparse_prompt_embeddings=sparse_embeddings,
+            dense_prompt_embeddings=dense_embeddings,
+            text_embedding=text_embedding,
+            patch_size_z=patch_size_z,
+        )
+        return masks_logits_low_res, masks_embeds
+
+    def forward(self, image: list[torch.Tensor], patch_size: list[tuple3_t[int]], text_embedding: list[torch.Tensor]):
+        batch_size = len(image)
+        image_embeddings: list[torch.Tensor] = self.image_encoder(image, patch_size)
+        masks_logits_low_res = []
+        for i in range(batch_size):
+            _masks_logits_low_res, masks_embeds = self._predict_masks(
+                text_embedding[i], image_embeddings[i], patch_size[i][0],
+            )
+            masks_logits_low_res.append(_masks_logits_low_res[:, 0])
+
+        masks_logits = [
+            nnf.interpolate(m[None], image[i].shape[1:], mode='trilinear')[0]
+            for i, m in enumerate(masks_logits_low_res)
+        ]
+        return masks_logits
+
 @dataclass
 class InstanceSamOutput:
     """(batch size, num targets (varied), num queries, ...)"""

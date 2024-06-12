@@ -51,15 +51,19 @@ def _get_patch_size_xy(size: npt.NDArray[np.int64], scale: float, stride: int, m
 
 @dataclass(kw_only=True)
 class TransConf:
+    low_res_p: float
     max_vision_tokens: int
+    max_vision_tokens_lr: int
     max_vision_tokens_2d: int
+    max_vision_tokens_2d_lr: int
     scale_z: tuple2_t[float]
     scale_z_p: float
     max_tokens_z: int
+    max_tokens_z_lr: int
     scale_xy: tuple2_t[float]
     scale_xy_p: float
     aniso_ratio_range: tuple2_t[float] = (0.5, 3.)
-    log2_vit_patch_size_z_std: float = 0.4
+    log2_vit_patch_size_z_std: float
     num_pos: int
     num_neg: int
     full_size_ratio: float
@@ -96,23 +100,31 @@ class SamplePatch(mt.Randomizable):
         conf = self.conf
         trans_conf = conf.trans
         size_z: int = sparse.shape[0].item()
+        if toss(self.R, trans_conf.low_res_p):
+            max_vision_tokens = trans_conf.max_vision_tokens_lr
+            max_vision_tokens_2d = trans_conf.max_vision_tokens_2d_lr
+            max_tokens_z = trans_conf.max_tokens_z_lr
+        else:
+            max_vision_tokens = trans_conf.max_vision_tokens
+            max_vision_tokens_2d = trans_conf.max_vision_tokens_2d
+            max_tokens_z = trans_conf.max_tokens_z
         if size_z == 1 or toss(self.R, trans_conf.full_size_ratio):
             # use full size
-            if size_z <= trans_conf.max_tokens_z:
+            if size_z <= max_tokens_z:
                 vit_patch_size_z = 1
                 tokens_z = size_z
             else:
                 log2_vit_patch_size_z = self.R.normal(
-                    np.log2(size_z / trans_conf.max_tokens_z),
+                    np.log2(size_z / max_tokens_z),
                     trans_conf.log2_vit_patch_size_z_std,
                 )
                 log2_vit_patch_size_z = np.clip(
                     np.rint(log2_vit_patch_size_z), 0, conf.base_vit_patch_size_z.bit_length() - 1,
                 )
                 vit_patch_size_z = 1 << int(log2_vit_patch_size_z)
-                tokens_z = min(math.ceil(size_z / vit_patch_size_z), trans_conf.max_tokens_z)
+                tokens_z = min(math.ceil(size_z / vit_patch_size_z), max_tokens_z)
             patch_size_z = tokens_z * vit_patch_size_z
-            tokens_xy_total = trans_conf.max_vision_tokens_2d if size_z == 1 else trans_conf.max_vision_tokens // tokens_z
+            tokens_xy_total = max_vision_tokens_2d if size_z == 1 else max_vision_tokens // tokens_z
             scale_xy = 1 / get_max_scale_for_size(
                 sparse.shape[1:],
                 conf.vit_patch_size_xy,
@@ -120,8 +132,9 @@ class SamplePatch(mt.Randomizable):
             )
             scale_z = size_z / patch_size_z
         else:
-            tokens_z = min(trans_conf.max_tokens_z, size_z)
-            tokens_xy_total = trans_conf.max_vision_tokens_2d if size_z == 1 else trans_conf.max_vision_tokens // tokens_z
+            tokens_z = min(max_tokens_z, size_z)
+            # I know, it is always 3D here
+            tokens_xy_total = max_vision_tokens_2d if size_z == 1 else max_vision_tokens // tokens_z
             # 2. sample scale_xy
             min_scale_xy = trans_conf.scale_xy[0]
             max_scale_xy = min(
@@ -217,26 +230,19 @@ class SamplePatch(mt.Randomizable):
     def _affine_transform(
         self,
         patch: torch.Tensor,
-        patch_masks: torch.BoolTensor | None,
-        boxes: torch.LongTensor,
+        patch_masks: torch.BoolTensor,
         patch_size: Sequence[int],
         scale: Sequence[float],
-    ) -> tuple[torch.Tensor, torch.BoolTensor | None, torch.LongTensor]:
+    ) -> tuple[torch.Tensor, torch.BoolTensor | None]:
         affine_trans = mt.Compose(
             [
                 # NOTE: scaling should be performed firstly since spatial axis order might change
-                mt.AffineD(
-                    ['image', 'masks'],
-                    scale_params=scale.tolist(),
-                    spatial_size=patch_size.tolist(),
-                    allow_missing_keys=True,
-                ),
-                # *[
-                #     mt.RandFlipD(['image', 'masks'], 0.5, i, allow_missing_keys=True)
-                #     for i in range(3)
-                # ],
-                mt.Rotate90D(['image', 'masks'], spatial_axes=(1, 2), allow_missing_keys=True, k=3),
-                # mt.RandRotate90D(['image', 'masks'], 0.75, spatial_axes=(1, 2), allow_missing_keys=True),
+                mt.AffineD(['image', 'masks'], scale_params=scale.tolist(), spatial_size=patch_size.tolist()),
+                *[
+                    mt.RandFlipD(['image', 'masks'], 0.5, i)
+                    for i in range(3)
+                ],
+                mt.RandRotate90D(['image', 'masks'], 0.75, spatial_axes=(1, 2)),
             ],
             lazy=True,
             overrides={
@@ -245,23 +251,11 @@ class SamplePatch(mt.Randomizable):
             }
         )
         affine_trans.set_random_state(state=self.R)
-        _dict_data = {'image': patch}
-        if patch_masks is not None:
-            _dict_data['masks'] = patch_masks
+        _dict_data = {'image': patch, 'masks': patch_masks}
         _dict_data = affine_trans(_dict_data)
-        patch_t: MetaTensor = _dict_data['image']
-        if patch_masks is None:
-            patch_masks_t = None
-            boxes_t = apply_affine_to_boxes_int(boxes, patch_t.affine.inverse())
-        else:
-            # generate new boxes from transformed masks
-            patch_masks_t = _dict_data['masks'].round().bool().as_tensor()
-            boxes_t = torch.empty(patch_masks_t.shape[0], 6, dtype=torch.int64)
-            for i, mask in enumerate(patch_masks_t):
-                # setting allow_smaller=False to make MONAI happy
-                _start, _end = generate_spatial_bounding_box(mask[None], allow_smaller=False)
-                boxes_t[i] = torch.tensor([*_start, *_end])
-        return patch_t.as_tensor(), patch_masks_t, boxes_t
+        patch_t = _dict_data['image'].as_tensor()
+        patch_masks_t = _dict_data['masks'].round().bool().as_tensor()
+        return patch_t, patch_masks_t
 
     def __call__(self, data: dict):
         data = dict(data)
@@ -304,96 +298,42 @@ class SamplePatch(mt.Randomizable):
             whole_masks: torch.BoolTensor = load_pt_zst(mask_path)
             patch_masks = whole_masks[:, *patch_slice]
         else:
-            patch_masks = None
+            assert sum(1 for _ in cytoolz.concat(sparse.targets.values())) == 0
+            patch_masks = torch.empty(0, *effective_patch_size.tolist(), dtype=torch.bool)
 
         # 4. determine positive & negative classes within the cropped patch
         targets = {}
         neg_targets = list(cytoolz.concat(sparse.neg_targets.values()))
         for target in cytoolz.concat(sparse.targets.values()):
             target: Sparse.Target
-            mask_indexes, boxes = self.filter_target(
-                target, patch_masks, patch_start, effective_patch_size,
-            )
-            if boxes.shape[0] == 0:
+            mask = einops.reduce(patch_masks[slice(*target.index_offset)], 'c ... -> 1 ...', 'any')
+            if mask.any():
+                targets[target.name] = mask
+            else:
                 neg_targets.append(target.name)
-            elif boxes.shape[0] > 0:
-                targets[target.name] = {
-                    'mask_indexes': mask_indexes,
-                    'boxes': boxes,
-                    'num_uncertain': 0,
-                    'semantic': target.semantic,
-                }
 
-        # 5. generate conversation
         pos_classes = self._sample_targets(targets, trans_conf.num_pos)
         neg_classes = self._sample_targets(neg_targets, trans_conf.num_neg)
-        classes = pos_classes + neg_classes
-
-        # 6. prepare the data point!
-        targets_data = {
-            'mask_indexes': [],
-            'boxes': [],
-            'semantic': torch.empty(len(classes), dtype=torch.bool),
-            'index_offsets': torch.empty(len(classes), 2, dtype=torch.int64),
-        }
-        index_offset = 0
-        for i, class_ in enumerate(classes):
-            if (req_target := targets.get(class_)) is None:
-                _num_instances = 0
-            else:
-                targets_data['mask_indexes'].extend(req_target['mask_indexes'])
-                boxes = req_target['boxes']
-                _num_instances = boxes.shape[0]
-                targets_data['boxes'].append(boxes)
-                targets_data['semantic'][i] = req_target['semantic']
-            # no instance, we can give instance segmentation a try
-            if _num_instances == 0:
-                targets_data['semantic'][i] = False
-            targets_data['index_offsets'][i] = torch.tensor([index_offset, (index_offset := index_offset + _num_instances)])
-        if index_offset == 0:
-            targets_data['boxes'] = torch.empty(0, 6, dtype=torch.int64)
+        if len(pos_classes) > 0:
+            masks = torch.cat([targets[name] for name in pos_classes])
         else:
-            targets_data['boxes'] = torch.cat(targets_data['boxes'], dim=0)
-
-        if patch_masks is not None:
-            # select masks before affine transform to save computation
-            if len(mask_indexes := targets_data['mask_indexes']) > 0:
-                patch_masks = patch_masks[mask_indexes]
-            else:
-                patch_masks = None
-        patch, patch_masks, boxes = self._affine_transform(
-            patch, patch_masks, targets_data['boxes'], patch_size, scale,
+            masks = torch.zeros(0, *effective_patch_size.tolist(), dtype=torch.bool)
+        patch, masks = self._affine_transform(
+            patch, masks, patch_size, scale,
         )
-        boxes = norm_boxes(boxes, patch.shape[1:])
         if patch.shape[0] == 1:
-            # ensure RGB
             patch = einops.repeat(patch, '1 ... -> c ...', c=3).contiguous()
-        index_offsets = targets_data['index_offsets']
-        # prepare semantic label
-        if patch_masks is None:
-            semantic_masks = semantic_boxes = None
-        else:
-            num_targets = index_offsets.shape[0]
-            semantic_masks = torch.empty(num_targets, 1, *patch_masks.shape[1:], dtype=torch.bool)
-            semantic_boxes = torch.empty(num_targets, 6, dtype=torch.int64)
-            for i, index_offset in enumerate(index_offsets):
-                semantic_masks[i] = einops.reduce(patch_masks[slice(*index_offset)], 'c ... -> 1 ...', 'any')
-                _start, _end = generate_spatial_bounding_box(semantic_masks[i])
-                semantic_boxes[i] = torch.tensor([*_start, *_end])
-            semantic_boxes = norm_boxes(semantic_boxes, patch.shape[1:])
+
+        # TODO: maybe shuffle the classes, though it should have no effect
+        classes = pos_classes + neg_classes
+        masks = torch.cat([masks, torch.zeros(len(neg_classes), *patch.shape[1:], dtype=torch.bool)])
 
         data_point = {
             'src': (dataset_name, data['key']),
             'image': patch,
             'patch_size': tuple(vit_patch_size.tolist()),
-            'classes': classes,  # oh
-            'masks': patch_masks,
-            'boxes': boxes,
-            'semantic_masks': semantic_masks,
-            'semantic_boxes': semantic_boxes,
-            'num_uncertain': torch.zeros(len(classes), dtype=torch.int64),
-            'semantic': targets_data['semantic'],
-            'index_offsets': index_offsets,
+            'classes': classes,
+            'masks': masks,
         }
         return data_point
 
