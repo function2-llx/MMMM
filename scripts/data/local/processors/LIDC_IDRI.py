@@ -85,6 +85,7 @@ def _patch_Scan_to_volume(self: pl.Scan, verbose: bool = True):
 
 class LIDC_IDRIProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor):
     name = 'LIDC-IDRI'
+    clip_min = True
     class_mapping = {
         3: 'left lung',
         4: 'right lung',

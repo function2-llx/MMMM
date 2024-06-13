@@ -122,6 +122,7 @@ class Processor(ABC):
     semantic_targets: set[str] = set()
     affine_atol: float = 1e-2
     assert_local: bool = True
+    clip_min: bool = False
 
     def __init__(self, logger: Logger, *, max_workers: int, chunksize: int, override: bool):
         self.tax = load_target_tax()
@@ -456,7 +457,7 @@ class Processor(ABC):
                 **{f'space-o-{i}': s.item() for i, s in enumerate(spacing)}
             }
             # 2. clip intensity, and crop the images & masks
-            cropper = clip_intensity(images)
+            cropper = clip_intensity(images, exclude_min=self.clip_min)
             images: MetaTensor = cropper(images)  # type: ignore
             # 3. compute resize (default: adapt to self.max_smaller_edge and self.min_aniso_ratio)
             new_spacing, new_shape = self.compute_resize(spacing, images.shape[1:])
