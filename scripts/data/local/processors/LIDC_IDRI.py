@@ -6,9 +6,11 @@ import pylidc as pl
 from pylidc.utils import consensus
 import torch
 
-from mmmm.data.defs import ORIGIN_LOCAL_DATA_ROOT
 from monai.data import MetaTensor
-from ._base import DefaultImageLoaderMixin, Processor, SegDataPoint
+import monai.transforms as mt
+
+from mmmm.data.defs import ORIGIN_LOCAL_DATA_ROOT
+from ._base import DefaultImageLoaderMixin, Processor, SegDataPoint, DefaultMaskLoaderMixin
 
 @dataclass(kw_only=True)
 class LIDR_IDRIDataPoint(SegDataPoint):
@@ -16,7 +18,7 @@ class LIDR_IDRIDataPoint(SegDataPoint):
     images: ... = None
 
 
-class LIDC_IDRIProcessor(DefaultImageLoaderMixin, Processor):
+class LIDC_IDRIProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Processor):
     name = 'LIDC-IDRI'
     class_mapping = {
         3: 'left lung',
@@ -50,12 +52,21 @@ class LIDC_IDRIProcessor(DefaultImageLoaderMixin, Processor):
         return masks
 
     def load_masks(self, data_point: LIDR_IDRIDataPoint, images: MetaTensor):
-        lung_targets, lung_masks = self._load_multi_class_masks(
-            ORIGIN_LOCAL_DATA_ROOT / f'LUNA16/seg-lungs-LUNA16/{data_point.series_instance_uid}.mhd',
-            self.class_mapping,
-        )
+        label_path = (ORIGIN_LOCAL_DATA_ROOT / f'LUNA16/seg-lungs-LUNA16/{data_point.series_instance_uid}.mhd')
+        if label_path.exists():
+            lung_targets, lung_masks = self._load_multi_class_masks(label_path, self.class_mapping)
+        else:
+            lung_targets, lung_masks = [], MetaTensor(
+                torch.empty(0, *images.shape[1:], dtype=torch.bool, device=self.device), images.affine,
+            )
         nodule_masks = self._load_nodule_masks(data_point, images)
-        targets = lung_targets + ['lung nodule'] * lung_masks.shape[0]
+        targets = lung_targets + ['lung nodule'] * nodule_masks.shape[0]
+        orientation = mt.Orientation('RAS')
+        lung_masks = orientation(lung_masks)
+        # we cannot get the shift term from pylidc, let's trust everyone
+        lung_masks.affine[:3, -1] = 0
+        nodule_masks = orientation(nodule_masks)
+        self._check_affine(lung_masks.affine, nodule_masks.affine)
         masks = torch.cat([lung_masks, nodule_masks])
         return targets, masks
 
