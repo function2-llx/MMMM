@@ -127,10 +127,11 @@ class AlignSam(PreTrainedModel, LightningModule):
             log_dict.setdefault('loss', []).append(log_dict_.pop('total'))
             for k, v in log_dict_.items():
                 log_dict.setdefault(k, []).append(v)
-        all_num_masks = self.trainer.strategy.reduce(num_masks, reduce_op='sum')
-        all_batch_size = self.trainer.world_size * len(class_lists)
+        from lightning_utilities.core.rank_zero import rank_prefixed_message
+        print(rank_prefixed_message(f'num masks = {num_masks}', self.global_rank))
+        all_num_masks = self.trainer.strategy.reduce(torch.tensor(num_masks, device=self.device), reduce_op='sum')
         log_dict_reduced = {
-            k: torch.cat(v).sum() * all_batch_size / all_num_masks
+            k: torch.cat(v).sum() * self.trainer.world_size / all_num_masks
             for k, v in log_dict.items()
         }
         return log_dict_reduced, masks_logits
