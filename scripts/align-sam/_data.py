@@ -235,7 +235,8 @@ class SamplePatch(mt.Randomizable):
             keys = ['image']
         else:
             keys = ['image', 'masks']
-        resize = np.maximum((patch.shape[1:] / scale).round().astype(np.int64), 1)
+        # interpolation may not be as accurate as grid sampling, but probably faster
+        resize = np.minimum(np.maximum((patch.shape[1:] / scale).round().astype(np.int64), 1), patch_size)
         if not np.array_equal(resize, patch.shape[1:]):
             resize = resize.tolist()
             patch = nnf.interpolate(patch[None], resize, mode='nearest-exact')[0]
