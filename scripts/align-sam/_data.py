@@ -311,6 +311,7 @@ class SamplePatch(mt.Randomizable):
             ])
         else:
             assert sum(1 for _ in cytoolz.concat(sparse.targets.values())) == 0
+            pos_classes = []
             pos_masks = None
 
         neg_classes = self._sample_targets(neg_targets, trans_conf.num_neg)
