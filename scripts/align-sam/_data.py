@@ -305,10 +305,13 @@ class SamplePatch(mt.Randomizable):
                 else:
                     neg_targets.append(target.name)
             pos_classes = self._sample_targets(targets, trans_conf.num_pos)
-            pos_masks = torch.cat([
-                einops.reduce(patch_masks[targets[name]], 'c ... -> 1 ...', 'any')
-                for name in pos_classes
-            ])
+            if len(pos_classes) > 0:
+                pos_masks = torch.cat([
+                    einops.reduce(patch_masks[targets[name]], 'c ... -> 1 ...', 'any')
+                    for name in pos_classes
+                ])
+            else:
+                pos_masks = None
         else:
             assert sum(1 for _ in cytoolz.concat(sparse.targets.values())) == 0
             pos_classes = []
