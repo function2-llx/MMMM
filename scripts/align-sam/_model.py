@@ -117,12 +117,22 @@ class AlignSam(PreTrainedModel, LightningModule):
         class_embeddings = self.get_class_embeddings(class_lists)
         masks_logits: list[torch.Tensor] = self.sam(batch['image'], batch['patch_size'], class_embeddings)
         log_dict = {}
+        num_masks = 0
+        # NOTE: it is assumed that:
+        #   1. the batch sizes are the same across distributed ranks;
+        #   2. no gradient accumulation, thanks
         for masks_logits_, masks_ in zip(masks_logits, batch['masks']):
-            log_dict_ = self.loss(masks_logits_[None], masks_[None], reduce_batch=True, return_dict=True)
+            num_masks += masks_.shape[0]
+            log_dict_ = self.loss(masks_logits_[:, None], masks_[:, None], reduce_batch=False, return_dict=True)
             log_dict.setdefault('loss', []).append(log_dict_.pop('total'))
             for k, v in log_dict_.items():
                 log_dict.setdefault(k, []).append(v)
-        log_dict_reduced = {k: torch.stack(v).mean() for k, v in log_dict.items()}
+        all_num_masks = self.trainer.strategy.reduce(num_masks, reduce_op='sum')
+        all_batch_size = self.trainer.world_size * len(class_lists)
+        log_dict_reduced = {
+            k: torch.cat(v).sum() * all_batch_size / all_num_masks
+            for k, v in log_dict.items()
+        }
         return log_dict_reduced, masks_logits
 
     def training_step(self, batch, *args, **kwargs):
