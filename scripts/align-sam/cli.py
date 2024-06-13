@@ -18,7 +18,7 @@ class CLI(LightningCLI):
 
     def instantiate_classes(self) -> None:
         super().instantiate_classes()
-        ckpt = torch.load(self.config_init.state_dict_path)
+        ckpt = torch.load(self.active_config_init.state_dict_path)
         self.model.load_state_dict(ckpt['state_dict'])
 
 def main():
