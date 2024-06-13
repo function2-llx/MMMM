@@ -62,9 +62,9 @@ class TransConf:
     aniso_ratio_range: tuple2_t[float] = (0.5, 3.)
     log2_vit_patch_size_z_std: float
     num_pos: int
-    num_neg: int
+    min_num_neg: int
     full_size_ratio: float
-    force_fg_ratio: float = 0.66
+    force_fg_ratio: float = 0.5
     scale_intensity_prob: float = 0.15
     scale_intensity_factor: float = 0.1
     shift_intensity_prob: float = 0.15
@@ -317,7 +317,9 @@ class SamplePatch(mt.Randomizable):
             pos_classes = []
             pos_masks = None
 
-        neg_classes = self._sample_targets(neg_targets, trans_conf.num_neg)
+        neg_classes = self._sample_targets(
+            neg_targets, (trans_conf.num_pos + trans_conf.min_num_neg - len(pos_classes)),
+        )
         if len(sparse.modalities) == 1:
             modality_slice = slice(None)
         else:

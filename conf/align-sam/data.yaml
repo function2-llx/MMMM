@@ -107,7 +107,7 @@ dataset:
     scale_xy: [0.8, 1.4]
     scale_xy_p: 0.2
     num_pos: 14
-    num_neg: 2
+    min_num_neg: 2
     full_size_ratio: 0.2
     scale_intensity_prob: 0.15
     scale_intensity_factor: 0.1
