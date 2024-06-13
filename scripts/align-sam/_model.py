@@ -7,10 +7,8 @@ from transformers import CLIPTokenizerFast, CLIPTextModel, PreTrainedModel, Pret
 from transformers.modeling_outputs import BaseModelOutputWithPooling
 
 from luolib.lightning import LightningModule
-from luolib.types import tuple3_t
 
 from mmmm.data.defs import Batch
-from mmmm.misc import IndexTrackerBinary
 from mmmm.models import InstanceSam
 from mmmm.models.loss import DiceFocalLoss
 from mmmm.models.segvol.modeling.sam import InstanceSamLoss, InstanceSamOutput, Sam
@@ -127,8 +125,6 @@ class AlignSam(PreTrainedModel, LightningModule):
             log_dict.setdefault('loss', []).append(log_dict_.pop('total'))
             for k, v in log_dict_.items():
                 log_dict.setdefault(k, []).append(v)
-        from lightning_utilities.core.rank_zero import rank_prefixed_message
-        print(rank_prefixed_message(f'num masks = {num_masks}', self.global_rank))
         all_num_masks = self.trainer.strategy.reduce(torch.tensor(num_masks, device=self.device), reduce_op='sum')
         log_dict_reduced = {
             k: torch.cat(v).sum() * self.trainer.world_size / all_num_masks
