@@ -95,6 +95,9 @@ def clip_intensity(image: torch.Tensor, exclude_min: bool = False) -> mt.Spatial
     roi_start, roi_end = generate_spatial_bounding_box(select_mask)
     return mt.SpatialCrop(roi_start=roi_start, roi_end=roi_end)
 
+class SkipException(Exception):
+    pass
+
 tensor_t = TypeVar('tensor_t', bound=torch.Tensor)
 
 class Processor(ABC):
@@ -508,6 +511,9 @@ class Processor(ABC):
             pd.to_pickle(info, save_dir / 'info.pkl')
             # 5. complete
             save_dir.rename(save_dir.with_name(key))
+        except SkipException:
+            self.logger.info(f'skip {key}')
+            (self.case_data_root / data_point.key).mkdir(parents=True)
         except Exception as e:
             self.logger.error(key)
             self.logger.error(e)
