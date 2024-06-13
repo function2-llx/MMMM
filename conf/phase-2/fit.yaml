@@ -34,8 +34,4 @@ optim:
         warmup_prefix: true
     interval: step
     frequency: 250
-model:
-  init_args:
-    freeze_vg: true
-    disable_vg: true
 lora: ../lora.yaml

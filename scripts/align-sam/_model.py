@@ -134,7 +134,7 @@ class AlignSam(PreTrainedModel, LightningModule):
 
     def training_step(self, batch, *args, **kwargs):
         log_dict, masks_logits = self(batch)
-        self.log_dict(_add_prefix(log_dict, 'train'))
+        self.log_dict(_add_prefix(log_dict, 'train'), sync_dist=True)
         with torch.no_grad():
             masks: list[torch.BoolTensor] = batch['masks']
             class_lists: list[list[str]] = batch['classes']  # type: ignore

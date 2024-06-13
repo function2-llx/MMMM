@@ -112,7 +112,7 @@ def get_vl_data_list(name: str, split: Split) -> list:
 class VLTransConf:
     max_tokens: int
     max_tokens_z: int
-    log2_patch_size_z_std: float = 0.5
+    log2_patch_size_z_std: float = 0.25
     ac_ratio: float = 0.2
     modality_prob: float = 0.2
     plane_prob: float = 0.2

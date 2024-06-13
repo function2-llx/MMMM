@@ -1,15 +1,13 @@
-from dataclasses import dataclass, field
 import os
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
 import einops
-import einops.layers.torch as elt
+import torch
 from jsonargparse import class_from_function
 from peft import PeftModel
 from scipy.optimize import linear_sum_assignment
-import torch
-from torch import nn
 from torch.nn import functional as nnf
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
@@ -17,39 +15,28 @@ from luolib.lightning import LightningModule
 from luolib.losses import bce_neg, bce_pos, zero_loss
 from luolib.types import PathLike, param3_t, tuple2_t, tuple3_t
 from luolib.utils.misc import pairwise_forward
+from monai.data import box_pair_giou, convert_box_mode
+from monai.data.box_utils import CenterSizeMode
+
 from mmmm.data.defs import Batch
 from mmmm.tokenizer import MMMMTokenizer
 from mmmm.utils import apply_prefix, get_lora_modules_default, get_lora_modules_finetune_all
-from monai.data import box_pair_giou, convert_box_mode
-from monai.data.box_utils import CenterSizeMode
 from .cogvlm import CogVLMConfig, CogVLMForCausalLM
 from .loss import DiceFocalLoss
 from .segvol import InstanceSam
+from .segvol.modeling.sam import Sam
 
 __all__ = [
     'MMMMForCausalLM',
     'build',
 ]
 
+
 @dataclass
 class VisionArgs:
     pos_embed_shape: tuple3_t[int]
     pt_pos_embed_shape: tuple2_t[int] | None = None
     patch_size: param3_t[int] = 16
-
-@dataclass(kw_only=True)
-class MMMMOutputWithPast:
-    """modified from CausalLMOutputWithPast
-    inheriting from ModelOutput will cause some trouble (e.g., "should not have more than one required field")
-    """
-    lm_logits: torch.Tensor
-    lm_loss: torch.Tensor | None = None
-    past_key_values: tuple[tuple[torch.Tensor, ...], ...] | None = None
-    hidden_states: tuple[torch.Tensor, ...] | None = None
-    attentions: tuple[torch.Tensor, ...] | None = None
-
-    masks_logits: list[torch.Tensor]
-    mask_loss: torch.Tensor | None
 
 @dataclass
 class VisualGroundingOutput:
@@ -59,25 +46,10 @@ class VisualGroundingOutput:
     boxes: list[torch.FloatTensor] = field(default_factory=list)
     disc_logit: list[torch.FloatTensor] = field(default_factory=list)
 
-@dataclass
-class SlidingWindow:
-    patch_size: tuple3_t[int]
-    batch_size: int
-    overlap: float = 0.5
-
 MATCH_NEGATIVE = -1
 MATCH_UNCERTAIN = -2
 
 EPS = 1e-8
-
-def _optional_index(x: torch.Tensor | None, index: ...):
-    return None if x is None else x[index]
-
-def _dice_metric(x: torch.BoolTensor, y: torch.BoolTensor):
-    reduce = elt.Reduce('c ... -> c', 'sum')
-    nominator = 2 * reduce(x & y)
-    denominator = reduce(x) + reduce(y)
-    return nominator / (denominator + EPS)
 
 class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
     tokenizer: MMMMTokenizer
@@ -90,25 +62,17 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         pretrained_model_name_or_path: str | os.PathLike | None,
         *args,
         lm_loss_weight: float = 1.,
-        box_l1_loss_weight: float = 1.,
-        box_giou_loss_weight: float = 0.5,
-        disc_loss_weight: float = 1.,
-        neg_mask_loss: bool = True,
         vision_override: VisionArgs,
         tokenizer: MMMMTokenizer,
-        sam: 'SamArgs',
         torch_dtype: str | torch.dtype = 'auto',
-        mask_loss: DiceFocalLoss | None = None,
         lora_lang: bool = True,
-        disable_vg: bool = False,
-        freeze_vg: bool = False,
+        sam: Sam | None = None,
     ):
         """make jsonargparse happy
         This works thanks to that AST does not support this (according to the debug information)
         TODO: refactor the construction of PreTrainedModel
         NOTE: mask loss handle the weights itself internally
         Args:
-            neg_mask_loss: whether to compute loss on negative instance masks
             lora_lang: whether to fine-tune language weights
         """
         self: MMMMForCausalLM = super().from_pretrained(
@@ -117,36 +81,13 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             torch_dtype=torch_dtype,
         )
         self.resize_token_embeddings(len(tokenizer))
-        self.sam_model = build_sam_vit_3d(sam)
         self.tokenizer = tokenizer
         self.lm_loss_weight = lm_loss_weight
-        self.box_l1_loss_weight = box_l1_loss_weight
-        self.box_giou_loss_weight = box_giou_loss_weight
-        self.disc_loss_weight = disc_loss_weight
-        self.mask_loss = mask_loss
-        self.neg_mask_loss = neg_mask_loss
-        self.vg_proj = nn.Sequential(
-            nn.Linear(self.config.hidden_size, self.config.hidden_size),
-            nn.ReLU(inplace=True),
-            nn.Linear(self.config.hidden_size, self.sam_model.prompt_dim),
-        )
-        # following DetrMLPPredictionHead
-        self.box_head = nn.Sequential(
-            nn.Linear(self.sam_model.mask_embed_dim, self.sam_model.mask_embed_dim),
-            nn.ReLU(inplace=True),
-            nn.Linear(self.sam_model.mask_embed_dim, self.sam_model.mask_embed_dim),
-            nn.ReLU(inplace=True),
-            nn.Linear(self.sam_model.mask_embed_dim, 6),
-        )
-        self.disc_head = nn.Sequential(
-            nn.Linear(self.sam_model.mask_embed_dim, self.sam_model.mask_embed_dim),
-            nn.ReLU(inplace=True),
-            nn.Linear(self.sam_model.mask_embed_dim, 1),
-        )
+        self.sam_model = sam
+        sam.requires_grad_(False)
+        sam.eval()
         self.model.config.lora_lang = lora_lang
         self.check_grad = False
-        self._setup_freeze(freeze_vg)
-        self.disable_vg = disable_vg
         return self
 
     def on_load_checkpoint(self, checkpoint: dict):
@@ -165,22 +106,6 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
 
     def load_default_adapter(self, ckpt_dir: Path):
         self.peft_model.load_adapter(str(ckpt_dir / 'adapter'), 'default')
-
-    def _setup_freeze(self, freeze_vg: bool):
-        sam = self.sam_model
-        if freeze_vg:
-            self.vg_proj.requires_grad_(False)
-            sam.requires_grad_(False)
-            self.disc_head.requires_grad_(False)
-            self.box_head.requires_grad_(False)
-        else:
-            # freeze unused parameters to make DDP work
-            sam.prompt_encoder.point_embeddings.requires_grad_(False)
-            sam.prompt_encoder.not_a_point_embed.requires_grad_(False)
-            sam.prompt_encoder.mask_downscaling.requires_grad_(False)
-            # sam.mask_decoder.iou_prediction_head.requires_grad_(False)
-            if not sam.mask_decoder.text_sim:
-                sam.mask_decoder.txt_align_upscaled_embedding.requires_grad_(False)
 
     def get_lora_modules(self, prefix: str):
         # apply LoRA on VLM, fully finetune others
@@ -272,7 +197,8 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             return_dict=True,
             output_hidden_states=True,
         )
-        if self.disable_vg:
+        if self.sam_model is None:
+            # pure VLM
             lm_loss = vlm_output.loss
             self.log('train/loss', lm_loss, sync_dist=True)
             return self.lm_loss_weight * lm_loss
@@ -563,36 +489,6 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
                         self.mask_loss(masks_logits[match_neg_mask][:, None], return_dict=True),
                         'instance', 'mask-neg',
                     )
-        return loss, log_dict
-
-    # def sw_predictor(self, patch: torch.Tensor):
-    #     output: MMMMOutputWithPast = self(
-    #         global_enc_image=patch,
-    #         grounding_enc_image=patch,
-    #         **self._val_vlm_inputs,
-    #         use_cache=False,
-    #     )
-    #     return output.masks_logits[0][None]
-    #
-    # def on_validation_epoch_start(self) -> None:
-    #     self.dice_metric = DiceMetric(reduction=MetricReduction.MEAN_BATCH)
-    #
-    # def validation_step(self, batch: dict, *args, **kwargs):
-    #     # the interface of sliding_window_inference only accepts image as input
-    #     self._val_vlm_inputs = batch['vlm_inputs']
-    #     conf = self.val_sw
-    #     logits = sliding_window_inference(
-    #         batch['image'],
-    #         conf.patch_size,
-    #         conf.batch_size,
-    #         self.sw_predictor,
-    #         conf.overlap,
-    #         BlendMode.GAUSSIAN,
-    #     )
-    #     pred = logits.sigmoid() > 0.5
-    #     dice = self.dice_metric(pred, batch['masks'])
-    #     for i, name in enumerate(batch['mask_classes']):
-    #         self.log(f'val/dice/{name}', dice[i])
 
     # noinspection PyMethodOverriding
     def prepare_inputs_for_generation(
