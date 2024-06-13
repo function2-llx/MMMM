@@ -28,7 +28,7 @@ CAPTION_PROMPTS = [
     'Briefly describe this {}.',
     'Please provide a brief description of this {}.',
     'Can you provide a brief description of this {}?',
-    'Caption this {}.'
+    'Caption this {}.',
     'Please provide a caption for this {}.',
     'Can you provide a caption for this {}?',
 ]
@@ -96,9 +96,10 @@ PLANE_PROMPTS = [
 REFERRINGS = ['image', 'medical image', 'radiograph', 'scan', 'radiology image', 'radiology scan', 'medical scan']
 
 _REPORT_DATASETS = {'MIMIC-CXR', 'CT-RATE', 'OpenI'}
+_CAPTION_DATASETS = {'ROCOv2'}
 def get_vl_data_list(name: str, split: Split) -> list:
     dataset_dir = PROCESSED_VL_DATA_ROOT / name
-    if name in _REPORT_DATASETS:
+    if name in _REPORT_DATASETS or name in _CAPTION_DATASETS:
         # load cleaned data for report dataset
         split_filename = f'{split}-processed.json'
     else:
@@ -206,20 +207,24 @@ class VLTransform(mt.RandomizableTransform):
         image = convert_to_tensor(image)
         image, _ = ensure_rgb(image, contiguous=True)
         image = intensity_norm(image)
+
         # 3. generate conversation
         referring: str = self.R.choice(REFERRINGS)
         conversation = []
-        if modality and (not allow_report or toss(self.R, trans_conf.modality_prob)):
+        caption: str | None = data.get('processed_caption')
+        report: str | None = data.get('processed_report') if allow_report else None
+        vqa: list[dict] | None = data.get('vqa')
+        _force = not caption and not report and not vqa
+        if _force:
+            assert modality or plane
+        if modality and (_force or toss(self.R, trans_conf.modality_prob)):
             conversation.extend(gen_modality_conv(modality, self.R))
-        if plane and (not allow_report or toss(self.R, trans_conf.plane_prob)):
+        if plane and (_force or toss(self.R, trans_conf.plane_prob)):
             _template: str = self.R.choice(PLANE_PROMPTS)
             conversation.append(
                 ConvTurn(_template.format(referring), plane)
             )
-        caption: str | None = data.get('processed_caption')
-        report: str | None = data.get('processed_report') if allow_report else None
-        vqa: list[dict] | None = data.get('vqa')
-        assert not allow_report or report or vqa
+        self.R.shuffle(conversation)
         if caption:
             conversation.append(
                 ConvTurn(self.R.choice(CAPTION_PROMPTS).format(referring), caption),

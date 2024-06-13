@@ -20,6 +20,7 @@ class CLI(LightningCLI):
         super().instantiate_classes()
         ckpt = torch.load(self.active_config_init.state_dict_path)
         self.model.load_state_dict(ckpt['state_dict'])
+        print(f'load state dict from checkpoint: {self.active_config_init.state_dict_path}')
 
 def main():
     CLI(

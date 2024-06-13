@@ -119,18 +119,21 @@ class AlignSam(PreTrainedModel, LightningModule):
         # NOTE: it is assumed that:
         #   1. the batch sizes are the same across distributed ranks;
         #   2. no gradient accumulation, thanks
-        for masks_logits_, masks_ in zip(masks_logits, batch['masks']):
-            num_masks += masks_.shape[0]
-            log_dict_ = self.loss(masks_logits_[:, None], masks_[:, None], reduce_batch=False, return_dict=True)
-            log_dict.setdefault('loss', []).append(log_dict_.pop('total'))
-            for k, v in log_dict_.items():
-                log_dict.setdefault(k, []).append(v)
-        all_num_masks = self.trainer.strategy.reduce(torch.tensor(num_masks, device=self.device), reduce_op='sum')
-        log_dict_reduced = {
-            k: torch.cat(v).sum() * self.trainer.world_size / all_num_masks
-            for k, v in log_dict.items()
-        }
-        return log_dict_reduced, masks_logits
+        if masks := batch.get('masks'):
+            for masks_logits_, masks_ in zip(masks_logits, masks):
+                num_masks += masks_.shape[0]
+                log_dict_ = self.loss(masks_logits_[:, None], masks_[:, None], reduce_batch=False, return_dict=True)
+                log_dict.setdefault('loss', []).append(log_dict_.pop('total'))
+                for k, v in log_dict_.items():
+                    log_dict.setdefault(k, []).append(v)
+            all_num_masks = self.trainer.strategy.reduce(torch.tensor(num_masks, device=self.device), reduce_op='sum')
+            log_dict_reduced = {
+                k: torch.cat(v).sum() * self.trainer.world_size / all_num_masks
+                for k, v in log_dict.items()
+            }
+            return log_dict_reduced, masks_logits
+        else:
+            return masks_logits
 
     def training_step(self, batch, *args, **kwargs):
         log_dict, masks_logits = self(batch)

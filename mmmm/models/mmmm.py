@@ -84,8 +84,9 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         self.tokenizer = tokenizer
         self.lm_loss_weight = lm_loss_weight
         self.sam_model = sam
-        sam.requires_grad_(False)
-        sam.eval()
+        if sam is not None:
+            sam.requires_grad_(False)
+            sam.eval()
         self.model.config.lora_lang = lora_lang
         self.check_grad = False
         return self

@@ -11,6 +11,7 @@ trainer:
     init_args:
       gradient_as_bucket_view: true
       broadcast_buffers: false
+      timeout: 0:5:0
   callbacks:
   - class_path: luolib.lightning.callbacks.ModelCheckpoint
     init_args:

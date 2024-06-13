@@ -34,4 +34,5 @@ optim:
         warmup_prefix: true
     interval: step
     frequency: 250
+model: model.yaml
 lora: ../lora.yaml

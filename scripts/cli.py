@@ -69,8 +69,6 @@ class CLI(LightningCLI):
         parser.link_arguments('tokenizer', f'{self.model_prefix}.tokenizer', apply_on='instantiate')
         # dataclass as class: https://github.com/omni-us/jsonargparse/issues/287
         parser.add_class_arguments(LoraConfig, 'lora')
-        parser.add_class_arguments(DiceFocalLoss, 'mask_loss')
-        parser.link_arguments('mask_loss', f'{self.model_prefix}.mask_loss', apply_on='instantiate')
         parser.add_argument('--lora_adapter_path', type=Path | None, default=None)
 
     def instantiate_classes(self) -> None:
