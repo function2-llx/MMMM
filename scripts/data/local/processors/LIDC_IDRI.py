@@ -32,17 +32,23 @@ class LIDC_IDRIProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Proces
 
     def load_images(self, data_point: LIDR_IDRIDataPoint) -> tuple[list[str], MetaTensor]:
         scan: pl.Scan = cytoolz.first(pl.query(pl.Scan).filter(pl.Scan.series_instance_uid == data_point.series_instance_uid))
-        volume = scan.to_volume(verbose=False)
-        image = MetaTensor(torch.from_numpy(volume)[None], torch.diag(torch.tensor((*scan.spacings, 1))))
+        image_path = scan.get_path_to_dicom_files()
+        image = self.image_loader(image_path)
+        image = mt.Orientation('PLS')(image)
+        volume = torch.from_numpy(scan.to_volume(verbose=False))
+        # from mmmm.misc import IndexTrackerBinary
+        # IndexTrackerBinary(mt.Orientation('ASR')(image)[0], zyx=False)
+        # IndexTrackerBinary(volume, zyx=False)
         modality = 'contrast-enhanced CT' if scan.contrast_used else 'CT'
-        return [modality], image
+        assert torch.equal(image[0], volume), 'I hate you'
+        return [modality], image.to(device=self.device)
 
     def _load_nodule_masks(self, data_point: LIDR_IDRIDataPoint, images: MetaTensor):
         scan: pl.Scan = cytoolz.first(pl.query(pl.Scan).filter(pl.Scan.series_instance_uid == data_point.series_instance_uid))
         nodules = scan.cluster_annotations()
         if len(nodules) == 0:
-            # TODO: calm down
-            return ['lung nodule'], torch.zeros(1,  dtype=torch.bool, device=self.device)
+            # no nodule, then create a negative mask for it
+            return torch.zeros(1, *images.shape[1:], dtype=torch.bool, device=self.device)
         masks = np.zeros((len(nodules), *images.shape[1:]), dtype=np.bool_)
         for i, nodule in enumerate(nodules):
             assert len(nodule) <= 4
@@ -63,8 +69,6 @@ class LIDC_IDRIProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Proces
         targets = lung_targets + ['lung nodule'] * nodule_masks.shape[0]
         orientation = mt.Orientation('RAS')
         lung_masks = orientation(lung_masks)
-        # we cannot get the shift term from pylidc, let's trust everyone
-        lung_masks.affine[:3, -1] = 0
         nodule_masks = orientation(nodule_masks)
         self._check_affine(lung_masks.affine, nodule_masks.affine)
         masks = torch.cat([lung_masks, nodule_masks])
