@@ -138,6 +138,8 @@ class LIDC_IDRIProcessor(DefaultImageLoaderMixin, DefaultMaskLoaderMixin, Proces
         orientation = mt.Orientation('RAS')
         lung_masks = orientation(lung_masks)
         nodule_masks = orientation(nodule_masks)
+        if lung_masks.shape[1:] != nodule_masks.shape[1:]:
+            raise SkipException
         self._check_affine(lung_masks.affine, nodule_masks.affine)
         masks = torch.cat([lung_masks, nodule_masks])
         return targets, masks
