@@ -17,7 +17,7 @@ init_args:
     base_pool_size_z: 2
     max_seq_len: 1024
     vl_trans:
-      max_tokens: 256
+      max_tokens: 144
       max_tokens_z: 4
   dataloader:
     train_batch_size: 8
