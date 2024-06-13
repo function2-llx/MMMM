@@ -210,6 +210,16 @@ class Processor(ABC):
             masks = None
         return pos_targets, neg_targets, masks, None
 
+    def _load_multi_class_masks(self, label_path: Path, class_mapping: dict[int, str]):
+        targets = list(class_mapping.values())
+        label: MetaTensor = self.mask_loader(label_path).to(dtype=torch.int16, device=self.device)
+        assert label.shape[0] == 1
+        class_ids = torch.tensor([c for c in class_mapping], dtype=torch.int16, device=self.device)
+        for _ in range(label.ndim - 1):
+            class_ids = class_ids[..., None]  # make broadcastable
+        masks = label == class_ids
+        return targets, masks
+
     def load_masks(self, data_point: SegDataPoint, images: MetaTensor) -> tuple[list[str], MetaTensor]:
         if isinstance(data_point, MultiLabelMultiFileDataPoint):
             targets, mask_paths = zip(*data_point.masks)
@@ -223,14 +233,7 @@ class Processor(ABC):
             masks.affine = affine
             masks = self._ensure_binary_mask(masks)
         elif isinstance(data_point, MultiClassDataPoint):
-            class_mapping = data_point.class_mapping
-            targets = list(class_mapping.values())
-            label: MetaTensor = self.mask_loader(data_point.label).to(dtype=torch.int16, device=self.device)
-            assert label.shape[0] == 1
-            class_ids = torch.tensor([c for c in class_mapping], dtype=torch.int16, device=self.device)
-            for _ in range(label.ndim - 1):
-                class_ids = class_ids[..., None]  # make broadcastable
-            masks = label == class_ids
+            targets, masks = self._load_multi_class_masks(data_point.label, data_point.class_mapping)
         else:
             raise NotImplementedError
         return targets, masks
