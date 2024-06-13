@@ -1,26 +1,25 @@
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
 import cytoolz
 import einops
-from lightning.fabric.utilities.distributed import DistributedSamplerWrapper
 import math
 import numpy as np
 import numpy.typing as npt
 import torch
 import torch.nn.functional as nnf
+from lightning.fabric.utilities.distributed import DistributedSamplerWrapper
 from torch.utils.data import Dataset as _TorchDataset, Sampler
-import torchvision.transforms.v2.functional as tvtf
 
-from luolib.datamodule import ExpDataModuleBase
-from luolib.types import tuple2_t, tuple3_t
-from luolib.utils import load_pt_zst
-from luolib.utils.misc import ceil_divide
 from monai.data import DataLoader
 from monai.data.box_utils import spatial_crop_boxes
 import monai.transforms as mt
 from monai.utils import GridSamplePadMode
+from luolib.datamodule import ExpDataModuleBase
+from luolib.types import tuple2_t
+from luolib.utils import load_pt_zst
+from luolib.utils.misc import ceil_divide
 
 from mmmm.data import get_target_tax
 from mmmm.data.dataset import DatasetSpec
@@ -215,9 +214,6 @@ class SamplePatch(mt.Randomizable):
             boxes = boxes[keep]
         return mask_indexes, boxes
 
-    def _get_category(self, name: str):
-        return self.target_tax[name].category
-
     def _sample_targets(self, targets: Iterable[str], limit: int) -> list[str]:
         targets = list(targets)
         if len(targets) > limit:
@@ -300,22 +296,24 @@ class SamplePatch(mt.Randomizable):
         if (mask_path := data_dir / 'masks.pt.zst').exists():
             whole_masks: torch.BoolTensor = load_pt_zst(mask_path)
             patch_masks = whole_masks[:, *patch_slice]
+            is_pos = einops.reduce(patch_masks, 'c ... -> c', 'any')
             for target in cytoolz.concat(sparse.targets.values()):
                 target: Sparse.Target
-                mask = einops.reduce(patch_masks[slice(*target.index_offset)], 'c ... -> 1 ...', 'any')
-                if mask.any():
-                    targets[target.name] = mask
+                index_slice = slice(*target.index_offset)
+                if is_pos[index_slice].any():
+                    targets[target.name] = index_slice
                 else:
                     neg_targets.append(target.name)
+            pos_classes = self._sample_targets(targets, trans_conf.num_pos)
+            pos_masks = torch.cat([
+                einops.reduce(patch_masks[targets[name]], 'c ... -> 1 ...', 'any')
+                for name in pos_classes
+            ])
         else:
             assert sum(1 for _ in cytoolz.concat(sparse.targets.values())) == 0
-
-        pos_classes = self._sample_targets(targets, trans_conf.num_pos)
-        neg_classes = self._sample_targets(neg_targets, trans_conf.num_neg)
-        if len(pos_classes) > 0:
-            pos_masks = torch.cat([targets[name] for name in pos_classes])
-        else:
             pos_masks = None
+
+        neg_classes = self._sample_targets(neg_targets, trans_conf.num_neg)
         if len(sparse.modalities) == 1:
             modality_slice = slice(None)
         else:

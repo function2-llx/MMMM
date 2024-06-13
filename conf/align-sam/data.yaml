@@ -3,7 +3,7 @@ dataset:
   - name: ACDC
     type: local
   - name: AMOS22
-    weight: 4
+    weight: 3
     type: local
   - name: ATLAS
     type: local
@@ -34,7 +34,7 @@ dataset:
     type: local
   - name: CT-ORG
     type: local
-    weight: 5
+    weight: 4
   - name: CTPelvic1K
     type: local
     weight: 0.2
@@ -49,7 +49,6 @@ dataset:
     type: local
   - name: LIDC-IDRI
     type: local
-    weight: 2
   - name: LNQ2023
     type: local
   - name: MRSpineSeg
@@ -88,7 +87,6 @@ dataset:
     type: local
   - name: TotalSegmentator
     type: local
-    weight: 2
   - name: VerSe
     type: local
     weight: 0.4
