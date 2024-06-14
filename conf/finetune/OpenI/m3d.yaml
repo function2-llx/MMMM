@@ -1,13 +1,13 @@
 model:
-  class_path: _vqa.llavamed.FinetuneLlavaMed
+  class_path: _vqa.m3d.FinetuneM3D
 data:
-  class_path: _rg.llavamed.LLAVAMRGDataModule
+  class_path: _rg.m3d.M3DRGDataModule
   init_args:
-    resize: [224, 224]
+    resize: [256, 256]
 logger:
   class_path: lightning.pytorch.loggers.WandbLogger
   init_args:
-    name: llava-med_openi_1e-4
+    name: m3d_openi
     save_dir: output/finetune/OpenI
     project: MMMM-FT
 lora:
@@ -17,7 +17,3 @@ lora:
     lora_alpha: 8
     lora_dropout: 0.05
     use_rslora: true
-optim:
-  optimizer:
-    init_args:
-      lr: 1e-4

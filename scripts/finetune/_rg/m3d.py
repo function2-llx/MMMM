@@ -1,36 +1,46 @@
 from typing import Callable
 
+import einops
 import torch
+import torch.nn.functional as F
+from torchvision.io import read_image, ImageReadMode
 from torchvision.transforms.v2 import functional as tvtf
 
+from _rg._base import RGDataModule, RGTransform
 from luolib.utils import load_pt_zst
-from scripts.finetune._rg._base import RGTransform, RGDataModule
-from scripts.finetune._utils import CE_IGNORE_INDEX, intensity_norm_
-from torchvision.io import read_image, ImageReadMode
+from scripts.finetune._utils import CE_IGNORE_INDEX
 
-class LLAVANRGTransform(RGTransform):
+
+class M3DRGTransform(RGTransform):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-
     def __call__(self, data):
-        if self.dataset_name == "MIMIC-CXR":
+        dtype = torch.bfloat16
+
+        if self.dataset_name == "MIMIC-CXR" or self.dataset_name == "CT-RATE":
             image = load_pt_zst(data['image'])
-            image = torch.squeeze(image, 1)
-            image = image.expand(3, image.shape[1], image.shape[2])
+            image = image.squeeze(0)
         elif self.dataset_name == "OpenI":
-            image = read_image(data['image'], ImageReadMode.RGB)
+            image = read_image(data['image'], ImageReadMode.GRAY)
         image = tvtf.to_dtype(image, torch.float32, scale=True)
         image = tvtf.resize(image, self.resize)
-        image_size = torch.tensor(self.resize)
-        intensity_norm_(image)
+        if self.dataset_name == "MIMIC-CXR" or self.dataset_name == "OpenI":
+            image = einops.repeat(image, '1 h w -> 1 d h w', d=32)
+        elif self.dataset_name == "CT-RATE":
+            image = image.unsqueeze(0).unsqueeze(0)
+            image = F.interpolate(image, size=(32, 256, 256), mode='trilinear', align_corners=False)
+            image = image.squeeze(0)
+        image = image.to(dtype=dtype)
+
+        proj_out_num = 256
 
         answer = data['processed_report']
         tokenizer = self.tokenizer
         text_ids = []
         labels = []
 
-        prompt = f'<image>\nPlease write a radiology report for me:'
+        prompt = "<im_patch>" * proj_out_num + 'Please write a radiology report for me:'
         prompt_ids = torch.tensor(tokenizer.encode(prompt, add_special_tokens=False))
         answer_ids = torch.tensor(tokenizer.encode(answer, add_special_tokens=False))
         text_ids.extend([prompt_ids, answer_ids])
@@ -54,7 +64,6 @@ class LLAVANRGTransform(RGTransform):
         ])
         return {
             'image': image,
-            'image_size': image_size,
             'vlm_inputs': {
                 'input_ids': input_ids,
                 'labels': labels,
@@ -63,9 +72,9 @@ class LLAVANRGTransform(RGTransform):
         }
 
 
-class LLAVANRGDataModule(RGDataModule):
+class M3DRGDataModule(RGDataModule):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
     def train_transform(self) -> Callable:
-        return LLAVANRGTransform(self.tokenizer, resize=self.resize, dataset_name=self.dataset_name)
+        return M3DRGTransform(self.tokenizer, resize=self.resize, dataset_name=self.dataset_name)

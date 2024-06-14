@@ -1,0 +1,19 @@
+model:
+  class_path: _vqa.m3d.FinetuneM3D
+data:
+  class_path: _vqa.m3d.M3DVQADataModule
+  init_args:
+    resize: [256, 256]
+logger:
+  class_path: lightning.pytorch.loggers.WandbLogger
+  init_args:
+    name: m3d_vqa-rad
+    save_dir: output/finetune/VQA-RAD
+    project: MMMM-FT
+lora:
+  class_path: peft.LoraConfig
+  init_args:
+    r: 64
+    lora_alpha: 8
+    lora_dropout: 0.05
+    use_rslora: true

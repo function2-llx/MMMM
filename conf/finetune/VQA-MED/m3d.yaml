@@ -1,13 +1,15 @@
 model:
-  class_path: _vqa.llavamed.FinetuneLlavaMed
+  class_path: _vqa.m3d.FinetuneM3D
 data:
-  class_path: _vqa.llavamed.LLAVAMVQADataModule
+  class_path: _vqa.m3d.M3DVQADataModule
   init_args:
-    resize: [224, 224]
+    resize: [256, 256]
+    dataloader:
+      train_batch_size: 4
 logger:
   class_path: lightning.pytorch.loggers.WandbLogger
   init_args:
-    name: llava-med_vqa-med_1e-4
+    name: m3d_vqa-med
     save_dir: output/finetune/VQA-Med
     project: MMMM-FT
 lora:
@@ -17,7 +19,3 @@ lora:
     lora_alpha: 8
     lora_dropout: 0.05
     use_rslora: true
-optim:
-  optimizer:
-    init_args:
-      lr: 1e-4

@@ -78,6 +78,12 @@ class RGDataModule(ExpDataModuleBase):
             plane_list = ['AP', 'PA']
         elif self.dataset_name == "OpenI":
             plane_list = ['frontal']
+        elif self.dataset_name == "CT-RATE":
+            for data in data_list:
+                image_idx = 0
+                data['image'] = data['image'][image_idx]
+                new_data_list.append(data)
+            return new_data_list
         for data in data_list:
             in_plane_list = False
             for plane in plane_list:

@@ -1,14 +1,14 @@
 model:
-  class_path: _vqa.llavamed.FinetuneLlavaMed
+  class_path: _vqa.llavanext.FinetuneLlavaNEXT
 data:
-  class_path: _vqa.llavamed.LLAVAMVQADataModule
+  class_path: _rg.llavanext.LLAVANRGDataModule
   init_args:
     resize: [224, 224]
 logger:
   class_path: lightning.pytorch.loggers.WandbLogger
   init_args:
-    name: llava-med_vqa-med_1e-4
-    save_dir: output/finetune/VQA-Med
+    name: llava-next_openi
+    save_dir: output/finetune/OpenI
     project: MMMM-FT
 lora:
   class_path: peft.LoraConfig
@@ -17,7 +17,3 @@ lora:
     lora_alpha: 8
     lora_dropout: 0.05
     use_rslora: true
-optim:
-  optimizer:
-    init_args:
-      lr: 1e-4
