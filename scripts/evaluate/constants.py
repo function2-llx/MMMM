@@ -40,4 +40,4 @@ RADBERT_CONDITIONS = [
     'Interlobular septal thickening'
 ]
 
-CHEXPERT_MICRO = [1, 4, 5, 7, 9]
+CHEXPERT_5 = [1, 4, 5, 7, 9]

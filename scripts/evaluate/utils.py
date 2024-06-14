@@ -29,7 +29,7 @@ from constants import (
     COMPOSITE_METRIC_V1_PATH,
     CHEXPERT_CONDITIONS,
     RADBERT_CONDITIONS,
-    CHEXPERT_MICRO,
+    CHEXPERT_5,
 )
 
 
@@ -435,8 +435,8 @@ class CXRMetrics:
 
     def compute_chexbert(self, df: pd.DataFrame):
         similarities = []
-        prediction_labels = [[] for _ in range(len(CHEXPERT_CONDITIONS))]
-        reference_labels = [[] for _ in range(len(CHEXPERT_CONDITIONS))]
+        prediction_labels = []
+        reference_labels = []
         for _, row in tqdm(df.iterrows(), total=df.shape[0]):
             self.chexbert_model.logits = True
             prediction = self.chexbert_tokenize(
@@ -444,14 +444,18 @@ class CXRMetrics:
             )
             prediction_attention_mask = torch.ones(1, prediction.shape[1]).to('cuda')
             logits = self.chexbert_model(prediction, prediction_attention_mask)
+            prediction_label = []
             for i in range(len(CHEXPERT_CONDITIONS)):
-                prediction_labels[i].append(torch.argmax(logits[i], dim=1).item())
+                prediction_label.append(torch.argmax(logits[i], dim=1).item())
+            prediction_labels.append(prediction_label)
 
             reference = self.chexbert_tokenize(str(row['answer']))
             reference_attention_mask = torch.ones(1, reference.shape[1]).to('cuda')
             logits = self.chexbert_model(reference, reference_attention_mask)
+            reference_label = []
             for i in range(len(CHEXPERT_CONDITIONS)):
-                reference_labels[i].append(torch.argmax(logits[i], dim=1).item())
+                reference_label.append(torch.argmax(logits[i], dim=1).item())
+            reference_labels.append(reference_label)
 
             self.chexbert_model.logits = False
             prediction = (
@@ -480,9 +484,7 @@ class CXRMetrics:
             [1 if x == 1 or x == 3 else 0 for x in y] for y in reference_labels
         ]
 
-        f1s = [f1_score(x, y) for x, y in zip(prediction_labels, reference_labels)]
-
-        return similarities, prediction_labels, reference_labels, f1s
+        return similarities, np.array(prediction_labels), np.array(reference_labels)
 
     def process(self, run: Path):
         df = pd.read_csv(str(run) + '.csv')
@@ -497,18 +499,20 @@ class CXRMetrics:
             'bleu2': [],
         }
 
-        results['chexbert'], prediction_labels, reference_labels, f1s = (
+        results['chexbert'], prediction_labels, reference_labels= (
             self.compute_chexbert(df)
         )
+        f1s = f1_score(reference_labels, prediction_labels, average=None)
         for i, condition in enumerate(CHEXPERT_CONDITIONS):
-            df[condition.lower() + ' chexbert prediction'] = prediction_labels[i]
-            df[condition.lower() + ' chexbert reference'] = reference_labels[i]
+            df[condition.lower() + ' chexbert prediction'] = prediction_labels[:,i]
+            df[condition.lower() + ' chexbert reference'] = reference_labels[:, i]
             summary[condition.lower() + ' chexbert f1'] = f1s[i]
 
-        summary['macro chexbert f1'] = sum(f1s) / len(f1s)
-        summary['micro chexbert f1'] = sum(
-            [f1 for i, f1 in enumerate(f1s) if i in CHEXPERT_MICRO]
-        ) / len(CHEXPERT_MICRO)
+        summary['macro chexbert 14 f1'] = f1_score(reference_labels, prediction_labels, average='macro')
+        summary['micro chexbert 14 f1'] = f1_score(reference_labels, prediction_labels, average='micro')
+
+        summary['macro chexbert 5 f1'] = f1_score(reference_labels[:, CHEXPERT_5], prediction_labels[:, CHEXPERT_5], average='macro')
+        summary['micro chexbert 5 f1'] = f1_score(reference_labels[:, CHEXPERT_5], prediction_labels[:, CHEXPERT_5], average='micro')
 
         for _, row in tqdm(df.iterrows(), total=df.shape[0]):
             score = self.compute(
@@ -601,13 +605,13 @@ class CTMetrics:
             / 'valid_predicted_labels.csv'
         )
 
-        f1s = []
+        f1s = f1_score(prediction_labels, reference_labels, average=None)
         for i, condition in enumerate(RADBERT_CONDITIONS):
             df[condition.lower() + ' radbert prediction'] = prediction_labels[:, i]
-            f1s.append(f1_score(prediction_labels[:, i], reference_labels[condition]))
             summary[condition.lower() + ' radbert f1'] = f1s[i]
 
-        summary['macro radbert f1'] = sum(f1s) / len(f1s)
+        summary['macro radbert f1'] = f1_score(prediction_labels, reference_labels, average='macro')
+        summary['micro radbert f1'] = f1_score(prediction_labels, reference_labels, average='micro')
 
         df.to_csv(str(run) + '.csv', index=False)
         with open(str(run) + '.json', 'w') as f:
