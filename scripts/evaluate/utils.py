@@ -88,7 +88,7 @@ class ReportTestDataset(Dataset):
                 }
                 for x in json.load(f)
                 for i, image in enumerate(x['image'])
-                if x['plane'][i] == 'AP' or x['plane'][i] == 'PA'
+                if self.name != 'MIMIC-CXR' or (x['plane'][i] == 'AP' or x['plane'][i] == 'PA')
             ][start:end]
 
     def __getitem__(self, index: int):

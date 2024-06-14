@@ -121,7 +121,7 @@ class MMMMTransform(mt.RandomizableTransform):
 
 
 def mmmm_vl_evaluate(model, tokenizer, dataloader, output):
-    gen_config = GenerationConfig(max_new_tokens=512, do_sample=False)
+    gen_config = GenerationConfig(max_new_tokens=1024, do_sample=False, eos_token_id=tokenizer.eos_token_id)
 
     results = []
 

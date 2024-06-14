@@ -62,7 +62,7 @@ class LlavaMedTransform(mt.RandomizableTransform):
         else:
             image = Image.open(data['image']).convert('RGB')
 
-        if self.setting == 'finetuned':
+        if 'finetuned' in self.setting:
             def intensity_norm_(
                 image: torch.Tensor,
                 mean: tuple3_t[float] = (0.48145466, 0.4578275, 0.40821073),

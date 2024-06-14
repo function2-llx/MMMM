@@ -23,16 +23,16 @@ def setup_cogvlm(checkpoint: str, adapter: str, tokenizer: str):
         trust_remote_code=True,
     )
     if adapter:
-        # pos_embed = model.model.vision.patch_embedding.position_embedding.weight
-        # cls_pos_embed, pos_embed = pos_embed[0:1], pos_embed[1:]
-        # pos_embed = rearrange(pos_embed, '(h w) c -> 1 c h w', h=35, w=35)
+        pos_embed = model.model.vision.patch_embedding.position_embedding.weight
+        cls_pos_embed, pos_embed = pos_embed[0:1], pos_embed[1:]
+        pos_embed = rearrange(pos_embed, '(h w) c -> 1 c h w', h=35, w=35)
 
-        # pos_embed = nnf.interpolate(pos_embed, (16, 16), mode='area')
-        # pos_embed = torch.cat([cls_pos_embed, rearrange(pos_embed, '1 c h w ->(h w) c')])
-        # model.model.vision.patch_embedding.position_embedding = nn.Embedding(
-        #     *pos_embed.shape[:2], _weight=pos_embed,
-        # )
-        # model.config.vision_config['image_size'] = 224
+        pos_embed = nnf.interpolate(pos_embed, (16, 16), mode='area')
+        pos_embed = torch.cat([cls_pos_embed, rearrange(pos_embed, '1 c h w ->(h w) c')])
+        model.model.vision.patch_embedding.position_embedding = nn.Embedding(
+            *pos_embed.shape[:2], _weight=pos_embed,
+        )
+        model.config.vision_config['image_size'] = 224
         model = PeftModel.from_pretrained(model, adapter)
     tokenizer = LlamaTokenizer.from_pretrained(tokenizer if tokenizer else 'lmsys/vicuna-7b-v1.5')
 

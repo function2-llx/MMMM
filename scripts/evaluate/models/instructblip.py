@@ -39,7 +39,7 @@ class InstructBlipTransform(mt.RandomizableTransform):
 
         inputs = self.processor(
             images=image,
-            text='Question: ' + data['question'] + ' Answer: ' if self.setting == 'finetuned' else data['question'],
+            text='Question: ' + data['question'] + ' Answer: ' if 'finetuned' in self.setting else data['question'],
             return_tensors='pt',
         )
 
