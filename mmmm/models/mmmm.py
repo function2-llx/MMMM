@@ -65,7 +65,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         vision_override: VisionArgs,
         tokenizer: MMMMTokenizer,
         torch_dtype: str | torch.dtype = 'auto',
-        lora_lang: bool = True,
+        freeze_vision: bool = False,
         sam: Sam | None = None,
     ):
         """make jsonargparse happy
@@ -87,7 +87,9 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         if sam is not None:
             sam.requires_grad_(False)
             sam.eval()
-        self.model.config.lora_lang = lora_lang
+        if freeze_vision:
+            self.model.vision.requires_grad_(False)
+        self.model.config.lora_lang = not freeze_vision
         self.check_grad = False
         return self
 

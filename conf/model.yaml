@@ -1,0 +1,8 @@
+class_path: mmmm.models.build
+init_args:
+  pretrained_model_name_or_path: THUDM/cogvlm-chat-hf
+  vision_override:
+    patch_size: 16
+    pos_embed_shape: [8, 32, 32]
+    pt_pos_embed_shape: [35, 35]
+  tokenizer: tokenizer.yaml
