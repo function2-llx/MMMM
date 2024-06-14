@@ -40,3 +40,5 @@ dependencies:
   - xformers -i https://download.pytorch.org/whl/cu121
   - pynrrd
   - pylidc  # for LIDC data
+  - evaluate
+  - radgraph
