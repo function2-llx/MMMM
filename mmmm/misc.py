@@ -38,6 +38,7 @@ def image_transform(
     base_pool_size_z: int = 2,
     patch_size_xy: int = 16,
     pool_size_xy: int = 2,
+    norm: bool = True,
 ):
     image = load_image(image_path)
     if (size_z := image.shape[1]) <= max_tokens_z:
@@ -71,7 +72,8 @@ def image_transform(
     image_resized = mt.DivisiblePad(stride)(image_resized)
     image_resized = convert_to_tensor(image_resized)
     image_resized, _ = ensure_rgb(image_resized, contiguous=True)
-    image_resized = intensity_norm(image_resized)
+    if norm:
+        image_resized = intensity_norm(image_resized)
     pool_size = (pool_size_z, pool_size_xy, pool_size_xy)
     num_vision_tokens = (np.array(image_resized.shape[1:]) // stride).prod().item()
     return image_resized, image, patch_size, pool_size, num_vision_tokens

@@ -306,8 +306,10 @@ class CogVLMDecoderLayer(nn.Module):
         use_cache: Optional[bool] = False,
     ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
         residual = hidden_states
-
-        hidden_states = _mask_set(hidden_states, padding_mask, self.input_layernorm(hidden_states[padding_mask]))
+        if hidden_states.shape[1] > 1:
+            hidden_states = _mask_set(hidden_states, padding_mask, self.input_layernorm(hidden_states[padding_mask]))
+        else:
+            hidden_states = self.input_layernorm(hidden_states)
 
         # Self Attention
         hidden_states, self_attn_weights, present_key_value = self.self_attn(
@@ -323,7 +325,10 @@ class CogVLMDecoderLayer(nn.Module):
 
         # Fully Connected
         residual = hidden_states
-        hidden_states = _mask_set(hidden_states, padding_mask, self.post_attention_layernorm(hidden_states[padding_mask]))
+        if hidden_states.shape[1] > 1:
+            hidden_states = _mask_set(hidden_states, padding_mask, self.post_attention_layernorm(hidden_states[padding_mask]))
+        else:
+            hidden_states = self.post_attention_layernorm(hidden_states)
         hidden_states = self.mlp(hidden_states, token_type_ids=token_type_ids, padding_mask=padding_mask)
         hidden_states = residual + hidden_states
 
@@ -565,9 +570,10 @@ class CogVLMModel(CogVLMPreTrainedModel):
 
             if output_attentions:
                 all_self_attns += (layer_outputs[1],)
-
-        hidden_states = _mask_set(hidden_states, padding_mask, self.norm(hidden_states[padding_mask]))
-
+        if hidden_states.shape[1] > 1:
+            hidden_states = _mask_set(hidden_states, padding_mask, self.norm(hidden_states[padding_mask]))
+        else:
+            hidden_states = self.norm(hidden_states)
         # add hidden states from the last decoder layer
         if output_hidden_states:
             all_hidden_states += (hidden_states,)
@@ -712,10 +718,10 @@ class CogVLMForCausalLM(CogVLMPreTrainedModel):
         return ret if return_dict else ret.to_tuple()
 
     def _prepare_attention_mask_for_generation(
-            self,
-            inputs: torch.Tensor,
-            pad_token_id: Optional[int],
-            eos_token_id: Optional[Union[int, List[int]]],
+        self,
+        inputs: torch.Tensor,
+        pad_token_id: Optional[int],
+        eos_token_id: Optional[Union[int, List[int]]],
     ) -> torch.LongTensor:
         return torch.ones(inputs.shape[:2], dtype=torch.long, device=inputs.device)  # type: ignore
 
