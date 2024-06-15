@@ -16,6 +16,7 @@ from tqdm import tqdm
 
 from luolib.utils import load_pt_zst
 from luolib.utils.misc import ensure_rgb
+from mmmm.misc import IndexTrackerBinary
 from monai.config import NdarrayOrTensor
 from monai.inferers import sliding_window_inference
 from monai.utils import BlendMode, convert_to_tensor
@@ -119,8 +120,8 @@ def main():
         ]
         image = load_pt_zst(image_path)
         image = tvtf.to_dtype(image, torch.float, scale=True)
-        roi_size = (64, 256, 256)
-        vit_patch_size = (8, 16, 16)
+        roi_size = (32, 256, 256)
+        vit_patch_size = (4, 16, 16)
         masks = load_pt_zst(case_dir / 'masks.pt.zst').cuda()
         # masks = nnf.interpolate(masks[None].float(), trans_image.shape[1:], mode='trilinear')[0] > 0.5
         targets_dict = {
@@ -165,7 +166,7 @@ def main():
                     label = label.rot90(dims=(-1, -2), k=rotate)
                     dice = _dice(sem_masks_pred[i], label) * 100
                     print(target, f'rotate={rotate}', f'{dice.item():.2f}')
-                    # IndexTracker(
+                    # IndexTrackerBinary(
                     #     image_plot,
                     #     torch.stack([label, sem_masks_pred[i]]),
                     #     # sem_masks_pred[i, 0:1],
