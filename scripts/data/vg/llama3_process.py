@@ -1,7 +1,6 @@
-import sys
-
 import orjson
 import torch
+from jsonargparse import ArgumentParser
 from vllm import LLM, SamplingParams
 
 from mmmm.data.defs import PROCESSED_VG_DATA_ROOT, PROCESSED_VL_DATA_ROOT
@@ -105,10 +104,10 @@ Remove the tags from any structures that are described using terms like 'no', 'w
 
 Here is an example to illustrate how you should perform your task:
 Example input: 
-Lateral view somewhat limited due to overlying motion artifact. The <p>lungs</p> are low in volume.  There is no focal airspace consolidation to suggest\n <p>pneumonia</p>.  A 1.2-cm <p>calcified granuloma</p> just below the medial aspect of the\n right <p>hemidiaphragm</p> is unchanged from prior study.  No <p>pleural effusions</p> or\n <p>pulmonary edema</p>. There is no <p>pneumothorax</p>.\n\n The inferior <p>sternotomy wire</p> is fractured but unchanged. Surgical clips and\n vascular markers in the <p>thorax</p> are related to prior CABG surgery.
+Lateral view somewhat limited due to overlying motion artifact. The <p>lungs</p> are low in volume.  There is no focal airspace consolidation to suggest <p>pneumonia</p>.  A 1.2-cm <p>calcified granuloma</p> just below the medial aspect of the right <p>hemidiaphragm</p> is unchanged from prior study.  No <p>pleural effusions</p> or <p>pulmonary edema</p>. There is no <p>pneumothorax</p>. The inferior <p>sternotomy wire</p> is fractured but unchanged. Surgical clips and vascular markers in the <p>thorax</p> are related to prior CABG surgery.
 
 Example output: 
-Lateral view somewhat limited due to overlying motion artifact. The <p>lungs</p> are low in volume.  There is no focal airspace consolidation to suggest\n pneumonia.  A 1.2-cm <p>calcified granuloma</p> just below the medial aspect of the\n right <p>hemidiaphragm</p> is unchanged from prior study.  No pleural effusions or\n pulmonary edema. There is no pneumothorax.\n\n The inferior <p>sternotomy wire</p> is fractured but unchanged. Surgical clips and\n vascular markers in the <p>thorax</p> are related to prior CABG surgery.
+Lateral view somewhat limited due to overlying motion artifact. The <p>lungs</p> are low in volume.  There is no focal airspace consolidation to suggest pneumonia.  A 1.2-cm <p>calcified granuloma</p> just below the medial aspect of the right <p>hemidiaphragm</p> is unchanged from prior study.  No pleural effusions or pulmonary edema. There is no pneumothorax. The inferior <p>sternotomy wire</p> is fractured but unchanged. Surgical clips and vascular markers in the <p>thorax</p> are related to prior CABG surgery.
 """
 
 def llama3_user_prompt(text: str):
@@ -118,22 +117,22 @@ Your output:
 """
     return user_prompt
 
-def process(dataset: str, num_samples: tuple[int, int, int] = None, FIRST: bool = True):
+def process(dataset: str, num_samples: tuple[int, int, int] = None, is_first: bool = True):
     output_dir = PROCESSED_VG_DATA_ROOT / dataset
     llm.get_tokenizer()
 
     output_dir.mkdir(exist_ok=True, parents=True)
-    src_dir = (PROCESSED_VL_DATA_ROOT if FIRST else PROCESSED_VG_DATA_ROOT) / dataset
+    src_dir = (PROCESSED_VL_DATA_ROOT if is_first else PROCESSED_VG_DATA_ROOT) / dataset
     for i, split in enumerate(['validate', 'test', 'train']):
         if not (data_path := src_dir / f'{split}.json').exists():
             continue
         data = orjson.loads(data_path.read_bytes())
-        # if num_samples[i] >= 0:
-        #     data = data[:num_samples[i]]
+        if num_samples[i] >= 0:
+            data = data[:num_samples[i]]
         prompts = []
         for item in data:
             user_prompt = llama3_user_prompt(item['findings'])
-            prompt = (system_prompt1 if FIRST else system_prompt2) + '\n' + user_prompt
+            prompt = (system_prompt1 if is_first else system_prompt2) + '\n' + user_prompt
             prompts.append(prompt)
         responses = llm.generate(prompts, sampling_params)
 
@@ -141,21 +140,23 @@ def process(dataset: str, num_samples: tuple[int, int, int] = None, FIRST: bool 
             generated_text = output.outputs[0].text
             # generated_text = generated_text.replace("Output: ", '')
             # generated_text = generated_text.replace("```", '')
-            if FIRST:
+            if is_first:
                 data[j]['findings-ann'] = generated_text
             else:
                 data[j]['findings-ann-filtered'] = generated_text
         (output_dir / f'{split}.json').write_bytes(orjson.dumps(data, option=orjson.OPT_INDENT_2))
 
 def main():
+    parser = ArgumentParser()
+    parser.add_argument('--first', action='store_true')
+    args = parser.parse_args()
     datasets = [
         ('MIMIC-CXR', (-1, -1, 5000)),
         ('CT-RATE', (-1, -1, 5000)),
     ]
-    FIRST = sys.argv[1] == '1'
     for dataset, num_samples in datasets:
         print(dataset)
-        process(dataset, num_samples, FIRST)
+        process(dataset, num_samples, args.first)
 
 if __name__ == '__main__':
     main()
