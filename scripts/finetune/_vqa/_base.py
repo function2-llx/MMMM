@@ -14,11 +14,11 @@ from mmmm.data.defs import Split
 from monai import transforms as mt
 
 class VQATransform(mt.Randomizable):
-    def __init__(self, tokenizer: PreTrainedTokenizer, resize: tuple2_t[int]):
+    def __init__(self, tokenizer: PreTrainedTokenizer, resize: tuple2_t[int], max_seq_len: int | None):
         super().__init__()
         self.tokenizer = tokenizer
         self.resize = resize
-
+        self.max_seq_len = max_seq_len
 
     def __call__(self, data):
         image = read_image(data['image'], ImageReadMode.RGB)
@@ -60,6 +60,9 @@ class VQATransform(mt.Randomizable):
             *labels,
             torch.tensor([tokenizer.eos_token_id]),
         ])
+        if self.max_seq_len is not None:
+            input_ids = input_ids[:self.max_seq_len]
+            labels = labels[:self.max_seq_len]
         return {
             'image': image,
             'vlm_inputs': {
@@ -73,10 +76,11 @@ class VQATransform(mt.Randomizable):
 class VQADataModule(ExpDataModuleBase):
     tokenizer: PreTrainedTokenizer
 
-    def __init__(self, *, dataset_name: str, resize: tuple2_t[int], **kwargs):
+    def __init__(self, *, dataset_name: str, resize: tuple2_t[int], max_seq_len: int | None, **kwargs):
         super().__init__(**kwargs)
         self.dataset_name = dataset_name
         self.resize = resize
+        self.max_seq_len = max_seq_len
 
     def train_data(self):
         data_list = get_vl_data_list(self.dataset_name, Split.TRAIN)
@@ -86,7 +90,7 @@ class VQADataModule(ExpDataModuleBase):
         return data_list
 
     def train_transform(self) -> Callable:
-        return VQATransform(self.tokenizer, self.resize)
+        return VQATransform(self.tokenizer, self.resize, self.max_seq_len)
 
     def _collate_fn(self, batch: list[dict]):
         batch_vlm_inputs: list[dict] = []
