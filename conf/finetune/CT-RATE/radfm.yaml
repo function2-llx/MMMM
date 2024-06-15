@@ -1,0 +1,19 @@
+model:
+  class_path: _vqa.radfm.FinetuneRadFM
+data:
+  class_path: _rg.radfm.RadFMRGDataModule
+  init_args:
+    resize: [256, 256]
+logger:
+  class_path: lightning.pytorch.loggers.WandbLogger
+  init_args:
+    name: radfm_ct-rate
+    save_dir: output/finetune/CT-RATE
+    project: MMMM-FT
+lora:
+  class_path: peft.LoraConfig
+  init_args:
+    r: 64
+    lora_alpha: 8
+    lora_dropout: 0.05
+    use_rslora: true

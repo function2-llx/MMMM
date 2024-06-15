@@ -1,28 +1,29 @@
 from typing import Callable
 
-import einops
 import torch
 import torch.nn as nn
-from torchvision.io import read_image, ImageReadMode
-from torchvision.transforms.v2 import functional as tvtf
-from transformers import AutoModelForCausalLM, PreTrainedModel
+from PIL import Image
+from einops import rearrange, repeat
+from torchvision import transforms
 
+from RadFM.multimodality_model import MultiLLaMAForCausalLM
 from luolib.lightning import LightningModule
+from luolib.utils import load_pt_zst
 from scripts.finetune._utils import CE_IGNORE_INDEX
 from scripts.finetune._vqa._base import VQATransform, VQADataModule
 
 
-class FinetuneM3D(LightningModule):
+class FinetuneRadFM(LightningModule):
     def __init__(self, *, model_path: str):
         super().__init__()
-        dtype = torch.bfloat16
-        self.m3d_model: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
-            model_path,
-            torch_dtype=dtype,
-            trust_remote_code=True,
-        )
-        self.target_modules, self.modules_to_save = self.get_lora_modules_default(self.m3d_model)
-        self.m3d_model.gradient_checkpointing_enable({'use_reentrant': False})
+        self.radfm_model = MultiLLaMAForCausalLM(lang_model_path=model_path)
+        checkpoint = torch.load(f'{model_path}/pytorch_model.bin', map_location='cpu')
+        self.radfm_model.load_state_dict(checkpoint)
+
+        self.radfm_model.to("cuda")
+
+        self.target_modules, self.modules_to_save = self.get_lora_modules_default(self.radfm_model)
+
         self.train()
 
     def get_lora_modules_default(self, module: nn.Module, prefix: str = '', recursive: bool = True):
@@ -41,29 +42,58 @@ class FinetuneM3D(LightningModule):
         return target_modules, modules_to_save
 
     def training_step(self, batch, *args, **kwargs):
-        outputs = self.m3d_model(
-            input_ids=batch['vlm_inputs']['input_ids'],
-            images=batch['image'],
-            attention_mask=batch['vlm_inputs']['attention_mask'],
-            labels=batch['vlm_inputs']['labels'],
+        outputs = self.radfm_model(
+            batch['vlm_inputs']['input_ids'],
+            batch['image'],
+            batch['vlm_inputs']['attention_mask'],
+            batch['vlm_inputs']['labels'],
         )
         loss = outputs.loss
         self.log('train/loss', loss)
         return loss
 
-class M3DVQATransform(VQATransform):
+class RadFMVQATransform(VQATransform):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        special_tokens = {
+            'additional_special_tokens': [f'<image{i}>' for i in range(32)] + ['<image>', '</image>']
+        }
+        self.tokenizer.add_special_tokens(special_tokens)
+        self.tokenizer.pad_token_id = 0
+        self.tokenizer.bos_token_id = 1
+        self.tokenizer.eos_token_id = 2
 
     def __call__(self, data):
-        dtype = torch.bfloat16
-        image = read_image(data['image'], ImageReadMode.GRAY)
-        image = tvtf.to_dtype(image, torch.float32, scale=True)
-        image = tvtf.resize(image, self.resize)
-        image = einops.repeat(image, '1 h w -> 1 d h w', d=32)
-        image = image.to(dtype=dtype)
+        if data['image'].endswith('.pt'):
+            image = rearrange(torch.load(data['image']).float(), 'c d h w -> c h w d')
+            image = (image - image.min()) / (image.max() - image.min())
+        elif data['image'].endswith('.pt.zst'):
+            image = rearrange(load_pt_zst(data['image']).float(), 'c d h w -> c h w d')
+            image = (image - image.min()) / (image.max() - image.min())
+        else:
+            transform = transforms.ToTensor()
+            image = Image.open(data['image']).convert('RGB')
+            image = transform(image)
 
-        proj_out_num = 256
+        target_d, max_d = 4, 4
+        if len(image.shape) == 4:
+            max_d = max(image.shape[3], max_d)
+        for temp_d in range(4, 65, 4):
+            if abs(temp_d - max_d) < abs(target_d - max_d):
+                target_d = temp_d
+        if len(image.shape) == 3:
+            image = torch.nn.functional.interpolate(
+                repeat(image, 'c h w -> 1 c h w 1'), size=(512, 512, target_d)
+            )
+        else:
+            if image.shape[0] == 1:
+                image = torch.nn.functional.interpolate(
+                    repeat(image, '1 h w d -> 1 3 h w d'), size=(512, 512, target_d)
+                )
+            else:
+                image = torch.nn.functional.interpolate(
+                    repeat(image, 'c h w d -> 1 c h w d'), size=(512, 512, target_d)
+                )
 
         pairs = [(qa['question'], qa['answer']) for qa in data['vqa']]
         self.R.shuffle(pairs)
@@ -73,7 +103,7 @@ class M3DVQATransform(VQATransform):
         for i, (query, answer) in enumerate(pairs):
             prompt = f'Question: {query} Answer:'
             if i == 0:
-                prompt = "<im_patch>" * proj_out_num + prompt
+                prompt = '<image>' + ''.join([f'<image{i}>' for i in range(32)]) + '</image>' + prompt
             prompt_ids = torch.tensor(tokenizer.encode(prompt, add_special_tokens=False))
             answer_ids = torch.tensor(tokenizer.encode(answer, add_special_tokens=False))
             text_ids.extend([prompt_ids, answer_ids])
@@ -111,9 +141,9 @@ class M3DVQATransform(VQATransform):
         }
 
 
-class M3DVQADataModule(VQADataModule):
+class RadFMVQADataModule(VQADataModule):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
     def train_transform(self) -> Callable:
-        return M3DVQATransform(self.tokenizer, resize=self.resize)
+        return RadFMVQATransform(self.tokenizer, resize=self.resize, max_seq_len=None)
