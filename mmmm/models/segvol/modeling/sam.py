@@ -81,6 +81,7 @@ class Sam(nn.Module):
 
         masks_logits = [
             nnf.interpolate(m[None], image[i].shape[1:], mode='trilinear')[0]
+            if m.shape[0] > 0 else m  # dummy, do you like DDP?
             for i, m in enumerate(masks_logits_low_res)
         ]
         return masks_logits

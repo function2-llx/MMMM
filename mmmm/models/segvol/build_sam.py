@@ -21,6 +21,7 @@ def _build_sam(
     pt_patch_size: tuple3_t[int] | None = None,
     pt_pos_embed_shape: tuple3_t[int] | None = None,
     checkpoint: Path | None = None,
+    state_dict_key: str | None = None,
     weight_prefix: str = '',
 ) -> Sam:
     encoder_mlp_dim = embed_dim * encoder_mlp_ratio
@@ -53,6 +54,8 @@ def _build_sam(
 
     if checkpoint is not None:
         state_dict = torch.load(checkpoint)
+        if state_dict_key is not None:
+            state_dict = state_dict[state_dict_key]
         state_dict = {
             key[len(weight_prefix):]: value
             for key, value in state_dict.items() if key.startswith(weight_prefix) and not key.startswith(f'{weight_prefix}text_encoder')

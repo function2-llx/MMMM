@@ -141,7 +141,7 @@ class VLTransform(mt.RandomizableTransform):
         self.inference = inference
         self.target_tax = get_target_tax()
 
-    def __call__(self, data: dict) -> DataPoint:
+    def __call__(self, data: dict):
         conf = self.conf
         trans_conf = conf.vl_trans
         dataset: str = data['dataset']
@@ -264,19 +264,13 @@ class VLTransform(mt.RandomizableTransform):
             max_seq_len=conf.max_seq_len,
             bop_weight=1.,
         )
-        data: DataPoint = {
+        data = {
             'src': (dataset, str(image_path)),
             'image': image,
             'grounding_image': torch.zeros(3, *patch_size),
             'patch_size': patch_size,
             'pool_size': (pool_size_z, conf.pool_size_xy, conf.pool_size_xy),
             'vlm_inputs': vlm_inputs,
-            'masks': torch.zeros(0, *patch_size, dtype=torch.bool),
-            'boxes': torch.zeros(0, 6),
-            'semantic_masks': None,
-            'semantic_boxes': None,
-            'index_offsets': torch.empty(0, 2, dtype=torch.long),
-            'num_uncertain': torch.empty(0, dtype=torch.long),
-            'semantic': torch.empty(0, dtype=torch.bool),
+            'masks': torch.zeros(0, *patch_size),
         }
         return data

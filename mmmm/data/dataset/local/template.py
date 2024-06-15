@@ -403,7 +403,6 @@ def gen_brats_conv(
 def gen_anomaly_conv(
     pos_classes: list[str],
     neg_classes: list[str],
-    _complete_anomaly: bool,
     grounding: bool,
     neg_grounding: bool,
     tokenizer: MMMMTokenizer,

@@ -15,9 +15,9 @@ __all__ = [
     'MMMMDataModule',
 ]
 
-from .defs import CE_IGNORE_INDEX, DataPoint
+from .defs import CE_IGNORE_INDEX
 
-def _collate_fn(batch: list[DataPoint]):
+def _collate_fn(batch: list[dict]):
     vlm_inputs: list[dict | None] = []
     ret = {}
     for x in batch:
