@@ -1,2 +1,2 @@
 from .mmmm import MMMMForCausalLM, build
-from .segvol import InstanceSam, build_sam
+from .segvol import Sam, build_sam, InstanceSam, build_instance_sam
