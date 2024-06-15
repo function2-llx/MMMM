@@ -8,7 +8,7 @@ dependencies:
 - python=3.11
 - numpy
 - scikit-learn
-- pytorch::pytorch=2.3
+- pytorch::pytorch=2.3.0
 - pytorch::pytorch-cuda=12.1
 - pytorch::torchvision
 - ocl-icd-system  # https://github.com/conda-forge/openvino-feedstock/pull/73
