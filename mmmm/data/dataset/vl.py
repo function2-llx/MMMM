@@ -271,6 +271,9 @@ class VLTransform(mt.RandomizableTransform):
             'patch_size': patch_size,
             'pool_size': (pool_size_z, conf.pool_size_xy, conf.pool_size_xy),
             'vlm_inputs': vlm_inputs,
-            'masks': torch.zeros(0, *patch_size),
+            'masks': None,
+            'boxes': None,
+            'index_offsets': None,
+            'instance_mask': False,
         }
         return data
