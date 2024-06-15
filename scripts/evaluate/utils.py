@@ -5,7 +5,6 @@ from typing import OrderedDict
 import evaluate
 import json
 
-from regex import R
 from monai.transforms import apply_transform
 import numpy as np
 import pandas as pd

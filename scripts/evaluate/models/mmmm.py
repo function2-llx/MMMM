@@ -91,6 +91,7 @@ class MMMMTransform(mt.RandomizableTransform):
     def __init__(self, tokenizer, task):
         self.tokenizer = tokenizer
         self.precision = HalfPrecision('bf16-true')
+        self.task = task
 
     def __call__(self, data: dict):
         image, patch_size, pool_size, num_vision_tokens = image_transform(data['image'])
