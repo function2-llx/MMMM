@@ -50,7 +50,7 @@ class Evaluator:
                 mmmm_vl_evaluate,
             )
             packed = setup_mmmm(adapter)
-            transform = MMMMTransform(packed[1])
+            transform = MMMMTransform(packed[1], self.task)
             evaluate_fn = mmmm_vl_evaluate
         if self.model == 'radfm':
             from models.radfm import RadFMTransform, setup_radfm, radfm_vl_evaluate
@@ -59,7 +59,7 @@ class Evaluator:
             evaluate_fn = radfm_vl_evaluate
         elif self.model == 'm3d':
             from models.m3d import M3DTransform, setup_m3d, m3d_vl_evaluate
-            packed = setup_m3d(checkpoint, tokenizer)
+            packed = setup_m3d(checkpoint, adapter, tokenizer)
             transform = M3DTransform(packed[1])
             evaluate_fn = m3d_vl_evaluate
         elif self.model == 'llavamed':

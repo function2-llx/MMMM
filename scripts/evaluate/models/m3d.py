@@ -1,6 +1,7 @@
 from einops import repeat, reduce
 from monai import transforms as mt
 from PIL import Image
+from peft import PeftModel
 import torch
 from tqdm import tqdm
 from transformers import AutoTokenizer, AutoModelForCausalLM
@@ -10,7 +11,7 @@ from luolib.utils.zstd import load_pt_zst
 from scripts.evaluate.utils import dump_results
 
 
-def setup_m3d(checkpoint: str, tokenizer: str):
+def setup_m3d(checkpoint: str, adapter: str, tokenizer: str):
     model = AutoModelForCausalLM.from_pretrained(
         checkpoint, torch_dtype=torch.bfloat16, trust_remote_code=True
     )
@@ -21,6 +22,9 @@ def setup_m3d(checkpoint: str, tokenizer: str):
         use_fast=False,
         trust_remote_code=True,
     )
+    if adapter:
+        print('fuck')
+        model = PeftModel.from_pretrained(model, adapter)
 
     model = model.to('cuda')
     model = model.eval()
@@ -50,10 +54,19 @@ class M3DTransform(mt.RandomizableTransform):
 
         image = torch.nn.functional.interpolate(image, size=(32, 256, 256))
 
-        language = self.tokenizer(
-            '<im_patch>' * 256 + ' ' + data['question'],
-            return_tensors='pt',
-        )['input_ids']
+        # language = self.tokenizer(
+        #     '<im_patch>' * 256 + data['question'],
+        #     return_tensors='pt',
+        # )['input_ids']
+
+        prompt_ids = torch.tensor(self.tokenizer.encode('<im_patch>' * 256 + data['question'], add_special_tokens=False))
+        input_ids = torch.cat([
+            torch.tensor([self.tokenizer.bos_token_id]).unsqueeze(1),
+            prompt_ids.unsqueeze(1),
+        ])
+
+        input_ids = input_ids.reshape(input_ids.shape[-1], input_ids.shape[0])
+        language = input_ids
 
         return {
             'vision': image,

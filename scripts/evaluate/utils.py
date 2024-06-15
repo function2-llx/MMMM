@@ -4,6 +4,8 @@ import sys
 from typing import OrderedDict
 import evaluate
 import json
+
+from regex import R
 from monai.transforms import apply_transform
 import numpy as np
 import pandas as pd
@@ -81,9 +83,7 @@ class ReportTestDataset(Dataset):
             self.dataset = [
                 {
                     'image': image,
-                    'question': (
-                        'Can you provide a radiology report for this medical image?'
-                    ),
+                    'question': 'Please write a radiology report for me:',
                     'answer': (x['processed_report']),
                 }
                 for x in json.load(f)
@@ -595,19 +595,18 @@ class CTMetrics:
         prediction_labels[prediction_labels >= 0.5] = 1
         prediction_labels[prediction_labels < 0.5] = 0
 
-        print(prediction_labels)
-
         reference_labels = pd.read_csv(
             ORIGIN_VL_DATA_ROOT
             / 'CT-RATE'
             / 'dataset'
             / 'multi_abnormality_labels'
             / 'valid_predicted_labels.csv'
-        )
+        )[RADBERT_CONDITIONS].to_numpy()
 
         f1s = f1_score(prediction_labels, reference_labels, average=None)
         for i, condition in enumerate(RADBERT_CONDITIONS):
             df[condition.lower() + ' radbert prediction'] = prediction_labels[:, i]
+            df[condition.lower() + ' radbert reference'] = reference_labels[:, i]
             summary[condition.lower() + ' radbert f1'] = f1s[i]
 
         summary['macro radbert f1'] = f1_score(prediction_labels, reference_labels, average='macro')

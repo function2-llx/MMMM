@@ -99,7 +99,7 @@ class LlavaNextTransform(mt.RandomizableTransform):
         if self.task == 'vqa':
             prompt = '<image>\nQuestion: ' + data['question'] + ' Answer:'
         elif self.task == 'report':
-            prompt = f'<image>\nPlease write a radiology report for me:'
+            prompt = f'<image>\n' + data['question']
 
         inputs = self.processor(prompt, image, return_tensors='pt')
 

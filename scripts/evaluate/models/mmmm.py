@@ -88,12 +88,14 @@ def image_transform(image_path: PathLike):
 
 
 class MMMMTransform(mt.RandomizableTransform):
-    def __init__(self, tokenizer):
+    def __init__(self, tokenizer, task):
         self.tokenizer = tokenizer
         self.precision = HalfPrecision('bf16-true')
 
     def __call__(self, data: dict):
         image, patch_size, pool_size, num_vision_tokens = image_transform(data['image'])
+        if self.task == 'report':
+            data['question'] = 'Can you provide a radiology report for this medical image?'
         vlm_inputs, _ = prepare_vlm_inputs(
             [ConvTurn(data['question'], '')],
             self.tokenizer,

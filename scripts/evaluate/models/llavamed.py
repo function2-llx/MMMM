@@ -85,7 +85,7 @@ class LlavaMedTransform(mt.RandomizableTransform):
         if self.task == 'vqa':
             prompt = f'{DEFAULT_IMAGE_TOKEN}\nQuestion: {data["question"]} Answer:'
         elif self.task == 'report':
-            prompt = f'{DEFAULT_IMAGE_TOKEN}\nPlease write a radiology report for me:'
+            prompt = f'{DEFAULT_IMAGE_TOKEN}\n' + data['question']
         language = torch.cat([
             torch.tensor([self.tokenizer.bos_token_id]).unsqueeze(1),
             torch.tensor(self.tokenizer.encode(prompt, add_special_tokens=False)).unsqueeze(1),
