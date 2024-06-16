@@ -141,7 +141,8 @@ def process(dataset: str, num_samples: tuple[int, int, int] = None, is_first: bo
                 data[j]['annotation'] = generated_text
             else:
                 data[j]['annotation-filtered'] = generated_text
-        (output_dir / f'{split}.json').write_bytes(orjson.dumps(data, option=orjson.OPT_INDENT_2))
+        output_path = output_dir / (f'{split}.json' if is_first else f'{split}-filtered.json')
+        output_path.write_bytes(orjson.dumps(data, option=orjson.OPT_INDENT_2))
 
 def main():
     global llm
