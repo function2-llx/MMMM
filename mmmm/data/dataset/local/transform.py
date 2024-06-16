@@ -287,6 +287,7 @@ class LocalTransform(mt.Randomizable):
             boxes = None
             index_offsets = None
         image, sem_masks, boxes = self._spatial_transform(image, sem_masks, boxes, resize_shape, stride)
+        boxes = norm_boxes(boxes, image.shape[1:])
         if image.shape[0] == 1:
             # ensure RGB
             image = einops.repeat(image, '1 ... -> c ...', c=3).contiguous()
