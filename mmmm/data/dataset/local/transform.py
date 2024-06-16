@@ -140,15 +140,18 @@ class LocalTransform(mt.Randomizable):
         resize: tuple3_t[int],
         stride: tuple3_t[int],
     ) -> tuple[torch.Tensor, torch.BoolTensor | None, torch.LongTensor | None]:
+        keys = ['image']
+        if masks is not None:
+            keys.append('masks')
         affine_trans = mt.Compose(
             [
-                mt.ResizeD(['image', 'masks'], resize, mode=InterpolateMode.TRILINEAR),
-                mt.DivisiblePadD(['image', 'masks'], stride),
+                mt.ResizeD(keys, resize, mode=InterpolateMode.TRILINEAR),
+                mt.DivisiblePadD(keys, stride),
                 *[
-                    mt.RandFlipD(['image', 'masks'], 0.5, i, allow_missing_keys=True)
+                    mt.RandFlipD(keys, 0.5, i)
                     for i in range(3)
                 ],
-                mt.RandRotate90D(['image', 'masks'], 0.75, spatial_axes=(1, 2), allow_missing_keys=True),
+                mt.RandRotate90D(keys, 0.75, spatial_axes=(1, 2)),
             ],
             lazy=True,
             overrides={
