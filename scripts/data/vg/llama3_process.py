@@ -161,7 +161,7 @@ def main():
         # ('MIMIC-CXR', (10, 10, 10)),
         # ('CT-RATE', (10, 10, 10)),
         ('MIMIC-CXR', (-1, -1, 5000)),
-        ('CT-RATE', (-1, -1, 5000)),
+        ('CT-RATE', (-1, -1, 2500)),
     ]
     for dataset, num_samples in datasets:
         print(dataset)

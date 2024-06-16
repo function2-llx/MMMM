@@ -1,25 +1,18 @@
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
 
-import einops
 import torch
 from jsonargparse import class_from_function
 from peft import PeftModel
-from scipy.optimize import linear_sum_assignment
 from torch import nn
 from torch.nn import functional as nnf
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
 from luolib.lightning import LightningModule
-from luolib.losses import bce_neg, bce_pos, zero_loss
+from luolib.losses import zero_loss
 from luolib.types import PathLike, param3_t, tuple2_t, tuple3_t
-from luolib.utils.misc import pairwise_forward
-from monai.data import box_pair_giou, convert_box_mode
-from monai.data.box_utils import CenterSizeMode
 
-from mmmm.data.defs import Batch
 from mmmm.tokenizer import MMMMTokenizer
 from mmmm.utils import apply_prefix, get_lora_modules_default, get_lora_modules_finetune_all
 from .cogvlm import CogVLMConfig, CogVLMForCausalLM

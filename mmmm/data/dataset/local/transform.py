@@ -257,13 +257,9 @@ class LocalTransform(mt.Randomizable):
                 trans_conf.max_vision_tokens // tokens_z,
             ),
         )
-        sem_masks = torch.zeros(len(grounding_classes), *image.shape[1:])
-        for i, class_name in enumerate(grounding_classes):
-            if target := targets.get(class_name):
-                target: Sparse.Target
-                sem_masks[i] = einops.reduce(masks[slice(*target.index_offset)], 'c ... -> ...', 'any')
         if dataset_name == 'VinDr-CXR':
             # Do you like hard coding? Yes, I don't.
+            sem_masks = None
             boxes_list = []
             index_offsets = torch.empty(len(grounding_classes), 2, dtype=torch.long)
             index_offset = 0
@@ -280,6 +276,11 @@ class LocalTransform(mt.Randomizable):
             else:
                 boxes = torch.cat(boxes_list)
         else:
+            sem_masks = torch.zeros(len(grounding_classes), *image.shape[1:])
+            for i, class_name in enumerate(grounding_classes):
+                if target := targets.get(class_name):
+                    target: Sparse.Target
+                    sem_masks[i] = einops.reduce(masks[slice(*target.index_offset)], 'c ... -> ...', 'any')
             boxes = None
             index_offsets = None
         image, sem_masks, boxes = self._spatial_transform(image, sem_masks, boxes, resize_shape, stride)
