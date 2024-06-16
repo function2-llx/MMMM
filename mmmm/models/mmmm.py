@@ -379,14 +379,14 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
 
 build = class_from_function(MMMMForCausalLM.build, MMMMForCausalLM)
 
-def from_pretrained(conf_path: PathLike, adapter_dir: PathLike) -> tuple[MMMMForCausalLM, MMMMTokenizer]:
+def from_pretrained(conf_path: PathLike, adapter_dir: PathLike, trainable: bool = False) -> tuple[MMMMForCausalLM, MMMMTokenizer]:
     from jsonargparse import ArgumentParser
     parser = ArgumentParser()
     parser.add_subclass_arguments(MMMMForCausalLM, 'model')
     args = parser.parse_args(['--model', str(conf_path)])
     args = parser.instantiate_classes(args)
     model: MMMMForCausalLM = args.model
-    peft_model = PeftModel.from_pretrained(model, adapter_dir)
+    peft_model = PeftModel.from_pretrained(model, adapter_dir, is_trainable=trainable)
     model.set_peft_model(peft_model)
     tokenizer = model.tokenizer
     return model, tokenizer

@@ -1,0 +1,12 @@
+model:
+  class_path: _vqa.mmmm.FinetuneMMMM
+data:
+  class_path: _vqa.mmmm.MMMMVQADataModule
+  init_args:
+    resize: [224, 224]
+logger:
+  class_path: lightning.pytorch.loggers.WandbLogger
+  init_args:
+    name: mmmm_slake
+    save_dir: output/finetune/Slake
+    project: MMMM-FT
