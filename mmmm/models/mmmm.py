@@ -101,6 +101,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
                 nn.ReLU(inplace=True),
                 nn.Linear(self.config.hidden_size, sam.prompt_dim),
             )
+            isam_loss.mask_loss = mask_loss
         if freeze_vision:
             self.model.vision.requires_grad_(False)
         self.model.config.lora_lang = not freeze_vision
@@ -196,11 +197,11 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         log_dict = {}
         for i in range(batch_size):
             if boxes_label[i] is not None:
-                if masks_label[i] is None:
+                if masks_label[i] is not None:
                     raise NotImplementedError
                 loss_, log_dict_ = self.isam_loss.compute_loss(
-                    torch.empty(*boxes_reg[i].shape[:2], 0, 0, 0),
-                    torch.empty(*boxes_reg[i].shape[:2], 0, 0, 0),
+                    boxes_reg[i].new_empty((*boxes_reg[i].shape[:2], 0, 0, 0)),
+                    boxes_reg[i].new_empty((*boxes_reg[i].shape[:2], 0, 0, 0)),
                     boxes_reg[i],
                     disc_logit[i],
                     None,
@@ -211,7 +212,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
                 log_dict_ = self.mask_loss(masks_logits[i][:, None], masks_label[i][:, None], return_dict=True)
                 loss_ = log_dict_.pop('total')
             else:
-                loss_ = zero_loss(disc_logit[i])
+                loss_ = zero_loss(masks_logits[i] if disc_logit[i] is None else disc_logit[i])
                 log_dict_ = {}
             loss_list.append(loss_)
             for k, v in log_dict_.items():
