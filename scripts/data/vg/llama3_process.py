@@ -1,3 +1,4 @@
+import numpy as np
 import orjson
 import torch
 from jsonargparse import ArgumentParser
@@ -16,13 +17,7 @@ sampling_params = SamplingParams(
     stop=["<|eot_id|>"],
 )
 
-llm = LLM(
-    model=model_id,
-    tensor_parallel_size=torch.cuda.device_count(),
-    disable_custom_all_reduce=True,
-    max_model_len=2048,
-    enable_prefix_caching=True,
-)
+llm: LLM
 
 anatomy_lsit = [
     "aorta",
@@ -119,19 +114,21 @@ Your output:
 
 def process(dataset: str, num_samples: tuple[int, int, int] = None, is_first: bool = True):
     output_dir = PROCESSED_VG_DATA_ROOT / dataset
-    llm.get_tokenizer()
-
+    # llm.get_tokenizer()
     output_dir.mkdir(exist_ok=True, parents=True)
     src_dir = (PROCESSED_VL_DATA_ROOT if is_first else PROCESSED_VG_DATA_ROOT) / dataset
     for i, split in enumerate(['validate', 'test', 'train']):
-        if not (data_path := src_dir / f'{split}.json').exists():
+        if not (data_path := src_dir / f'{split}-processed.json').exists():
+            print(f'split file: "{data_path}" not found')
             continue
         data = orjson.loads(data_path.read_bytes())
+        R = np.random.RandomState(42)
+        R.shuffle(data)
         if num_samples[i] >= 0:
             data = data[:num_samples[i]]
         prompts = []
         for item in data:
-            user_prompt = llama3_user_prompt(item['findings'])
+            user_prompt = llama3_user_prompt(item['processed_report'])
             prompt = (system_prompt1 if is_first else system_prompt2) + '\n' + user_prompt
             prompts.append(prompt)
         responses = llm.generate(prompts, sampling_params)
@@ -141,16 +138,28 @@ def process(dataset: str, num_samples: tuple[int, int, int] = None, is_first: bo
             # generated_text = generated_text.replace("Output: ", '')
             # generated_text = generated_text.replace("```", '')
             if is_first:
-                data[j]['findings-ann'] = generated_text
+                data[j]['annotation'] = generated_text
             else:
-                data[j]['findings-ann-filtered'] = generated_text
+                data[j]['annotation-filtered'] = generated_text
         (output_dir / f'{split}.json').write_bytes(orjson.dumps(data, option=orjson.OPT_INDENT_2))
 
 def main():
+    global llm
+
+    llm = LLM(
+        model=model_id,
+        tensor_parallel_size=torch.cuda.device_count(),
+        disable_custom_all_reduce=True,
+        max_model_len=2048,
+        enable_prefix_caching=True,
+    )
+
     parser = ArgumentParser()
     parser.add_argument('--first', action='store_true')
     args = parser.parse_args()
     datasets = [
+        # ('MIMIC-CXR', (10, 10, 10)),
+        # ('CT-RATE', (10, 10, 10)),
         ('MIMIC-CXR', (-1, -1, 5000)),
         ('CT-RATE', (-1, -1, 5000)),
     ]

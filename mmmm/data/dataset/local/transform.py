@@ -275,7 +275,10 @@ class LocalTransform(mt.Randomizable):
                 else:
                     _num = 0
                 index_offsets[i] = torch.tensor((index_offset, index_offset := index_offset + _num))
-            boxes = torch.cat(boxes_list)
+            if len(boxes_list) == 0:
+                boxes = torch.empty(0, 6, dtype=torch.long)
+            else:
+                boxes = torch.cat(boxes_list)
         else:
             boxes = None
             index_offsets = None

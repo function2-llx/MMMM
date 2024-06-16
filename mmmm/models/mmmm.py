@@ -202,8 +202,9 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         loss_list = []
         log_dict = {}
         for i in range(batch_size):
-            if masks_label[i] is None:
-                assert boxes_reg[i] is not None
+            if boxes_label[i] is not None:
+                if masks_label[i] is None:
+                    raise NotImplementedError
                 loss_, log_dict_ = self.isam_loss.compute_loss(
                     torch.empty(*boxes_reg[i].shape[:2], 0, 0, 0),
                     torch.empty(*boxes_reg[i].shape[:2], 0, 0, 0),
@@ -213,9 +214,12 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
                     boxes_label[i],
                     index_offsets[i],
                 )
-            else:
-                log_dict_ = self.mask_loss.forward(masks_logits[i], masks_label[i], return_dict=True)
+            elif masks_label[i] is not None and masks_label[i].shape[0] > 0:
+                log_dict_ = self.mask_loss(masks_logits[i][:, None], masks_label[i][:, None], return_dict=True)
                 loss_ = log_dict_.pop('total')
+            else:
+                loss_ = zero_loss(disc_logit[i])
+                log_dict_ = {}
             loss_list.append(loss_)
             for k, v in log_dict_.items():
                 log_dict.setdefault(k, []).append(v)
@@ -332,7 +336,6 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             },
         )
         return model_inputs
-
 
     def _inference_path(self, input_ids, token_type_ids, global_enc_images, attention_masks):
         # Process and return inference output

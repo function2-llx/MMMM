@@ -31,6 +31,7 @@ dependencies:
 - pydicom
 - itk
 - zstandard
+- inflect
 - pip
 - pip:
   - jsonargparse[signatures, omegaconf]

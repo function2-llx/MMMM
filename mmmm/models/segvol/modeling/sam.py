@@ -9,7 +9,7 @@ from scipy.optimize import linear_sum_assignment
 from torch import nn
 from torch.nn import functional as nnf
 
-from luolib.losses import sigmoid_focal_loss
+from luolib.losses import sigmoid_focal_loss, zero_loss
 from luolib.types import tuple3_t
 from luolib.utils import pairwise_forward
 from monai.data import box_pair_giou, convert_box_mode
@@ -252,7 +252,7 @@ class InstanceSamLoss(nn.Module):
         num_targets = disc_logit.shape[0]
         # tokens for vg might be truncated by max_seq_len
         assert num_targets <= index_offsets.shape[0]
-        loss = torch.tensor(0., device=disc_logit.device)
+        loss = zero_loss(disc_logit)
         log_dict = {}
         if num_targets > 0:
             # convert to float since it is used for loss calculation
