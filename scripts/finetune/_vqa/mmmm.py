@@ -17,36 +17,14 @@ class FinetuneMMMM(LightningModule):
     def __init__(self, *, model_path: str):
         super().__init__()
 
-        adapter_path = "/data/MMMM/output/vlm-post/run-20240615_035211-cjw9e7jo/checkpoint/step=6000.ckpt/adapter"
+        adapter_path = "/root/dataDisk/adapter/"
+
         model, tokenizer = from_pretrained('conf/model.yaml', adapter_path, True)
 
-        self.mmmm_model: MMMMForCausalLM = model.to('cuda')
-        # self.target_modules, self.modules_to_save = self.get_lora_modules_default(self.mmmm_model)
+        self.mmmm_model: MMMMForCausalLM = model
+        # self.mmmm_model.gradient_checkpointing_enable({'use_reentrant': False})
+        # self.train()
 
-        # pos_embed = self.mmmm_model.model.vision.patch_embedding.position_embedding.weight
-        # cls_pos_embed, pos_embed = pos_embed[0:1], pos_embed[1:]
-        # pos_embed = einops.rearrange(pos_embed, '(h w) c -> 1 c h w', h=35, w=35)
-        # import torch.nn.functional as nnf
-        # pos_embed = nnf.interpolate(pos_embed, (16, 16), mode='area')
-        # pos_embed = torch.cat([cls_pos_embed, einops.rearrange(pos_embed, '1 c h w ->(h w) c')])
-        # self.mmmm_model.model.vision.patch_embedding.position_embedding = nn.Embedding(
-        #     *pos_embed.shape[:2], _weight=pos_embed,
-        # )
-
-    # def get_lora_modules_default(self, module: nn.Module, prefix: str = '', recursive: bool = True):
-    #     target_modules, modules_to_save = [], []
-    #
-    #     def dfs(m: nn.Module, prefix: str):
-    #         if isinstance(m, nn.Linear):
-    #             target_modules.append(prefix)  # Linear layers as LoRA targets
-    #         elif isinstance(m, nn.Embedding):
-    #             modules_to_save.append(prefix)  # Embedding layers to save
-    #
-    #         for name, child in m.named_children():
-    #             dfs(child, f"{prefix}.{name}" if prefix else name)
-    #
-    #     dfs(module, prefix)
-    #     return target_modules, modules_to_save
 
     def training_step(self, batch, *args, **kwargs):
         input_ids = batch['vlm_inputs']['input_ids']

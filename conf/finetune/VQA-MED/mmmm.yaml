@@ -3,7 +3,9 @@ model:
 data:
   class_path: _vqa.mmmm.MMMMVQADataModule
   init_args:
-    resize: [224, 224]
+    resize: [384, 384]
+    dataloader:
+      train_batch_size: 4
 logger:
   class_path: lightning.pytorch.loggers.WandbLogger
   init_args:

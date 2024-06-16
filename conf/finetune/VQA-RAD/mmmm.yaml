@@ -5,7 +5,7 @@ data:
   init_args:
     resize: [384, 384]
     dataloader:
-      train_batch_size: 1
+      train_batch_size: 4
 logger:
   class_path: lightning.pytorch.loggers.WandbLogger
   init_args:

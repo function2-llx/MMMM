@@ -18,9 +18,10 @@ class FinetuneRadFM(LightningModule):
         super().__init__()
         self.radfm_model = MultiLLaMAForCausalLM(lang_model_path=model_path)
         checkpoint = torch.load(f'{model_path}/pytorch_model.bin', map_location='cpu')
+
         self.radfm_model.load_state_dict(checkpoint)
 
-        self.radfm_model.to("cuda")
+        self.radfm_model.to(torch.bfloat16)
 
         self.target_modules, self.modules_to_save = self.get_lora_modules_default(self.radfm_model)
 
