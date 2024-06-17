@@ -19,7 +19,7 @@ class FinetuneM3D(LightningModule):
         self.m3d_model: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             model_path,
             torch_dtype=dtype,
-            trust_remote_code=True
+            trust_remote_code=True,
         )
         self.target_modules, self.modules_to_save = self.get_lora_modules_default(self.m3d_model)
         self.m3d_model.gradient_checkpointing_enable({'use_reentrant': False})
@@ -52,9 +52,6 @@ class FinetuneM3D(LightningModule):
         return loss
 
 class M3DVQATransform(VQATransform):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
     def __call__(self, data):
         dtype = torch.bfloat16
         image = read_image(data['image'], ImageReadMode.GRAY)
@@ -112,8 +109,5 @@ class M3DVQATransform(VQATransform):
 
 
 class M3DVQADataModule(VQADataModule):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
     def train_transform(self) -> Callable:
-        return M3DVQATransform(self.tokenizer, resize=self.resize)
+        return M3DVQATransform(self.tokenizer, self.resize, self.max_seq_len)

@@ -4,157 +4,113 @@ init_args:
     datasets:
     - name: ACDC
       type: local
-      weight: 0.01
     - name: AMOS22
       type: local
-      weight: 0.01
     - name: ATLAS
       type: local
-      weight: 0.01
     - name: ATM22
       type: local
-      weight: 0.01
     - name: autoPET-III
       type: local
-      weight: 0.01
+      weight: 0.2
     - name: BraTS2023-GLI
       type: local
-      weight: 0.01
+      weight: 0.2
     - name: BraTS2023-MEN
       type: local
-      weight: 0.01
+      weight: 0.2
     - name: BraTS2023-MET
       type: local
-      weight: 0.01
+      weight: 0.2
     - name: BraTS2023-PED
       type: local
-      weight: 0.01
+      weight: 0.2
     - name: BraTS2023-SSA
       type: local
-      weight: 0.01
+      weight: 0.2
     - name: BTCV-Abdomen
       type: local
-      weight: 0.01
     - name: BTCV-Cervix
       type: local
-      weight: 0.01
     - name: BUSI
       type: local
-      weight: 0.01
     - name: CHAOS
       type: local
-      weight: 0.01
     - name: CT-ORG
       type: local
-      weight: 0.01
     - name: CTPelvic1K
       type: local
-      weight: 0.01
+      weight: 0.2
     - name: CTSpine1K
       type: local
-      weight: 0.01
+      weight: 0.2
     - name: HaN-Seg
       type: local
-      weight: 0.01
     - name: ISLES22
       type: local
-      weight: 0.01
     - name: LiTS
       type: local
-      weight: 0.01
     - name: LIDC-IDRI
       type: local
-      weight: 0.01
     - name: LNQ2023
       type: local
-      weight: 0.01
     - name: MRSpineSeg
       type: local
-      weight: 0.01
     - name: MSD-Task02_Heart
       type: local
-      weight: 0.01
     - name: MSD-Task03_Liver
       type: local
-      weight: 0.01
     - name: MSD-Task04_Hippocampus
       type: local
-      weight: 0.01
     - name: MSD-Task05_Prostate
       type: local
-      weight: 0.01
     - name: MSD-Task06_Lung
       type: local
-      weight: 0.01
     - name: MSD-Task07_Pancreas
       type: local
-      weight: 0.01
     - name: MSD-Task08_HepaticVessel
       type: local
-      weight: 0.01
     - name: MSD-Task09_Spleen
       type: local
-      weight: 0.01
     - name: MSD-Task10_Colon
       type: local
-      weight: 0.01
     - name: PARSE2022
       type: local
-      weight: 0.01
     - name: PENGWIN-T1
       type: local
-      weight: 0.01
     - name: Prostate158
       type: local
-      weight: 0.01
     - name: RibFrac
       type: local
-      weight: 0.01
     - name: SEG.A.2023
       type: local
-      weight: 0.01
     - name: SegRap2023
       type: local
-      weight: 0.01
     - name: SegTHOR
       type: local
-      weight: 0.01
     - name: TotalSegmentator
       type: local
-      weight: 0.01
     - name: VerSe
       type: local
-      weight: 0.01
-    - name: VinDr-CXR
-      type: local
-      weight: 0.02
     - name: WORD
       type: local
-      weight: 0.01
+    - name: VinDr-CXR
+      type: local
+      weight: 0.67
     - name: MIMIC-CXR
       type: vl
-    - name: Radiopaedia
-      type: vl
-    - name: VQA-RAD
-      type: vl
-      weight: 5
-    - name: OpenI
-      type: vl
-      weight: 3
-    - name: Slake
-      type: vl
-      weight: 3
+      weight: 0.1
     - name: CT-RATE
       type: vl
-      weight: 2.5
-    - name: VQA-Med
+      weight: 0.2
+    - name: ROCOv2
       type: vl
-      weight: 3
+      weight: 0.02
     base_vit_patch_size_z: 16
     vit_patch_size_xy: 16
     pool_size_xy: 2
     base_pool_size_z: 2
-    max_seq_len: 768
+    max_seq_len: 1024
     mimic_cxr_neg_weight: 0.15
     vl_trans:
       max_tokens: 144
@@ -163,10 +119,8 @@ init_args:
     local_trans:
       max_vision_tokens: 144
       max_tokens_z: 4
-      scale_xy: [0.9, 3]
-      scale_xy_p: 0.9
       num_pos: 12
       num_neg: 4
-      grounding_prob: 0.5
+      grounding_prob: 0.95
   dataloader:
     train_batch_size: 8

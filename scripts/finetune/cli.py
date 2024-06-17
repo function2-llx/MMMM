@@ -2,9 +2,10 @@ from lightning.pytorch.cli import LightningArgumentParser
 from transformers import AutoTokenizer
 
 from _vqa.cogvlm import FinetuneCogVLM
-from _vqa.llavanext import FinetuneLlavaNEXT
-from _vqa.llavamed import FinetuneLlavaMed
+# from _vqa.llavanext import FinetuneLlavaNEXT
+# from _vqa.llavamed import FinetuneLlavaMed
 from _vqa.m3d import FinetuneM3D
+from _vqa.radfm import FinetuneRadFM
 from luolib.datamodule import ExpDataModuleBase
 from luolib.lightning import LightningModule
 from luolib.lightning.cli import LightningCLI
@@ -30,6 +31,8 @@ class CLI(LightningCLI):
             self.trainer_class = MyPeftTrainer
         super().instantiate_classes()
         tokenizer = AutoTokenizer.from_pretrained(self.active_config_init.tokenizer)
+        # if isinstance(self.model, FinetuneM3D):
+        #     tokenizer = AutoTokenizer.from_pretrained(self.active_config_init.tokenizer, model_max_length=1024)
         self.datamodule.tokenizer = tokenizer
         if self.active_config_init.lora:
             model = self.model
@@ -40,15 +43,18 @@ class CLI(LightningCLI):
             if isinstance(model, FinetuneCogVLM):
                 peft_model = get_peft_model(model.cogvlm_model, lora_config)
                 model.set_peft_model(peft_model, prefix='cogvlm_model')
-            elif isinstance(model, FinetuneLlavaNEXT):
-                peft_model = get_peft_model(model.llavaN_model, lora_config)
-                model.set_peft_model(peft_model, prefix='llavaN_model')
-            elif isinstance(model, FinetuneLlavaMed):
-                peft_model = get_peft_model(model.llavaM_model, lora_config)
-                model.set_peft_model(peft_model, prefix='llavaM_model')
+            # elif isinstance(model, FinetuneLlavaNEXT):
+            #     peft_model = get_peft_model(model.llavaN_model, lora_config)
+            #     model.set_peft_model(peft_model, prefix='llavaN_model')
+            # elif isinstance(model, FinetuneLlavaMed):
+            #     peft_model = get_peft_model(model.llavaM_model, lora_config)
+            #     model.set_peft_model(peft_model, prefix='llavaM_model')
             elif isinstance(model, FinetuneM3D):
                 peft_model = get_peft_model(model.m3d_model, lora_config)
                 model.set_peft_model(peft_model, prefix='m3d_model')
+            elif isinstance(model, FinetuneRadFM):
+                peft_model = get_peft_model(model.radfm_model, lora_config)
+                model.set_peft_model(peft_model, prefix='radfm_model')
             else:
                 raise NotImplementedError
             # if (lora_adapter_path := config.lora_adapter_path) is not None:

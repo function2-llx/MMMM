@@ -1,14 +1,14 @@
 model:
-  class_path: _vqa.m3d.FinetuneM3D
+  class_path: _vqa.radfm.FinetuneRadFM
 data:
-  class_path: _rg.m3d.M3DRGDataModule
+  class_path: _rg.radfm.RadFMRGDataModule
   init_args:
     resize: [256, 256]
 logger:
   class_path: lightning.pytorch.loggers.WandbLogger
   init_args:
-    name: m3d_openi
-    save_dir: output/finetune/OpenI
+    name: radfm_ct-rate
+    save_dir: output/finetune/CT-RATE
     project: MMMM-FT
 lora:
   class_path: peft.LoraConfig

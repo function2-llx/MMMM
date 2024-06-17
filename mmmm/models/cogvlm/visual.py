@@ -40,7 +40,7 @@ class PatchEmbedding(nn.Module):
             h, w = self.pt_pos_embed_shape
             pos_embed = einops.rearrange(pos_embed, '(h w) c -> 1 c h w', h=h, w=w)
             if self.pt_pos_embed_shape != self.pos_embed_shape[-2:]:
-                print(f'resample {prefix} pos_embed: {self.pt_pos_embed_shape} -> {self.pos_embed_shape[-2:]}')
+                print(f'resample {prefix}pos_embed: {self.pt_pos_embed_shape} -> {self.pos_embed_shape[-2:]}')
                 pos_embed = spadop.resample(pos_embed, self.pos_embed_shape[-2:])
             pos_embed = einops.repeat(pos_embed, '1 c h w -> 1 c d h w', d=self.pos_embed_shape[0])
             state_dict[f'{prefix}cls_pos_embed'] = cls_pos_embed

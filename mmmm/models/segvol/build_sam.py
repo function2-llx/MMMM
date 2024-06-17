@@ -2,6 +2,7 @@ from pathlib import Path
 
 from jsonargparse import class_from_function
 import torch
+from torch import nn
 
 from luolib.types import tuple3_t
 
@@ -21,6 +22,7 @@ def _build_sam(
     pt_patch_size: tuple3_t[int] | None = None,
     pt_pos_embed_shape: tuple3_t[int] | None = None,
     checkpoint: Path | None = None,
+    state_dict_key: str | None = None,
     weight_prefix: str = '',
 ) -> Sam:
     encoder_mlp_dim = embed_dim * encoder_mlp_ratio
@@ -50,20 +52,29 @@ def _build_sam(
             transformer_dim=embed_dim,
         ),
     )
+    _load_checkpoint(sam, checkpoint, state_dict_key, weight_prefix, 'SAM')
+    return sam
 
-    if checkpoint is not None:
-        state_dict = torch.load(checkpoint)
+def _load_checkpoint(
+    model: nn.Module,
+    ckpt_path: Path,
+    state_dict_key: str | None,
+    weight_prefix: str,
+    name: str,
+):
+    if ckpt_path is not None:
+        state_dict = torch.load(ckpt_path)
+        if state_dict_key is not None:
+            state_dict = state_dict[state_dict_key]
         state_dict = {
             key[len(weight_prefix):]: value
             for key, value in state_dict.items() if key.startswith(weight_prefix) and not key.startswith(f'{weight_prefix}text_encoder')
         }
-        missing_keys, unexpected_keys = sam.load_state_dict(state_dict, strict=False)
-        print(f'load pre-trained SAM checkpoint from {checkpoint}')
+        missing_keys, unexpected_keys = model.load_state_dict(state_dict, strict=False)
+        print(f'load pre-trained {name} checkpoint from {ckpt_path}')
         if missing_keys or unexpected_keys:
             print('missing:', missing_keys)
             print('unexpected:', unexpected_keys)
-
-    return sam
 
 def _build_instance_sam(
     *,
@@ -79,6 +90,7 @@ def _build_instance_sam(
     pt_patch_size: tuple3_t[int] | None = None,
     pt_pos_embed_shape: tuple3_t[int] | None = None,
     checkpoint: Path | None = None,
+    state_dict_key: str | None = None,
     weight_prefix: str = '',
 ) -> InstanceSam:
     encoder_mlp_dim = embed_dim * encoder_mlp_ratio
@@ -108,19 +120,9 @@ def _build_instance_sam(
             transformer_dim=embed_dim,
         ),
     )
-
-    if checkpoint is not None:
-        state_dict = torch.load(checkpoint)
-        state_dict = {
-            key[len(weight_prefix):]: value
-            for key, value in state_dict.items() if key.startswith(weight_prefix) and not key.startswith(f'{weight_prefix}text_encoder')
-        }
-        missing_keys, unexpected_keys = sam.load_state_dict(state_dict, strict=False)
-        print(f'load pre-trained SAM checkpoint from {checkpoint}')
-        if missing_keys or unexpected_keys:
-            print('missing:', missing_keys)
-            print('unexpected:', unexpected_keys)
+    _load_checkpoint(sam, checkpoint, state_dict_key, weight_prefix, 'instance SAM')
 
     return sam
 
 build_sam = class_from_function(_build_sam)
+build_instance_sam = class_from_function(_build_instance_sam)

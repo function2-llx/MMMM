@@ -80,10 +80,10 @@ class MaskDecoder(nn.Module):
             state_dict[f'{ln_prefix}weight'] = einops.reduce(weight, 'c ... -> c', 'mean')
             state_dict[f'{ln_prefix}bias'] = einops.reduce(bias, 'c ... -> c', 'mean')
         # reinitialize new additional mask tokens weights
-        pt_mask_tokens_weight = state_dict[f'{prefix}mask_tokens.weight']
-        mask_tokens_weight_pad = self.mask_tokens.weight.clone()
-        mask_tokens_weight_pad[:pt_mask_tokens_weight.shape[0]] = pt_mask_tokens_weight
-        state_dict[f'{prefix}mask_tokens.weight'] = mask_tokens_weight_pad[:self.num_mask_tokens]
+        if (pt_mask_tokens_weight := state_dict.get(f'{prefix}mask_tokens.weight')) is not None:
+            mask_tokens_weight_pad = self.mask_tokens.weight.clone()
+            mask_tokens_weight_pad[:pt_mask_tokens_weight.shape[0]] = pt_mask_tokens_weight
+            state_dict[f'{prefix}mask_tokens.weight'] = mask_tokens_weight_pad[:self.num_mask_tokens]
         return super()._load_from_state_dict(state_dict, prefix, *args, **kwargs)
 
     def forward(

@@ -76,7 +76,7 @@ class VQATransform(mt.Randomizable):
 class VQADataModule(ExpDataModuleBase):
     tokenizer: PreTrainedTokenizer
 
-    def __init__(self, *, dataset_name: str, resize: tuple2_t[int], max_seq_len: int | None, **kwargs):
+    def __init__(self, *, dataset_name: str, resize: tuple2_t[int], max_seq_len: int | None = None, **kwargs):
         super().__init__(**kwargs)
         self.dataset_name = dataset_name
         self.resize = resize

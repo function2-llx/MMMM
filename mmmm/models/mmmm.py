@@ -1,30 +1,24 @@
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
 
-import einops
 import torch
 from jsonargparse import class_from_function
 from peft import PeftModel
-from scipy.optimize import linear_sum_assignment
+from torch import nn
 from torch.nn import functional as nnf
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
 from luolib.lightning import LightningModule
-from luolib.losses import bce_neg, bce_pos, zero_loss
+from luolib.losses import zero_loss
 from luolib.types import PathLike, param3_t, tuple2_t, tuple3_t
-from luolib.utils.misc import pairwise_forward
-from monai.data import box_pair_giou, convert_box_mode
-from monai.data.box_utils import CenterSizeMode
 
-from mmmm.data.defs import Batch
 from mmmm.tokenizer import MMMMTokenizer
 from mmmm.utils import apply_prefix, get_lora_modules_default, get_lora_modules_finetune_all
 from .cogvlm import CogVLMConfig, CogVLMForCausalLM
 from .loss import DiceFocalLoss
 from .segvol import InstanceSam
-from .segvol.modeling.sam import Sam
+from .segvol.modeling.sam import Sam, InstanceSamLoss, InstanceSamOutput
 
 __all__ = [
     'MMMMForCausalLM',
@@ -40,7 +34,7 @@ class VisionArgs:
 
 @dataclass
 class VisualGroundingOutput:
-    """(batch size, num targets, num queries, ...)"""
+    """(batch size, num targets, ...)"""
     masks_logits: list[torch.Tensor] = field(default_factory=list)
     masks_logits_ds: list[torch.Tensor] = field(default_factory=list)
     boxes: list[torch.FloatTensor] = field(default_factory=list)
@@ -51,29 +45,37 @@ MATCH_UNCERTAIN = -2
 
 EPS = 1e-8
 
+def _add_prefix(log_dict: dict[str, ...], prefix: str) -> dict[str, ...]:
+    if prefix != '' and not prefix.endswith('/'):
+        prefix += '/'
+    return {f'{prefix}{k}': v for k, v in log_dict.items()}
+
 class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
     tokenizer: MMMMTokenizer
-    sam_model: InstanceSam
+    sam: Sam
     mask_loss: DiceFocalLoss | None
+    isam: InstanceSam
+    isam_loss: InstanceSamLoss
 
     @classmethod
     def build(
         cls,
         pretrained_model_name_or_path: str | os.PathLike | None,
         *args,
-        lm_loss_weight: float = 1.,
         vision_override: VisionArgs,
         tokenizer: MMMMTokenizer,
         torch_dtype: str | torch.dtype = 'auto',
         freeze_vision: bool = False,
+        lm_loss_weight: float = 1.,
         sam: Sam | None = None,
+        mask_loss: DiceFocalLoss | None = None,
+        isam: InstanceSam | None = None,
+        isam_loss: InstanceSamLoss | None = None,
     ):
         """make jsonargparse happy
         This works thanks to that AST does not support this (according to the debug information)
         TODO: refactor the construction of PreTrainedModel
         NOTE: mask loss handle the weights itself internally
-        Args:
-            lora_lang: whether to fine-tune language weights
         """
         self: MMMMForCausalLM = super().from_pretrained(
             pretrained_model_name_or_path,
@@ -83,10 +85,23 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         self.resize_token_embeddings(len(tokenizer))
         self.tokenizer = tokenizer
         self.lm_loss_weight = lm_loss_weight
-        self.sam_model = sam
+        self.sam = sam
+        self.mask_loss = mask_loss
+        self.isam = isam
+        self.isam_loss = isam_loss
         if sam is not None:
+            assert isam is not None
             sam.requires_grad_(False)
             sam.eval()
+            isam.requires_grad_(False)
+            isam.eval()
+            assert sam.prompt_dim == isam.prompt_dim
+            self.vg_proj = nn.Sequential(
+                nn.Linear(self.config.hidden_size, self.config.hidden_size),
+                nn.ReLU(inplace=True),
+                nn.Linear(self.config.hidden_size, sam.prompt_dim),
+            )
+            isam_loss.mask_loss = mask_loss
         if freeze_vision:
             self.model.vision.requires_grad_(False)
         self.model.config.lora_lang = not freeze_vision
@@ -120,30 +135,10 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             modules_to_save.extend(c_modules_to_save)
         return target_modules, modules_to_save
 
-    def _get_vg_hidden_states(self, token_ids: torch.LongTensor, hidden_states: torch.Tensor) -> list[torch.Tensor]:
+    def _get_vg_prompts(self, token_ids: torch.LongTensor, hidden_states: torch.Tensor) -> list[torch.Tensor]:
         eop_mask: torch.BoolTensor = token_ids == self.tokenizer.eop_token_id  # type: ignore
-        vg_hidden_states = [
-            hidden_states[i, eop_mask[i]]
-            for i in range(hidden_states.shape[0])
-        ]
-        return vg_hidden_states
-
-    def _predict_masks(
-        self, vg_hidden_states: torch.Tensor, image_embeddings: torch.Tensor, patch_size_z: int
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        sam = self.sam_model
-        text_embedding = self.vg_proj(vg_hidden_states)
-        sparse_embeddings, dense_embeddings = sam.prompt_encoder(image_embeddings.shape[2:], text_embedding=text_embedding)
-        sparse_embeddings = sparse_embeddings.to(text_embedding.dtype)
-        masks_logits_ds, masks_embeds = sam.mask_decoder(
-            image_embeddings=image_embeddings,
-            text_embedding=text_embedding,  # make SegVol happy
-            image_pe=sam.prompt_encoder.get_dense_pe(image_embeddings.shape[2:]),
-            sparse_prompt_embeddings=sparse_embeddings,
-            dense_prompt_embeddings=dense_embeddings,
-            patch_size_z=patch_size_z,
-        )
-        return masks_logits_ds, masks_embeds
+        vg_hidden_states: torch.Tensor = self.vg_proj(hidden_states[eop_mask])
+        return vg_hidden_states.split(eop_mask.sum(dim=-1).tolist())
 
     def visual_grounding(
         self,
@@ -151,34 +146,84 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         hidden_states: torch.Tensor,
         image: list[torch.Tensor],
         patch_size: list[tuple3_t[int]],
-    ) -> VisualGroundingOutput:
+        instance_mask: list[bool] | None,
+    ):
         """
         Args:
             token_ids: generated token ids
             hidden_states: hidden states that generate tokens
         Returns: for each sample in the batch:
-            - predicted masks logits, the first one is semantic
+            - predicted semantic masks logits
             - predicted bounding boxes
             - discrimination logits for instances
             each one has a size of (num_vg, num_queries, ...)
         """
-        batch_size = token_ids.shape[0]
-        vg_hidden_states = self._get_vg_hidden_states(token_ids, hidden_states)
-        image_embeddings: list[torch.Tensor] = self.sam_model.image_encoder(image, patch_size)
-        ret = VisualGroundingOutput()
+        if instance_mask is None:
+            raise NotImplementedError
+        batch_size = len(image)
+        vg_prompts = self._get_vg_prompts(token_ids, hidden_states)
+        if all(instance_mask):
+            masks_logits = [None] * batch_size
+        else:
+            args_list = (args for i, args in enumerate(zip(image, patch_size, vg_prompts)) if not instance_mask[i])
+            masks_logits = self.sam(*zip(*args_list))
+            for i, instance_mask_ in enumerate(instance_mask):
+                if instance_mask_:
+                    masks_logits.insert(i, None)
+        if any(instance_mask):
+            args_list = (args for i, args in enumerate(zip(image, patch_size, vg_prompts)) if instance_mask[i])
+            output: InstanceSamOutput = self.isam(*zip(*args_list))
+            boxes, disc_logit = output.boxes, output.disc_logit
+            for i, instance_mask_ in enumerate(instance_mask):
+                if not instance_mask_:
+                    boxes.insert(i, None)
+                    disc_logit.insert(i, None)
+        else:
+            boxes = [None] * batch_size
+            disc_logit = [None] * batch_size
+        return masks_logits, boxes, disc_logit
+
+    def _compute_vg_loss(
+        self,
+        masks_logits: list[torch.Tensor | None],
+        boxes_reg: list[torch.Tensor | None],
+        disc_logit: list[torch.Tensor | None],
+        masks_label: list[torch.BoolTensor | None],
+        boxes_label: list[torch.Tensor | None],
+        index_offsets: list[torch.LongTensor | None],
+    ):
+        batch_size = len(masks_logits)
+        loss_list = []
+        log_dict = {}
         for i in range(batch_size):
-            masks_logits_ds, masks_embeds = self._predict_masks(
-                vg_hidden_states[i], image_embeddings[i], patch_size[i][0],
-            )
-            masks_logits = nnf.interpolate(masks_logits_ds, image[i].shape[1:], mode='trilinear')
-            # calling sigmoid here to restrict range (CenterSizeMode), following DETR
-            boxes = self.box_head(masks_embeds).float().sigmoid()
-            disc_logit = einops.rearrange(self.disc_head(masks_embeds[:, 1:]).float(), 'nt nq 1 -> nt nq')
-            ret.masks_logits.append(masks_logits)
-            ret.masks_logits_ds.append(masks_logits_ds)
-            ret.boxes.append(boxes)
-            ret.disc_logit.append(disc_logit)
-        return ret
+            if boxes_label[i] is not None:
+                if masks_label[i] is not None:
+                    raise NotImplementedError
+                loss_, log_dict_ = self.isam_loss.compute_loss(
+                    boxes_reg[i].new_empty((*boxes_reg[i].shape[:2], 0, 0, 0)),
+                    boxes_reg[i].new_empty((*boxes_reg[i].shape[:2], 0, 0, 0)),
+                    boxes_reg[i],
+                    disc_logit[i],
+                    None,
+                    boxes_label[i],
+                    index_offsets[i],
+                )
+            elif masks_label[i] is not None and masks_label[i].shape[0] > 0:
+                log_dict_ = self.mask_loss(masks_logits[i][:, None], masks_label[i][:, None], return_dict=True)
+                loss_ = log_dict_.pop('total')
+            else:
+                loss_ = zero_loss(masks_logits[i] if disc_logit[i] is None else disc_logit[i])
+                log_dict_ = {}
+            loss_list.append(loss_)
+            for k, v in log_dict_.items():
+                log_dict.setdefault(k, []).append(v)
+        loss = torch.stack(loss_list).mean()
+        with torch.no_grad():
+            log_dict = {
+                k: torch.stack(v).mean()
+                for k, v in log_dict.items()
+            }
+        return loss, log_dict
 
     def on_fit_start(self) -> None:
         super().on_fit_start()
@@ -189,7 +234,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
         #  however, let's keep it "training" to make DeepSpeed work, since it is just a linear layer
         #  and is not affected by the mode
 
-    def training_step(self, batch: Batch, *args, **kwargs):
+    def training_step(self, batch: dict, *args, **kwargs):
         vlm_inputs = batch['vlm_inputs']
         input_ids: torch.LongTensor = vlm_inputs['input_ids']  # type: ignore
         vlm_output: CausalLMOutputWithPast = self(
@@ -200,27 +245,28 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             return_dict=True,
             output_hidden_states=True,
         )
-        if self.sam_model is None:
+        if self.sam is None:
             # pure VLM
             lm_loss = vlm_output.loss
             self.log('train/loss', lm_loss, sync_dist=True)
             return self.lm_loss_weight * lm_loss
-        vg_output = self.visual_grounding(
+        masks_logits, boxes, disc_logit = self.visual_grounding(
             # shift as suggested by GLaMM: https://github.com/mbzuai-oryx/groundingLMM/issues/16
             input_ids[:, 1:],
             vlm_output.hidden_states[-1][:, :-1],
             batch['grounding_image'],
             batch['patch_size'],
+            batch['instance_mask'],
         )
-        vg_loss, vg_log_dict = self._compute_vg_loss_batch(
-            vg_output.masks_logits, vg_output.masks_logits_ds,
-            vg_output.boxes, vg_output.disc_logit,
-            batch['masks'], batch['boxes'],
-            batch['semantic_masks'], batch['semantic_boxes'],
-            batch['index_offsets'], batch['semantic'], batch['num_uncertain'],
-            'train',
+        vg_loss, vg_log_dict = self._compute_vg_loss(
+            masks_logits,
+            boxes,
+            disc_logit,
+            batch['masks'],
+            batch['boxes'],
+            batch['index_offsets'],
         )
-        # weight for VG is controlled internally
+        # NOTE: weight for VG is controlled internally
         loss = vlm_output.loss * self.lm_loss_weight + vg_loss
         # make some custom log
         lm_labels = vlm_inputs['labels']
@@ -237,261 +283,13 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
                 'train/loss': loss,
                 'train/lm_loss': vlm_output.loss,
                 'train/vg_loss': vg_loss,
-                **vg_log_dict,
+                **_add_prefix(vg_log_dict, 'train/vg'),
                 **token_log_dict,
             },
             # the logging keys can be inconsistent, setting sync_dist=True can make DDP hang
             # sync_dist=True,
         )
         return loss
-
-    @torch.no_grad()
-    def _match_instances(
-        self,
-        masks_logits: torch.Tensor,
-        boxes_reg: torch.Tensor,
-        disc_logit: torch.Tensor,
-        masks_label: torch.BoolTensor | None,
-        boxes_label: torch.Tensor,
-        num_uncertain: int,
-        offset: int,
-    ) -> torch.LongTensor | int:
-        num_queries = masks_logits.shape[0]
-        num_pos = boxes_label.shape[0]
-        num_uncertain = min(max(num_queries - num_pos, 0), num_uncertain)
-        num_neg = max(num_queries - num_pos - num_uncertain, 0)
-        if num_queries == num_neg:
-            return MATCH_NEGATIVE
-        disc_cost_pos = self.disc_loss(disc_logit, True, reduce_batch=False)
-        disc_cost_neg = self.disc_loss(disc_logit, False, reduce_batch=False)
-        # label order: pos, neg, uncertain,
-        disc_cost = torch.cat(
-            [
-                einops.repeat(disc_cost_pos, 'n -> n m', m=num_pos),
-                einops.repeat(disc_cost_neg, 'n -> n m', m=num_neg),
-                disc_logit.new_zeros(num_queries, num_uncertain),
-            ],
-            dim=1,
-        )
-        if masks_label is None:
-            box_cost = torch.cat(
-                [
-                    pairwise_forward(self.box_loss, boxes_reg, boxes_label, reduce_batch=False),
-                    disc_cost.new_zeros(num_queries, num_neg + num_uncertain)
-                ],
-                dim=1,
-            )
-            mask_cost = torch.zeros_like(disc_cost)
-        else:
-            # not using box for matching when mask is available
-            box_cost = torch.zeros_like(disc_cost)
-            mask_cost_pos = pairwise_forward(self.mask_loss, masks_logits, masks_label, reduce_batch=False)
-            if self.neg_mask_loss:
-                mask_cost_neg = self.mask_loss(masks_logits, reduce_batch=False)
-                mask_cost = torch.cat(
-                    [
-                        mask_cost_pos,
-                        einops.repeat(mask_cost_neg, 'n -> n m', m=num_neg),
-                        mask_cost_pos.new_zeros(num_queries, num_uncertain),
-                    ],
-                    dim=1,
-                )
-            else:
-                mask_cost = torch.cat(
-                    [
-                        mask_cost_pos,
-                        mask_cost_pos.new_zeros(num_queries, num_neg + num_uncertain)
-                    ],
-                    dim=1,
-                )
-        cost = mask_cost + box_cost + disc_cost
-        row, col = linear_sum_assignment(cost.float().cpu().numpy())
-        match = torch.empty(num_queries, dtype=torch.int64, device=self.device)
-        match[row] = torch.as_tensor(col, device=self.device)
-        match[match >= num_pos] = MATCH_NEGATIVE
-        match[match >= num_pos + num_neg] = MATCH_UNCERTAIN
-        match[match >= 0] += offset
-        return match
-
-    def box_loss(self, input: torch.Tensor, target: torch.Tensor, reduce_batch: bool = True, return_dict: bool = False):
-        """input and target are in CenterSizeMode"""
-        if reduce_batch:
-            l1 = nnf.l1_loss(input, target)
-        else:
-            l1 = nnf.l1_loss(input, target, reduction='none').mean(dim=-1)
-        giou = box_pair_giou(
-            convert_box_mode(input, src_mode=CenterSizeMode),
-            convert_box_mode(target, src_mode=CenterSizeMode),
-        )
-        if reduce_batch:
-            giou = giou.mean()
-        giou = 1 - giou
-        total = self.box_l1_loss_weight * l1 + self.box_giou_loss_weight * giou
-        if return_dict:
-            return {
-                'l1': l1,
-                'giou': giou,
-                'total': total,
-            }
-        else:
-            return total
-
-    def disc_loss(self, input: torch.Tensor, pos: bool, reduce_batch: bool = True, return_dict: bool = False):
-        disc_loss = (bce_pos if pos else bce_neg)(input)
-        if reduce_batch:
-            disc_loss = disc_loss.mean()
-        total = self.disc_loss_weight * disc_loss
-        if return_dict:
-            return {
-                'ce': disc_loss,
-                'total': total,
-            }
-        else:
-            return total
-
-    def _compute_vg_loss_batch(
-        self,
-        masks_logits: list[torch.Tensor],
-        masks_logits_ds: list[torch.Tensor],
-        boxes_reg: list[torch.Tensor],
-        disc_logit: list[torch.Tensor],
-        masks_label: list[torch.BoolTensor | None],
-        boxes_label: list[torch.Tensor],
-        sem_masks: list[torch.BoolTensor | None],
-        sem_boxes: list[torch.Tensor],
-        index_offsets: list[torch.LongTensor],
-        semantic: list[torch.BoolTensor],
-        num_uncertain: list[torch.LongTensor],
-        prefix: str,
-    ):
-        batch_size = len(masks_logits)
-        vg_loss_list = []
-        vg_log_dict = {}
-        for i in range(batch_size):
-            _vg_loss, _vg_log_dict = self._compute_vg_loss(
-                masks_logits[i], masks_logits_ds[i],
-                boxes_reg[i], disc_logit[i],
-                masks_label[i], boxes_label[i],
-                sem_masks[i], sem_boxes[i],
-                index_offsets[i], semantic[i], num_uncertain[i],
-            )
-            vg_loss_list.append(_vg_loss)
-            for k, v in _vg_log_dict.items():
-                vg_log_dict.setdefault(k, []).append(v)
-        vg_loss = torch.stack(vg_loss_list).mean()
-        with torch.no_grad():
-            vg_log_dict = {
-                f'{prefix}/vg/{k}': torch.stack(v).mean()
-                for k, v in vg_log_dict.items()
-            }
-        return vg_loss, vg_log_dict
-
-    def _compute_vg_loss(
-        self,
-        masks_logits: torch.Tensor,
-        masks_logits_ds: torch.Tensor,
-        boxes_reg: torch.Tensor,
-        disc_logit: torch.Tensor,
-        masks_label: torch.BoolTensor | None,
-        boxes_label: torch.Tensor,
-        sem_masks: torch.BoolTensor | None,
-        sem_boxes: torch.Tensor | None,
-        index_offsets: torch.LongTensor,
-        semantic: torch.BoolTensor,
-        num_uncertain: torch.LongTensor,
-    ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
-        num_targets = masks_logits.shape[0]
-        # tokens for vg might be truncated by max_seq_len
-        assert num_targets <= index_offsets.shape[0]
-        loss = zero_loss(masks_logits_ds, boxes_reg, disc_logit)
-        log_dict = {}
-        if num_targets > 0:
-            # convert to float since it is used for loss calculation
-            masks_logits = masks_logits.float()
-            index_offsets = index_offsets[:num_targets]
-            semantic = semantic[:num_targets]
-            num_uncertain = num_uncertain[:num_targets]
-
-            def _accumulate(loss_log_dict: dict[str, torch.Tensor], task: Literal['semantic', 'instance'], prefix: str):
-                ret = loss_log_dict.pop('total')
-                for k, v in loss_log_dict.items():
-                    log_dict[f'{task}-{prefix}-{k}'] = v
-                return ret
-
-            # 1. semantic part
-            if sem_masks is not None and (_valid_mask := num_uncertain >= 0).any():
-                sem_masks = sem_masks[:num_targets]
-                sem_boxes = sem_boxes[:num_targets]
-                loss += _accumulate(
-                    self.mask_loss(masks_logits[_valid_mask, 0:1], sem_masks[_valid_mask], return_dict=True),
-                    'semantic', 'mask',
-                )
-                loss += _accumulate(
-                    self.box_loss(boxes_reg[:, 0][_valid_mask], sem_boxes, return_dict=True),
-                    'semantic', 'box',
-                )
-
-            # 2. instance part
-            # drop the semantic part
-            masks_logits_ds = masks_logits_ds[:, 1:]
-            masks_logits = masks_logits[:, 1:]
-            boxes_reg = boxes_reg[:, 1:]
-            # downsample the mask for matching to save computation
-            if masks_label is None:
-                masks_label_ds = None
-            else:
-                masks_label_ds = nnf.interpolate(
-                    masks_label[None].byte(), masks_logits_ds.shape[2:], mode='nearest-exact',
-                )[0].bool()
-
-            num_uncertain_list = num_uncertain.tolist()
-            offset_list = index_offsets[:, 0].tolist()
-            match = torch.full((num_targets, masks_logits.shape[1]), MATCH_UNCERTAIN, dtype=torch.long, device=self.device)
-            for i in range(num_targets):
-                if semantic[i] or (_num_uncertain := num_uncertain_list[i]) == -1:
-                    # we know that the target presents on the image, but no localized information available, skip
-                    continue
-                label_slice = slice(*index_offsets[i])
-                match[i] = self._match_instances(
-                    masks_logits_ds[i, :, None],
-                    boxes_reg[i],
-                    disc_logit[i],
-                    None if masks_label_ds is None else masks_label_ds[label_slice, None],
-                    boxes_label[label_slice],
-                    _num_uncertain,
-                    offset_list[i],
-                )
-            match_pos_mask: torch.BoolTensor = match >= 0  # type: ignore
-            match_pos = match[match_pos_mask]
-            match_neg_mask: torch.BoolTensor = match == MATCH_NEGATIVE  # type: ignore
-            if match_pos.shape[0] > 0:
-                loss += _accumulate(
-                    self.disc_loss(disc_logit[match_pos_mask], True, return_dict=True),
-                    'instance', 'disc-pos',
-                )
-                loss += _accumulate(
-                    self.box_loss(
-                        boxes_reg[match_pos_mask], boxes_label[match_pos], return_dict=True,
-                    ),
-                    'instance', 'box',
-                )
-                if masks_label is not None:
-                    loss += _accumulate(
-                        self.mask_loss(
-                            masks_logits[match_pos_mask][:, None], masks_label[match_pos, None], return_dict=True,
-                        ),
-                        'instance', 'mask-pos',
-                    )
-            if match_neg_mask.any():
-                loss += _accumulate(
-                    self.disc_loss(disc_logit[match_neg_mask], False, return_dict=True),
-                    'instance', 'disc-neg',
-                )
-                if self.neg_mask_loss:
-                    loss += _accumulate(
-                        self.mask_loss(masks_logits[match_neg_mask][:, None], return_dict=True),
-                        'instance', 'mask-neg',
-                    )
 
     # noinspection PyMethodOverriding
     def prepare_inputs_for_generation(
@@ -532,7 +330,6 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
             },
         )
         return model_inputs
-
 
     def _inference_path(self, input_ids, token_type_ids, global_enc_images, attention_masks):
         # Process and return inference output
@@ -582,14 +379,14 @@ class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
 
 build = class_from_function(MMMMForCausalLM.build, MMMMForCausalLM)
 
-def from_pretrained(conf_path: PathLike, adapter_dir: PathLike) -> tuple[MMMMForCausalLM, MMMMTokenizer]:
+def from_pretrained(conf_path: PathLike, adapter_dir: PathLike, trainable: bool = False) -> tuple[MMMMForCausalLM, MMMMTokenizer]:
     from jsonargparse import ArgumentParser
     parser = ArgumentParser()
     parser.add_subclass_arguments(MMMMForCausalLM, 'model')
     args = parser.parse_args(['--model', str(conf_path)])
     args = parser.instantiate_classes(args)
     model: MMMMForCausalLM = args.model
-    peft_model = PeftModel.from_pretrained(model, adapter_dir)
+    peft_model = PeftModel.from_pretrained(model, adapter_dir, is_trainable=trainable)
     model.set_peft_model(peft_model)
     tokenizer = model.tokenizer
     return model, tokenizer

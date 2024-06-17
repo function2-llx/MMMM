@@ -1,5 +1,84 @@
-import einops
 import torch
+from PIL import Image
+from einops import rearrange, repeat
+from peft import PeftModel
+from torchvision import transforms
+from transformers import LlamaTokenizer
+
+from luolib.utils.zstd import load_pt_zst
+from scripts.evaluate.models.radfm import setup_radfm
+
+
+ckpt_path = "/data/MMMM/RadFM/pytorch_model.bin"
+tokenizer_path = "/data/MMMM/RadFM"
+
+from RadFM.multimodality_model import MultiLLaMAForCausalLM
+
+model = MultiLLaMAForCausalLM(
+    lang_model_path=tokenizer_path,
+)
+checkpoint = torch.load(ckpt_path, map_location='cpu')
+model.load_state_dict(checkpoint)
+model = model.to('cuda')
+model.eval()
+
+print(1)
+
+tokenizer = LlamaTokenizer.from_pretrained(tokenizer_path)
+special_tokens = {
+    'additional_special_tokens': [f'<image{i}>' for i in range(32)] + ['<image>', '</image>']
+}
+tokenizer.add_special_tokens(special_tokens)
+tokenizer.pad_token_id = 0
+tokenizer.bos_token_id = 1
+tokenizer.eos_token_id = 2
+
+image_path = "data/processed/vision-language/VQA-RAD/images/synpic100176.jpg"
+
+query = "Is there evidence of a pneumoperitoneum?"
+
+
+if image_path.endswith('.pt'):
+    image = rearrange(torch.load(image_path).float(), 'c d h w -> c h w d')
+    image = (image - image.min()) / (image.max() - image.min())
+elif image_path.endswith('.pt.zst'):
+    image = rearrange(load_pt_zst(image_path).float(), 'c d h w -> c h w d')
+    image = (image - image.min()) / (image.max() - image.min())
+else:
+    transform = transforms.ToTensor()
+    image = Image.open(image_path).convert('RGB')
+    image = transform(image)
+
+target_d, max_d = 4, 4
+if len(image.shape) == 4:
+    max_d = max(image.shape[3], max_d)
+for temp_d in range(4, 65, 4):
+    if abs(temp_d - max_d) < abs(target_d - max_d):
+        target_d = temp_d
+if len(image.shape) == 3:
+    image = torch.nn.functional.interpolate(
+        repeat(image, 'c h w -> 1 c h w 1'), size=(512, 512, target_d)
+    ).unsqueeze(0)
+else:
+    if image.shape[0] == 1:
+        image = torch.nn.functional.interpolate(
+            repeat(image, '1 h w d -> 1 3 h w d'), size=(512, 512, target_d)
+        ).unsqueeze(0)
+    else:
+        image = torch.nn.functional.interpolate(
+            repeat(image, 'c h w d -> 1 c h w d'), size=(512, 512, target_d)
+        ).unsqueeze(0)
+
+image = image.to('cuda')
+prompt = '<image>' + ''.join([f'<image{i}>' for i in range(32)]) + '</image>' + query
+language = tokenizer(
+    prompt,
+    return_tensors='pt',
+)['input_ids']
+
+generation = model.generate(language, image)
+generated_texts = tokenizer.batch_decode(generation, skip_special_tokens=True)
+print(generated_texts[0])
 
 def ft_iblip():
     from instructblip import FinetuneInstructBlip
@@ -219,13 +298,12 @@ def llava_med():
     import einops
     import torch.nn as nn
     from llava.model.builder import load_pretrained_model
-    from llava.mm_utils import tokenizer_image_token, get_model_name_from_path
-    from llava.constants import IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_TOKEN
+    from llava.mm_utils import get_model_name_from_path
+    from llava.constants import DEFAULT_IMAGE_TOKEN
     from torchvision.io import read_image, ImageReadMode
     from torchvision.transforms.v2 import functional as tvtf
     from luolib.types import tuple3_t
     from peft import PeftModel
-    from llava.conversation import conv_templates, SeparatorStyle
 
     model_id = "microsoft/llava-med-v1.5-mistral-7b"
     model_name = get_model_name_from_path(model_id)
@@ -303,84 +381,109 @@ def llava_med():
 
     print(outputs)
 
-import numpy as np
-import torch
-from torchvision.io import read_image, ImageReadMode
-from transformers import AutoTokenizer, AutoModelForCausalLM
-# import simple_slice_viewer as ssv
-# import SimpleITK as sikt
-from torchvision.io import read_image, ImageReadMode
-from torchvision.transforms.v2 import functional as tvtf
-from luolib.types import tuple3_t
 
-device = torch.device('cuda') # 'cpu', 'cuda'
-dtype = torch.bfloat16 # or bfloat16, float16, float32
+def m3d():
+    # Prepare your 3D medical image:
+    # 1. The image shape needs to be processed as 1*32*256*256, consider resize and other methods.
+    # 2. The image needs to be normalized to 0-1, consider Min-Max Normalization.
+    # 3. The image format needs to be converted to .npy
+    # 4. Although we did not train on 2D images, in theory, the 2D image can be interpolated to the shape of 1*32*256*256 for input.
 
-model_name_or_path = '/data/new_llm/M3D-LaMed-Llama-2-7B'
-proj_out_num = 256
+    import torch
+    from transformers import AutoTokenizer, AutoModelForCausalLM
+
+    from torchvision.io import read_image, ImageReadMode
+    from torchvision.transforms.v2 import functional as tvtf
+
+    device = torch.device('cuda') # 'cpu', 'cuda'
+    dtype = torch.bfloat16 # or bfloat16, float16, float32
+
+    model_name_or_path = '/data/new_llm/M3D-LaMed-Llama-2-7B'
+    proj_out_num = 256
+
+    model = AutoModelForCausalLM.from_pretrained(
+        model_name_or_path,
+        torch_dtype=dtype,
+        device_map='auto',
+        trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_name_or_path,
+    )
+
+    # OpenI
+    def build_RG_inputs_ids(tokenizer, image_path, prompt):
+        image_tokens = "<im_patch>" * proj_out_num
+        prompt = image_tokens + prompt
+
+        prompt_ids = torch.tensor(tokenizer.encode(prompt, add_special_tokens=False))
+        input_ids = torch.cat([
+            torch.tensor([tokenizer.bos_token_id]).unsqueeze(1),
+            prompt_ids.unsqueeze(1),
+        ])
+
+        input_ids = input_ids.reshape(input_ids.shape[-1], input_ids.shape[0])
+        input_ids = input_ids.to(device=device)
+
+        image = read_image(image_path, ImageReadMode.GRAY)
+        image = tvtf.to_dtype(image, torch.float32, scale=True)
+        image = tvtf.resize(image, (256, 256))
+
+        image = einops.repeat(image, '1 h w -> 1 1 d h w', d=32)
+        image_pt = image.to(dtype=dtype, device=device)
+
+        inputs = {
+            'input_ids': input_ids,
+            'attention_mask': torch.ones_like(input_ids).to('cuda'),
+            'image': image_pt
+        }
+        return inputs
+
+    adapter_path = "/home/chenxuanzhong/MMMM/output/finetune/OpenI/m3d_openi/seed-42/run-20240614_232340-9t7twlpk/checkpoint/last.ckpt/adapter"
+    image_path = "data/processed/vision-language/OpenI/images/2788_IM-1222-1001.dcm.png"
+    # Report Generation
+    prompt = f'Please write a radiology report for me:'
+    inputs = build_RG_inputs_ids(tokenizer, image_path, prompt)
+
+    #VQA
+    def build_VQA_input_ids(tokenizer, image_path, query):
+        image = read_image(image_path, ImageReadMode.GRAY)
+        image = tvtf.to_dtype(image, torch.float32, scale=True)
+        image = tvtf.resize(image, (256, 256))
+        image = einops.repeat(image, '1 h w -> 1 1 d h w', d=32)
+        image = image.to(dtype=dtype)
+
+        prompt = f'Question: {query} Answer:'
+        prompt = "<im_patch>" * proj_out_num + prompt
+        prompt_ids = torch.tensor(tokenizer.encode(prompt, add_special_tokens=False))
+
+        input_ids = torch.cat([
+            torch.tensor([tokenizer.bos_token_id]).unsqueeze(1),
+            prompt_ids.unsqueeze(1),
+        ])
+
+        input_ids = input_ids.reshape(input_ids.shape[-1], input_ids.shape[0])
+
+        inputs = {
+            'input_ids': input_ids.to('cuda'),
+            'attention_mask': torch.ones_like(input_ids).to('cuda'),
+            'image': image.to('cuda').to(torch.bfloat16)
+        }
+        return inputs
 
 
-image_path = "/data/MMMM/data/processed/vision-language/VQA-RAD/images/synpic19118.jpg"
+    adapter_path = "/data/MMMM/output/finetune/VQA-RAD/m3d/seed-42/run-20240614_232324-9jt8s3y8/checkpoint/last.ckpt/adapter"
 
-model = AutoModelForCausalLM.from_pretrained(
-    model_name_or_path,
-    torch_dtype=dtype,
-    device_map='auto',
-    trust_remote_code=True)
-tokenizer = AutoTokenizer.from_pretrained(
-    model_name_or_path,
-    model_max_length=512,
-    padding_side="right",
-    use_fast=False,
-    trust_remote_code=True
-)
+    image_path = "data/processed/vision-language/VQA-RAD/images/synpic100176.jpg"
+    query = "Is there evidence of a pneumoperitoneum?"
 
-model = model.to(device=device)
-
-query = "Are these small opacities in the right lung calcifications?"
-prompt = f'Question: {query} Answer:'
-
-image_tokens = "<im_patch>" * proj_out_num
-input_txt = image_tokens + prompt
-input_id = tokenizer(input_txt, return_tensors="pt")['input_ids'].to(device=device)
+    inputs = build_VQA_input_ids(tokenizer, image_path, query)
 
 
-def intensity_norm_(
-    image: torch.Tensor,
-    mean: tuple3_t[float] = (0.48145466, 0.4578275, 0.40821073),
-    std: tuple3_t[float] = (0.26862954, 0.26130258, 0.27577711),
-):
-    """default mean and std is adopted from CogVLM (, which is from CLIP)"""
-    mean = image.new_tensor(mean)
-    std = image.new_tensor(std)
-    x = image.view(image.shape[0], -1)
-    x.sub_(mean[:, None]).div_(std[:, None])
+    inference_model = PeftModel.from_pretrained(model, adapter_path)
+    inference_model = inference_model.to(device=device)
 
 
-# Prepare your 3D medical image:
-# 1. The image shape needs to be processed as 1*32*256*256, consider resize and other methods.
-# 2. The image needs to be normalized to 0-1, consider Min-Max Normalization.
-# 3. The image format needs to be converted to .npy
-# 4. Although we did not train on 2D images, in theory, the 2D image can be interpolated to the shape of 1*32*256*256 for input.
+    generation = inference_model.generate(inputs['image'], inputs['input_ids'], max_new_tokens=1024, do_sample=True, top_p=0.9, temperature=1.0)
+    generated_texts = tokenizer.batch_decode(generation, skip_special_tokens=True)
+    print(generated_texts[0])
 
-
-image = read_image(image_path, ImageReadMode.GRAY)
-image = tvtf.to_dtype(image, torch.float32, scale=True)
-image = tvtf.resize(image, (256, 256))
-# intensity_norm_(image)
-image = einops.repeat(image, '1 h w -> 1 1 d h w', d=32)
-image_pt = image.to(dtype=dtype, device=device)
-
-# generation = model.generate(image_pt, input_id, max_new_tokens=256, do_sample=True, top_p=0.9, temperature=1.0)
-generation, seg_logit = model.generate(image_pt, input_id, seg_enable=True, max_new_tokens=256, do_sample=False)
-
-generated_texts = tokenizer.batch_decode(generation, skip_special_tokens=True)
-# seg_mask = (torch.sigmoid(seg_logit) > 0.5) * 1.0
-
-print('question', prompt)
-print('generated_texts', generated_texts[0])
-
-# image = sikt.GetImageFromArray(image_np)
-# ssv.display(image)
-# seg = sikt.GetImageFromArray(seg_mask.cpu().numpy()[0])
-# ssv.display(seg)

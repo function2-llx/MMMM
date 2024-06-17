@@ -3,35 +3,30 @@ from pathlib import Path
 import cytoolz
 import einops
 import inflect
-import matplotlib
 import torch
+import torchvision.transforms.v2.functional as tvtf
 from jsonargparse import ActionConfigFile, ArgumentParser
 from lightning.fabric.utilities import move_data_to_device
 from lightning.pytorch.plugins import HalfPrecision
-from matplotlib import pyplot as plt
-from matplotlib.colors import ListedColormap
-from matplotlib.patches import Rectangle
-import torchvision.transforms.v2.functional as tvtf
 from tqdm import tqdm
 
 from luolib.utils import load_pt_zst
 from luolib.utils.misc import ensure_rgb
-from mmmm.misc import IndexTrackerBinary
-from monai.config import NdarrayOrTensor
 from monai.inferers import sliding_window_inference
-from monai.utils import BlendMode, convert_to_tensor
+from monai.utils import BlendMode
 
 from mmmm.data import get_target_tax
 from mmmm.data.defs import Split
 from mmmm.data.sparse import Sparse
 from mmmm.data.target_tax import TargetClass
-from mmmm.models.segvol.modeling.sam import InstanceSamOutput
-
 from _data import _collate_fn
-from _model import AlignSam
+from _model import AlignSam, AlignInstanceSam
 
 engine = inflect.engine()
 _stop_words = {'the'}
+supported_phrases = [
+    'aortic enlargement', 'atelectasis', 'calcification', 'cardiomegaly', 'clavicle fracture', 'pulmonary consolidation', 'pulmonary edema', 'pulmonary emphysema', 'pulmonary artery enlargement', 'interstitial lung disease', 'pulmonary infiltrate', 'pulmonary cavity', 'pulmonary cyst', 'pulmonary opacification', 'mediastinal shift', 'lung nodule', 'pleural effusion', 'pleural thickening', 'pneumothorax', 'pulmonary fibrosis', 'rib fracture'
+]
 
 def singularize(word: str) -> str:
     result = engine.singular_noun(word)
@@ -74,7 +69,7 @@ def _dice(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
 def main():
     parser = ArgumentParser()
     parser.add_argument('-c', action=ActionConfigFile)
-    parser.add_class_arguments(AlignSam, 'model')
+    parser.add_class_arguments(AlignInstanceSam, 'model')
     parser.add_argument('--ckpt_path', type=Path | None)
     # parser.add_argument('--max_vision_tokens', type=int, required=True)
     args = parser.parse_args()
@@ -84,6 +79,7 @@ def main():
         print('no checkpoint provided')
     else:
         model.load_state_dict(torch.load(args.ckpt_path)['state_dict'])
+    exit(0)
     model.to(dtype=torch.bfloat16,  device='cuda')
     # R = np.random.RandomState(42)
     build_phrase_mapping()
@@ -92,18 +88,20 @@ def main():
     from mmmm.data.dataset.local import get_local_data_list
     data = get_local_data_list('BTCV-Abdomen', Split.TRAIN)
     for item_idx, item in enumerate(tqdm(data)):
+        annotated_report: str = item['annotation']
         # findings_ann: str = item['findings-ann']
         # findings_remove_ann = findings_ann.replace('<p>', '').replace('</p>', '')
         # if findings_ann != findings_remove_ann:
         #     pass
-        # phrases = parse_phrases(findings_ann)
-        # supported_phrases = []
-        # unsupported_phrases = []
-        # for phrase in phrases:
-        #     if (target := phrase_mapping.get(normalize(phrase))) is None:
-        #         unsupported_phrases.append(phrase)
-        #     else:
-        #         supported_phrases.append((phrase, target.name))
+        phrases = parse_phrases(annotated_report)
+        supported_phrases = []
+        unsupported_phrases = []
+        for phrase in phrases:
+            if (target := phrase_mapping.get(normalize(phrase))) is None:
+                unsupported_phrases.append(phrase)
+            else:
+                supported_phrases.append((phrase, target.name))
+
         # print(supported_phrases)
         # print(unsupported_phrases)
         # targets = list({target for _, target in supported_phrases})

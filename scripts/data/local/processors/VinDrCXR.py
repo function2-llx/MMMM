@@ -14,7 +14,6 @@ from monai.data import MetaTensor, box_iou
 from monai.data.box_utils import clip_boxes_to_image
 import monai.transforms as mt
 
-from mmmm.data.target_tax import TargetCategory
 from ._base import DataPoint, DefaultImageLoaderMixin, Processor
 
 @dataclass(kw_only=True)

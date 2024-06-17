@@ -16,7 +16,6 @@ from luolib.lightning.trainer import PeftTrainer
 
 from mmmm.data import MMMMDataModule
 from mmmm.models import MMMMForCausalLM
-from mmmm.models.loss import DiceFocalLoss
 from mmmm.tokenizer import MMMMTokenizer
 from mmmm.utils import get_lora_modules_default
 
