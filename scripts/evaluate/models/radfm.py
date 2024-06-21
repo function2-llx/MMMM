@@ -1,5 +1,6 @@
 from einops import rearrange, repeat
 from monai import transforms as mt
+from peft import PeftModel
 from PIL import Image
 import sys
 import torch
@@ -11,7 +12,7 @@ from luolib.utils.zstd import load_pt_zst
 from scripts.evaluate.utils import dump_results
 
 
-def setup_radfm(checkpoint: str, tokenizer: str):
+def setup_radfm(checkpoint: str, adapter: str, tokenizer: str):
     sys.path.append('third-party/RadFM/Quick_demo/Model')
     from RadFM.multimodality_model import MultiLLaMAForCausalLM
 
@@ -20,6 +21,8 @@ def setup_radfm(checkpoint: str, tokenizer: str):
     )
     checkpoint = torch.load(checkpoint, map_location='cpu')
     model.load_state_dict(checkpoint)
+    if adapter:
+        model = PeftModel.from_pretrained(model, adapter)
     model = model.to('cuda')
     model.eval()
 

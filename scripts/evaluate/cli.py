@@ -54,7 +54,7 @@ class Evaluator:
             evaluate_fn = mmmm_vl_evaluate
         if self.model == 'radfm':
             from models.radfm import RadFMTransform, setup_radfm, radfm_vl_evaluate
-            packed = setup_radfm(checkpoint, tokenizer)
+            packed = setup_radfm(checkpoint, adapter, tokenizer)
             transform = RadFMTransform(packed[1])
             evaluate_fn = radfm_vl_evaluate
         elif self.model == 'm3d':
