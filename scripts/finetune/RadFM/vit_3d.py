@@ -3,6 +3,8 @@ from torch import nn
 
 from einops import rearrange, repeat
 from einops.layers.torch import Rearrange
+from torch.utils.checkpoint import checkpoint
+
 from .position_encoding import PositionEmbeddingLearned3d
 
 # helpers
@@ -75,9 +77,19 @@ class Transformer(nn.Module):
                 PreNorm(dim, FeedForward(dim, mlp_dim, dropout = dropout))
             ]))
     def forward(self, x):
+        def forward_layer(attn, ff, x_input):
+            x_output = attn(x_input) + x_input
+            x_output = ff(x_output) + x_output
+            return x_output
         for attn, ff in self.layers:
-            x = attn(x) + x
-            x = ff(x) + x
+            # x = attn(x) + x
+            # x = ff(x) + x
+            x = checkpoint(
+                forward_layer,
+                attn,
+                ff,
+                x
+            )
         return x
 
 class ViT(nn.Module):

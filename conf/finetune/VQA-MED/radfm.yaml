@@ -4,13 +4,11 @@ data:
   class_path: _vqa.radfm.RadFMVQADataModule
   init_args:
     resize: [224, 224]
-    dataloader:
-      train_batch_size: 16
 logger:
   class_path: lightning.pytorch.loggers.WandbLogger
   init_args:
-    name: radfm_vqa-rad
-    save_dir: output/finetune/VQA-RAD
+    name: radfm_vqa-med
+    save_dir: output/finetune/VQA-Med
     project: MMMM-FT
 lora:
   class_path: peft.LoraConfig

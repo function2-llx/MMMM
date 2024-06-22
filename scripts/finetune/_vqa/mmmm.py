@@ -1,10 +1,6 @@
 from typing import Callable
 
-import einops
 import torch
-import torch.nn as nn
-from peft import PeftModel
-from transformers import AutoTokenizer
 
 from _vqa._base import VQADataModule, VQATransform
 from luolib.lightning import LightningModule
@@ -17,13 +13,13 @@ class FinetuneMMMM(LightningModule):
     def __init__(self, *, model_path: str):
         super().__init__()
 
-        adapter_path = "/root/dataDisk/adapter/"
+        adapter_path = "/data/MMMM/output/vlm-post/run-20240615_035211-cjw9e7jo/checkpoint/step=6000.ckpt/adapter"
 
         model, tokenizer = from_pretrained('conf/model.yaml', adapter_path, True)
 
         self.mmmm_model: MMMMForCausalLM = model
-        # self.mmmm_model.gradient_checkpointing_enable({'use_reentrant': False})
-        # self.train()
+        self.mmmm_model.gradient_checkpointing_enable({'use_reentrant': False})
+        self.train()
 
 
     def training_step(self, batch, *args, **kwargs):

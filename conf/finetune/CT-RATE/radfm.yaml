@@ -4,6 +4,8 @@ data:
   class_path: _rg.radfm.RadFMRGDataModule
   init_args:
     resize: [256, 256]
+    dataloader:
+      train_batch_size: 16
 logger:
   class_path: lightning.pytorch.loggers.WandbLogger
   init_args:

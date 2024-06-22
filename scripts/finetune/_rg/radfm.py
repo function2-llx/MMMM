@@ -5,12 +5,12 @@ from PIL import Image
 from einops import rearrange, repeat
 from torchvision import transforms
 
+from _rg._base import RGDataModule, RGTransform
 from luolib.utils import load_pt_zst
 from scripts.finetune._utils import CE_IGNORE_INDEX
-from scripts.finetune._vqa._base import VQATransform, VQADataModule
 
 
-class RadFMRGTransform(VQATransform):
+class RadFMRGTransform(RGTransform):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         special_tokens = {
@@ -81,17 +81,21 @@ class RadFMRGTransform(VQATransform):
             *labels,
             torch.tensor([tokenizer.eos_token_id]),
         ])
+        if self.max_seq_len is not None:
+            input_ids = input_ids[:self.max_seq_len]
+            labels = labels[:self.max_seq_len]
         return {
             'image': image,
             'vlm_inputs': {
                 'input_ids': input_ids,
                 'labels': labels,
                 'attention_mask': torch.ones_like(input_ids),
+                'loss_reweight': torch.ones_like(labels)
             }
         }
 
 
-class RadFMRGDataModule(VQADataModule):
+class RadFMRGDataModule(RGDataModule):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 

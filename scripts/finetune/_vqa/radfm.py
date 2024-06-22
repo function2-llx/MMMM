@@ -17,7 +17,7 @@ class FinetuneRadFM(LightningModule):
     def __init__(self, *, model_path: str):
         super().__init__()
         self.radfm_model = MultiLLaMAForCausalLM(lang_model_path=model_path)
-        checkpoint = torch.load(f'{model_path}/pytorch_model.bin', map_location='cpu')
+        checkpoint = torch.load(f'{model_path}/pytorch_model-bf16.bin', map_location='cpu')
 
         self.radfm_model.load_state_dict(checkpoint)
 
@@ -48,8 +48,10 @@ class FinetuneRadFM(LightningModule):
             batch['image'],
             batch['vlm_inputs']['attention_mask'],
             batch['vlm_inputs']['labels'],
+            batch['vlm_inputs']['loss_reweight'],
+            None
         )
-        loss = outputs.loss
+        loss = outputs['loss']
         self.log('train/loss', loss)
         return loss
 
@@ -138,6 +140,7 @@ class RadFMVQATransform(VQATransform):
                 'input_ids': input_ids,
                 'labels': labels,
                 'attention_mask': torch.ones_like(input_ids),
+                'loss_reweight': torch.ones_like(labels)
             }
         }
 
