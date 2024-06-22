@@ -87,7 +87,7 @@ class ReportTestDataset(Dataset):
                 }
                 for x in json.load(f)
                 for i, image in enumerate(x['image'])
-                if self.name != 'MIMIC-CXR' or (x['plane'][i] == 'AP' or x['plane'][i] == 'PA')
+                if (self.name != 'MIMIC-CXR' or (x['plane'][i] == 'AP' or x['plane'][i] == 'PA')) and (self.name != 'OpenI' or x['plane'][i] == 'frontal')
             ][start:end]
 
     def __getitem__(self, index: int):
@@ -203,8 +203,8 @@ class LlamaMetrics:
         self.llama = LLM(
             model=LLAMA3_PATH,
             dtype='bfloat16',
-            gpu_memory_utilization=0.95,
-            tensor_parallel_size=2,
+            gpu_memory_utilization=0.83,
+            tensor_parallel_size=4,
             enable_prefix_caching=True,
         )
 
@@ -600,7 +600,15 @@ class CTMetrics:
             / 'dataset'
             / 'multi_abnormality_labels'
             / 'valid_predicted_labels.csv'
-        )[RADBERT_CONDITIONS].to_numpy()
+        ).set_index(['VolumeName'])[RADBERT_CONDITIONS]
+
+        with open(PROCESSED_VL_DATA_ROOT / 'CT-RATE' / 'test-processed.json') as f:
+            file_names = [
+                image.split('/')[-1].replace('.pt.zst', '.nii.gz')
+                for x in json.load(f)
+                for i, image in enumerate(x['image'])
+            ]
+        reference_labels = reference_labels.loc[file_names].values
 
         f1s = f1_score(prediction_labels, reference_labels, average=None)
         for i, condition in enumerate(RADBERT_CONDITIONS):

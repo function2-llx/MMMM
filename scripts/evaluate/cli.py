@@ -54,7 +54,7 @@ class Evaluator:
             evaluate_fn = mmmm_vl_evaluate
         if self.model == 'radfm':
             from models.radfm import RadFMTransform, setup_radfm, radfm_vl_evaluate
-            packed = setup_radfm(checkpoint, tokenizer)
+            packed = setup_radfm(checkpoint, adapter, tokenizer)
             transform = RadFMTransform(packed[1])
             evaluate_fn = radfm_vl_evaluate
         elif self.model == 'm3d':
@@ -102,9 +102,15 @@ class Evaluator:
                 instructblip_vl_evaluate,
             )
             packed = setup_instructblip(checkpoint, tokenizer)
-            transform = InstructBlipTransform(packed[1], self.setting,
+            transform = InstructBlipTransform(
+                packed[1], self.setting,
             )
             evaluate_fn = instructblip_vl_evaluate
+        elif self.model == 'r2gengpt':
+            from models.r2gengpt import R2GenGPTTransform, setup_r2gengpt, r2gengpt_vl_evaluate
+            packed = setup_r2gengpt(adapter)
+            transform = R2GenGPTTransform(packed[1])
+            evaluate_fn = r2gengpt_vl_evaluate
 
         if self.task == 'vqa':
             dataset = VQATestDataset(self.dataset, transform, start, end)

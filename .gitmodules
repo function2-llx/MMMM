@@ -10,3 +10,6 @@
 [submodule "third-party/CT-CLIP"]
 	path = third-party/CT-CLIP
 	url = git@github.com:ibrahimethemhamamci/CT-CLIP.git
+[submodule "third-party/R2GenGPT"]
+	path = third-party/R2GenGPT
+	url = git@github.com:wang-zhanyu/R2GenGPT.git
