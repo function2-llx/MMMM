@@ -2,7 +2,7 @@
 tokenizer: ../tokenizer.yaml
 logger: logger.yaml
 trainer:
-  max_steps: 15000
+  max_steps: 50000
   log_every_n_steps: 20
   precision: bf16-true
   gradient_clip_val: 1
@@ -12,11 +12,11 @@ trainer:
     init_args:
       gradient_as_bucket_view: true
       broadcast_buffers: false
-      timeout: 0:5:0
+#      timeout: 0:5:0
   callbacks:
   - class_path: luolib.lightning.callbacks.ModelCheckpoint
     init_args:
-      every_n_train_steps: 100
+      every_n_train_steps: 2000
       filename: "{step}"
       save_top_k: -1
       save_last: true
@@ -27,7 +27,7 @@ optim:
   optimizer:
     class_path: torch.optim.AdamW
     init_args:
-      lr: 1e-4
+      lr: 5e-5
       weight_decay: 0.01
   lr_scheduler:
     scheduler:
@@ -35,7 +35,7 @@ optim:
       init_args:
         t_initial: ${trainer.max_steps}
         t_in_epochs: false
-        warmup_t: 0
+        warmup_t: 5000
         warmup_prefix: true
     interval: step
     frequency: 250
