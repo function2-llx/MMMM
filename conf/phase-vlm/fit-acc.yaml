@@ -1,0 +1,43 @@
+#data: data.yaml
+tokenizer: ../tokenizer.yaml
+logger: logger.yaml
+trainer:
+  max_steps: 100000
+  log_every_n_steps: 40
+  precision: bf16-true
+  gradient_clip_val: 1
+  gradient_clip_algorithm: norm
+  strategy:
+    class_path: lightning.pytorch.strategies.DDPStrategy
+    init_args:
+      gradient_as_bucket_view: true
+      broadcast_buffers: false
+#      timeout: 0:5:0
+  callbacks:
+  - class_path: luolib.lightning.callbacks.ModelCheckpoint
+    init_args:
+      every_n_train_steps: 4000
+      filename: "{step}"
+      save_top_k: -1
+      save_last: true
+      verbose: true
+optim:
+  param_groups:
+  - prefix: ['']
+  optimizer:
+    class_path: torch.optim.AdamW
+    init_args:
+      lr: 5e-5
+      weight_decay: 0.01
+  lr_scheduler:
+    scheduler:
+      class_path: timm.scheduler.CosineLRScheduler
+      init_args:
+        t_initial: ${trainer.max_steps}
+        t_in_epochs: false
+        warmup_t: 5000
+        warmup_prefix: true
+    interval: step
+    frequency: 500
+model: model.yaml
+lora: ../lora.yaml
