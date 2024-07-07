@@ -1,0 +1,56 @@
+data: data.yaml
+logger: logger.yaml
+trainer:
+  max_steps: 30000
+  log_every_n_steps: 20
+  precision: bf16-true
+  gradient_clip_val: 1
+  gradient_clip_algorithm: norm
+  strategy:
+    class_path: lightning.pytorch.strategies.DDPStrategy
+    init_args:
+      gradient_as_bucket_view: true
+      broadcast_buffers: false
+      timeout: 0:5:0
+  callbacks:
+  - class_path: luolib.lightning.callbacks.ModelCheckpoint
+    init_args:
+      every_n_train_steps: 1000
+      filename: "{step}"
+      save_top_k: -1
+      save_last: true
+      verbose: true
+optim:
+  param_groups:
+  - prefix: ['']
+  optimizer:
+    class_path: torch.optim.AdamW
+    init_args:
+      lr: 2e-4
+      weight_decay: 0.01
+  lr_scheduler:
+    scheduler:
+      class_path: timm.scheduler.CosineLRScheduler
+      init_args:
+        t_initial: ${trainer.max_steps}
+        t_in_epochs: false
+        warmup_t: 0
+        warmup_prefix: true
+    interval: step
+    frequency: 250
+model:
+  sam:
+    class_path: mmmm.models.build_instance_sam
+    init_args:
+      patch_size: 16
+      pos_embed_shape: [8, 32, 32]
+      pt_in_channels: 1
+      pt_patch_size: [4, 16, 16]
+      pt_pos_embed_shape: [8, 16, 16]
+      checkpoint: pre-trained/SegVol/pytorch_model.bin
+      weight_prefix: model.
+  loss:
+    class_path: mmmm.models.segvol.modeling.sam.InstanceSamLoss
+    init_args:
+  seg_vol_path: pre-trained/SegVol
+  freeze_clip: true

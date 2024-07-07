@@ -1,0 +1,26 @@
+dataset:
+  datasets:
+  - name: VinDr-CXR
+    type: local
+  base_vit_patch_size_z: 16
+  vit_patch_size_xy: 16
+  trans:
+    max_vision_tokens: 2048
+    max_vision_tokens_lr: 600
+    max_tokens_z: 8
+    max_tokens_z_lr: 6
+    max_vision_tokens_2d: 1024
+    max_vision_tokens_2d_lr: 256
+    low_res_p: 0.4
+    scale_z: [0.9, 1.2]
+    scale_z_p: 0.1
+    scale_xy: [0.8, 1.4]
+    scale_xy_p: 0.2
+    num_pos: 14
+    min_num_neg: 2
+    full_size_ratio: 0.2
+    scale_intensity_prob: 0.15
+    scale_intensity_factor: 0.1
+    shift_intensity_prob: 0.15
+    shift_intensity_offset: 0.1
+    log2_vit_patch_size_z_std: 0.25
