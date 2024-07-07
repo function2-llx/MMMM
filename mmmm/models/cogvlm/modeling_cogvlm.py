@@ -3,7 +3,6 @@ from typing import Any, Dict, List, Literal, Optional, TYPE_CHECKING, Tuple, Uni
 import warnings
 
 import einops
-import math
 import torch
 from torch import nn
 from torch.nn import functional as F
@@ -21,15 +20,12 @@ from mmmm.utils import apply_prefix, get_lora_modules_default
 from mmmm.data.defs import CE_IGNORE_INDEX
 from .configuration_cogvlm import CogVLMConfig
 from .visual import EVA2CLIPModel
+from ...data.utils import LANGUAGE_TOKEN_TYPE, VISION_TOKEN_TYPE
 
 if TYPE_CHECKING:
     from transformers.utils import ModelOutput
 
 logger = get_logger(__name__)
-
-LANGUAGE_TOKEN_TYPE = 0
-VISION_TOKEN_TYPE = 1
-"""tokens of `VISION_TOKEN_TYPE` will be processed by VE"""
 
 class RMSNorm(nn.Module):
     def __init__(self, hidden_size, eps=1e-6):

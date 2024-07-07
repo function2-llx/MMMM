@@ -10,7 +10,6 @@ import torch
 from luolib.types import PathLike
 from luolib.utils import load_pt_zst
 
-from mmmm.models.cogvlm import LANGUAGE_TOKEN_TYPE, VISION_TOKEN_TYPE
 from mmmm.tokenizer import MMMMTokenizer
 from .defs import CE_IGNORE_INDEX, ConvTurn, mmmm_debug
 from .sparse import Sparse
@@ -177,3 +176,7 @@ def save_as_nifti(path: PathLike, output_path: PathLike | None = None):
         nib.Nifti1Image(image.numpy(), np.eye(4)),
         output_path
     )
+
+"""tokens of `VISION_TOKEN_TYPE` will be processed by VE"""
+LANGUAGE_TOKEN_TYPE = 0
+VISION_TOKEN_TYPE = 1

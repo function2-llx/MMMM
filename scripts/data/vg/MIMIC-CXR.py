@@ -3,6 +3,9 @@ from pathlib import Path
 import cytoolz
 import einops
 import inflect
+import math
+import numpy as np
+import orjson
 import torch
 import torchvision.transforms.v2.functional as tvtf
 from jsonargparse import ActionConfigFile, ArgumentParser
@@ -10,13 +13,16 @@ from lightning.fabric.utilities import move_data_to_device
 from lightning.pytorch.plugins import HalfPrecision
 from tqdm import tqdm
 
+from luolib.types import PathLike
 from luolib.utils import load_pt_zst
 from luolib.utils.misc import ensure_rgb
+from mmmm.data.dataset.misc import get_max_resize
+from mmmm.misc import load_image
 from monai.inferers import sliding_window_inference
 from monai.utils import BlendMode
 
 from mmmm.data import get_target_tax
-from mmmm.data.defs import Split
+from mmmm.data.defs import PROCESSED_VG_DATA_ROOT, Split
 from mmmm.data.sparse import Sparse
 from mmmm.data.target_tax import TargetClass
 from _data import _collate_fn
@@ -66,6 +72,54 @@ def build_phrase_mapping():
 def _dice(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
     return 2 * (x * y).sum() / (x.sum() + y.sum())
 
+def image_transform(
+    image_path: PathLike,
+    max_vision_tokens,
+    max_tokens_z: int = 4,
+    base_patch_size_z: int = 16,
+    base_pool_size_z: int = 2,
+    patch_size_xy: int = 16,
+    pool_size_xy: int = 2,
+    norm: bool = True,
+):
+    image = load_image(image_path)
+    if (size_z := image.shape[1]) <= max_tokens_z:
+        patch_size_z = pool_size_z = stride_z = 1
+        tokens_z = size_z
+    else:
+        pool_size_z = base_pool_size_z
+        log2_patch_size_z = np.log2(size_z / (pool_size_z * max_tokens_z)),
+        log2_patch_size_z = np.clip(
+            np.rint(log2_patch_size_z), 0, base_patch_size_z.bit_length() - 1,
+        )
+        patch_size_z = 1 << int(log2_patch_size_z)
+        stride_z = patch_size_z * pool_size_z
+        tokens_z = min(math.ceil(size_z / stride_z), max_tokens_z)
+    patch_size = (patch_size_z, patch_size_xy, patch_size_xy)
+    stride_xy = patch_size_xy * pool_size_xy
+    stride = (stride_z, stride_xy, stride_xy)
+    resize_shape = (
+        min(size_z, tokens_z * stride_z),  # do not resize z if unnecessary
+        *get_max_resize(
+            image.shape[2:],
+            stride_xy,
+            max_vision_tokens // tokens_z,
+        ),
+    )
+    if resize_shape != image.shape[1:]:
+        resize = mt.Resize(resize_shape, mode=InterpolateMode.TRILINEAR, anti_aliasing=True)
+        image_resized = resize(image)
+    else:
+        image_resized = image
+    image_resized = mt.DivisiblePad(stride)(image_resized)
+    image_resized = convert_to_tensor(image_resized)
+    image_resized, _ = ensure_rgb(image_resized, contiguous=True)
+    if norm:
+        image_resized = intensity_norm(image_resized)
+    pool_size = (pool_size_z, pool_size_xy, pool_size_xy)
+    num_vision_tokens = (np.array(image_resized.shape[1:]) // stride).prod().item()
+    return image_resized, image, patch_size, pool_size, num_vision_tokens
+
 def main():
     parser = ArgumentParser()
     parser.add_argument('-c', action=ActionConfigFile)
@@ -74,20 +128,22 @@ def main():
     # parser.add_argument('--max_vision_tokens', type=int, required=True)
     args = parser.parse_args()
     args = parser.instantiate_classes(args)
-    model: AlignSam = args.model
+    model: AlignInstanceSam = args.model
     if args.ckpt_path is None:
         print('no checkpoint provided')
     else:
         model.load_state_dict(torch.load(args.ckpt_path)['state_dict'])
-    exit(0)
     model.to(dtype=torch.bfloat16,  device='cuda')
-    # R = np.random.RandomState(42)
     build_phrase_mapping()
     precision = HalfPrecision('bf16-true')
-    # data = orjson.loads((PROCESSED_VG_DATA_ROOT / 'CT-RATE/train.json').read_bytes())
-    from mmmm.data.dataset.local import get_local_data_list
-    data = get_local_data_list('BTCV-Abdomen', Split.TRAIN)
+    data = orjson.loads((PROCESSED_VG_DATA_ROOT / 'MIMIC-CXR/train.json').read_bytes())
+    # data = get_local_data_list('BTCV-Abdomen', Split.TRAIN)
     for item_idx, item in enumerate(tqdm(data)):
+        for image_path, plane in zip(item['image'], item['plane']):
+            if plane in {'AP', 'PA'}:
+                pass
+            else:
+                pass
         annotated_report: str = item['annotation']
         # findings_ann: str = item['findings-ann']
         # findings_remove_ann = findings_ann.replace('<p>', '').replace('</p>', '')
@@ -96,10 +152,19 @@ def main():
         phrases = parse_phrases(annotated_report)
         supported_phrases = []
         unsupported_phrases = []
-        for phrase in phrases:
+        supported_indexes = []
+        # image =
+        for i, phrase in enumerate(phrases):
             if (target := phrase_mapping.get(normalize(phrase))) is None:
                 unsupported_phrases.append(phrase)
             else:
+                item = {
+                    'image':
+                }
+                model.forward(
+
+                )
+                supported_indexes.append(i)
                 supported_phrases.append((phrase, target.name))
 
         # print(supported_phrases)
