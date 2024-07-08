@@ -36,4 +36,4 @@ init_args:
       box_giou_weight: 2
       disc_weight: 2
       disc_focal_gamma: 2
-      disc_focal_alpha: 0.9
+      disc_focal_alpha: 0.85
