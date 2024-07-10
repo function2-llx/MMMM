@@ -7,6 +7,7 @@ trainer:
   precision: bf16-true
   gradient_clip_val: 1
   gradient_clip_algorithm: norm
+  accumulate_grad_batches: 1
   strategy:
     class_path: lightning.pytorch.strategies.DDPStrategy
     init_args:
