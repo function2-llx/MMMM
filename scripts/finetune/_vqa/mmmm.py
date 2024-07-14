@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Callable
 
 import torch
@@ -10,10 +11,8 @@ LANGUAGE_TOKEN_TYPE = 0
 VISION_TOKEN_TYPE = 1
 
 class FinetuneMMMM(LightningModule):
-    def __init__(self, *, model_path: str):
+    def __init__(self, *, adapter_path: Path):
         super().__init__()
-
-        adapter_path = "/data/MMMM/output/vlm-post/run-20240615_035211-cjw9e7jo/checkpoint/step=6000.ckpt/adapter"
 
         model, tokenizer = from_pretrained('conf/model.yaml', adapter_path, True)
 
