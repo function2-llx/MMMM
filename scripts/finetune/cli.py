@@ -1,11 +1,11 @@
 from lightning.pytorch.cli import LightningArgumentParser
 from transformers import AutoTokenizer
 
-from _vqa.cogvlm import FinetuneCogVLM
+# from _vqa.cogvlm import FinetuneCogVLM
 # from _vqa.llavanext import FinetuneLlavaNEXT
 # from _vqa.llavamed import FinetuneLlavaMed
-from _vqa.m3d import FinetuneM3D
-from _vqa.radfm import FinetuneRadFM
+# from _vqa.m3d import FinetuneM3D
+# from _vqa.radfm import FinetuneRadFM
 from luolib.datamodule import ExpDataModuleBase
 from luolib.lightning import LightningModule
 from luolib.lightning.cli import LightningCLI
@@ -40,7 +40,7 @@ class CLI(LightningCLI):
             lora_config: LoraConfig = config.lora
             lora_config.target_modules = model.target_modules
             lora_config.modules_to_save = model.modules_to_save
-            if isinstance(model, FinetuneCogVLM):
+            if model.__class__.__name__ == 'FinetuneCogVLM':
                 peft_model = get_peft_model(model.cogvlm_model, lora_config)
                 model.set_peft_model(peft_model, prefix='cogvlm_model')
             # elif isinstance(model, FinetuneLlavaNEXT):
@@ -49,10 +49,10 @@ class CLI(LightningCLI):
             # elif isinstance(model, FinetuneLlavaMed):
             #     peft_model = get_peft_model(model.llavaM_model, lora_config)
             #     model.set_peft_model(peft_model, prefix='llavaM_model')
-            elif isinstance(model, FinetuneM3D):
+            elif model.__class__.__name__ == 'FinetuneM3D':
                 peft_model = get_peft_model(model.m3d_model, lora_config)
                 model.set_peft_model(peft_model, prefix='m3d_model')
-            elif isinstance(model, FinetuneRadFM):
+            elif model.__class__.__name__ == 'FinetuneRadFM':
                 peft_model = get_peft_model(model.radfm_model, lora_config)
                 model.set_peft_model(peft_model, prefix='radfm_model')
             else:
