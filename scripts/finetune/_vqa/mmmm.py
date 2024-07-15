@@ -3,14 +3,17 @@ from typing import Callable
 
 import torch
 
-from _vqa._base import VQADataModule, VQATransform
 from luolib.lightning import LightningModule
+from luolib.lightning.peft import PeftMixin
+
 from mmmm.models.mmmm import from_pretrained, MMMMForCausalLM, MMMMTokenizer
+
+from _vqa._base import VQADataModule, VQATransform
 
 LANGUAGE_TOKEN_TYPE = 0
 VISION_TOKEN_TYPE = 1
 
-class FinetuneMMMM(LightningModule):
+class FinetuneMMMM(PeftMixin, LightningModule):
     def __init__(self, *, adapter_path: Path):
         super().__init__()
 

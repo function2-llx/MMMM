@@ -10,6 +10,7 @@ from torch.nn import functional as nnf
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
 from luolib.lightning import LightningModule
+from luolib.lightning.peft import PeftMixin
 from luolib.losses import zero_loss
 from luolib.types import PathLike, param3_t, tuple2_t, tuple3_t
 
@@ -50,7 +51,7 @@ def _add_prefix(log_dict: dict[str, ...], prefix: str) -> dict[str, ...]:
         prefix += '/'
     return {f'{prefix}{k}': v for k, v in log_dict.items()}
 
-class MMMMForCausalLM(CogVLMForCausalLM, LightningModule):
+class MMMMForCausalLM(CogVLMForCausalLM, PeftMixin, LightningModule):
     tokenizer: MMMMTokenizer
     sam: Sam
     mask_loss: DiceFocalLoss | None
