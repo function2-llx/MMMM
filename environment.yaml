@@ -8,7 +8,7 @@ dependencies:
 - python=3.11
 - numpy
 - scikit-learn
-- pytorch::pytorch=2.3.0
+- pytorch::pytorch=2.3.1
 - pytorch::pytorch-cuda=12.1
 - pytorch::torchvision
 - ocl-icd-system  # https://github.com/conda-forge/openvino-feedstock/pull/73
@@ -39,6 +39,7 @@ dependencies:
 # comment out since we do not need bitsandbytes currently, and it can cause trouble: https://github.com/huggingface/peft/issues/1665
 #  - bitsandbytes  # bitsandbytes plays strangely with conda, it still depends on cudatoolkit=11.8
   - xformers -i https://download.pytorch.org/whl/cu121
+  - vllm
   - pynrrd
   - pylidc  # for LIDC data
   - evaluate
