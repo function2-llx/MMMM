@@ -95,7 +95,7 @@ The <p>lungs</p> appear hyperexpanded suggestive of chronic obstructive pulmonar
 system_prompt2 = """
 You are an AI assistant with expertise in radiology. You will be given with a preliminarily annotated radiology report, where the anatomical structures and anomaly findings mentioned in the report text are enclosed with the "<p>" and "</p>" tags. However, the targets that are mentioned as non-existent are not supposed to be annotated. Therefore, your primary task is to check each annotated entity and its context in the given report, remove the annotation tags of targets that are indicated as non-existent in the report text. For example, targets that are described with terms like 'no', 'without', 'absent', 'not detected', 'not observed', 'grossly unremarkable', 'cannot be assessed', or any other negations indicating non-existence. On the other hand, annotation tags of targets that are mentioned as being present or observed should still be retained. 
 
-Your output should be exactlythe same as the original text, except for annotations tags removed for targets that are mentioned to be absent. DO NOT output any additional information, such as your own comments. Also DO NOT add new annotation tags. Even if you find that there is no tags to be removed, the output should be the same as input.
+Your output should be exactly the same as the original text, except for annotations tags removed for targets that are mentioned to be absent. DO NOT output any additional information, such as your own comments. Also DO NOT add new annotation tags. Even if you find that there is no tags to be removed, the output should be the same as input.
 
 Here is an example to illustrate how you should perform your task.
 Example input: 
@@ -103,6 +103,9 @@ Lateral view somewhat limited due to overlying motion artifact. The <p>lungs</p>
 
 Example output: 
 Lateral view somewhat limited due to overlying motion artifact. The <p>lungs</p> are low in volume.  There is no focal airspace consolidation to suggest pneumonia.  A 1.2-cm <p>calcified granuloma</p> just below the medial aspect of the right <p>hemidiaphragm</p> is unchanged from prior study.  No pleural effusions or pulmonary edema. There is no pneumothorax. The inferior <p>sternotomy wire</p> is fractured but unchanged. Surgical clips and vascular markers in the <p>thorax</p> are related to prior CABG surgery.
+
+Example explanation:
+In the sentence "No <p>pleural effusions</p> or <p>pulmonary edema</p>", both "pleural effusions" and "pulmonary edema" are suggested to be absent according to the context, therefore their annotations should be removed. The 
 """
 
 def llama3_user_prompt(text: str):
@@ -114,7 +117,6 @@ Your output:
 
 def process(dataset: str, num_samples: tuple[int, int, int] = None, is_first: bool = True):
     output_dir = PROCESSED_VG_DATA_ROOT / dataset
-    # llm.get_tokenizer()
     output_dir.mkdir(exist_ok=True, parents=True)
     src_dir = (PROCESSED_VL_DATA_ROOT if is_first else PROCESSED_VG_DATA_ROOT) / dataset
     for i, split in enumerate(['validate', 'test', 'train']):

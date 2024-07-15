@@ -17,12 +17,14 @@ from luolib.types import PathLike
 from luolib.utils import load_pt_zst
 from luolib.utils.misc import ensure_rgb
 from mmmm.data.dataset.misc import get_max_resize
+from mmmm.data.utils import prepare_vlm_inputs
 from mmmm.misc import load_image
+from mmmm.models.mmmm import from_pretrained
 from monai.inferers import sliding_window_inference
 from monai.utils import BlendMode
 
 from mmmm.data import get_target_tax
-from mmmm.data.defs import PROCESSED_VG_DATA_ROOT, Split
+from mmmm.data.defs import ConvTurn, PROCESSED_VG_DATA_ROOT, Split
 from mmmm.data.sparse import Sparse
 from mmmm.data.target_tax import TargetClass
 from _data import _collate_fn
@@ -121,18 +123,24 @@ def image_transform(
     return image_resized, image, patch_size, pool_size, num_vision_tokens
 
 def main():
-    parser = ArgumentParser()
-    parser.add_argument('-c', action=ActionConfigFile)
-    parser.add_class_arguments(AlignInstanceSam, 'model')
-    parser.add_argument('--ckpt_path', type=Path | None)
-    # parser.add_argument('--max_vision_tokens', type=int, required=True)
-    args = parser.parse_args()
-    args = parser.instantiate_classes(args)
-    model: AlignInstanceSam = args.model
-    if args.ckpt_path is None:
-        print('no checkpoint provided')
-    else:
-        model.load_state_dict(torch.load(args.ckpt_path)['state_dict'])
+    # parser = ArgumentParser()
+    # parser.add_argument('-c', action=ActionConfigFile)
+    # parser.add_class_arguments(AlignInstanceSam, 'model')
+    # parser.add_argument('--ckpt_path', type=Path | None)
+    adapter_path = 'output/phase-vg+vlm/vg+vlm-post/seed-42/run-20240616_102650-3obxspn8/checkpoint/step=4600.ckpt/adapter'
+    model, tokenizer = from_pretrained('conf/model.yaml', adapter_path)
+    model = model.cuda()
+    image_path = 'data/processed/vision-language/MIMIC-CXR/files/p12/p12699874/s54061371/0791e888-c49848f9-5efcc8f6-eea5e10b-aea2c689.pt.zst'
+    image_resized, image, patch_size, pool_size, num_vision_tokens = image_transform(image_path, 144)
+    s = 'Findings: Development of small <p>pleural effusion</p> on the right with fluid within the <p>fissure</p>. <p>Opacity</p> at the right base may represent <p>atelectasis</p>; however, infection cannot be excluded. There is <p>atelectasis</p> at <p>left lung base</p>. Peripheral <p>left upper lobe opacity</p> is present. There is no <p>pneumothorax</p>. There are degenerative changes in the <p>thoracic spine</p>.\n\nImpression: Re-accumulation of small <p>right pleural effusion</p> with opacity at the <p>right base</p>, with non-specific consolidation at <p>right lung base</p> which could be infectious.'
+
+    vlm_inputs, text = prepare_vlm_inputs(
+        ConvTurn('Please provide a report for this medical image.', s),
+        tokenizer,
+        num_vision_tokens,
+        inference=False,
+        grounding=True,
+    )
     model.to(dtype=torch.bfloat16,  device='cuda')
     build_phrase_mapping()
     precision = HalfPrecision('bf16-true')
@@ -159,7 +167,7 @@ def main():
                 unsupported_phrases.append(phrase)
             else:
                 item = {
-                    'image':
+                    # 'image':
                 }
                 model.forward(
 
