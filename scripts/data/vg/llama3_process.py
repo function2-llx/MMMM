@@ -1,12 +1,14 @@
+import cytoolz
 import numpy as np
 import orjson
 import torch
-from jsonargparse import ArgumentParser
+from transformers import PreTrainedTokenizerFast
 from vllm import LLM, SamplingParams
 
-from mmmm.data.defs import PROCESSED_VG_DATA_ROOT, PROCESSED_VL_DATA_ROOT
+from mmmm.data.defs import PROCESSED_VG_DATA_ROOT
 
-model_id = "/data/llama3/Meta-Llama-3-70B-Instruct-hf"
+model_id = "/data/llama3/Meta-Llama-3-8B-Instruct-hf"
+# model_id = "/data/llama3/Meta-Llama-3-70B-Instruct-hf"
 # model_id = "/data/new_llm/Llama3-OpenBioLLM-70B"
 
 model_name = model_id.split("/")[-1]
@@ -19,94 +21,119 @@ sampling_params = SamplingParams(
 
 llm: LLM
 
-anatomy_lsit = [
-    "aorta",
-    'artery',
+anatomy_list = [
+    '[left; right] adrenal gland',
+    '[abdominal; thoracic] aorta',
+    '[left; right] clavicle',
     'colon',
+    'duodenum',
     'esophagus',
+    '[left; right] femur',
     'gallbladder',
-    'atrium',
-    'ventricle',
-    'vena cava',
-    'vein',
-    'kidney',
+    '[left; right] atrium',
+    '[left; right] ventricle',
+    '[left; right] humerus',
+    '[left; right] [common; main] [iliac; pulmonary; subclavian; carotid; brachiocephalic] artery',
+    '[left; right] [common iliac; pulmonary; brachiocephalic] vein',
+    '[inferior; superior] vena cava',
+    '[left; right] kidney',
     'liver',
-    'lung',
-    'lung lobe',
-    'heart',
+    '[left; right] lung [lower; middle; upper] lobe',
     'pancreas',
-    'rib',
-    'scapula',
+    '[left; right] [first; ...; twelfth] rib',
+    '[left; right] scapula',
     'spleen',
     'stomach',
     'trachea',
+    '[left; right] [main] bronchus',  # unable to segment, though
     'bladder',
-    'vertebra',
+    'heart',
+    '[left; right] atrial appendage',
+    '[left; right] lung',
     'thyroid',
-    'adrenal gland',
 ]
 anomaly_list = [
     'atelectasis',
     'cardiomegaly',
-    'edema',
-    'cardiomediastinum',
-    'fibrosis',
-    'hiatal hernia',
+    'pulmonary consolidation',
+    'pulmonary edema',
+    'widened mediastinum',
+    'rib fracture',
+    'pulmonary fibrosis',
+    'lung nodule',
+    'pulmonary opacification',
     'pleural effusion',
     'pneumothorax',
-    'pneumoperitoneum',
-    'pneumomediastinum',
-    'arterial wall calcification',
+
     'pericardial effusion',
-    'coronary artery wall calcification',
+    'hiatal hernia',
     'lymphadenopathy',
-    'emphysema',
-    'lung nodule',
-    'lung opacity',
+    'pulmonary emphysema',
     'peribronchial thickening',
-    'consolidation',
     'bronchiectasis',
     'interlobular septal thickening',
 ]
 
-system_prompt1 = f"""You are an AI assistant with expertise in radiology. Your main task is to meticulously review a provided radiology report and accurately identify key anatomical structures and anomaly findings mentioned within it. Here are non-exclusive lists to be focused:
-Anatomy: {', '.join(anatomy_lsit)}
-Anomaly: {', '.join(anomaly_list)}
-You should not highlight any other entities, such as symptoms, diseases, scan orientation, body systems or treatments, such as "AP/PA view", "chest", 
+
+tag_system_prompt = f"""You are an AI assistant with expertise in radiology. Your main task is to meticulously review a provided sentence from a radiology report and accurately identify the specified anatomical structures and anomaly findings mentioned in the report.
+The names of targets to be identified are primarily specified as follows:
+- anatomy (with optional anatomical modifiers): {'; '.join(anatomy_list)}
+- anomaly: {'; '.join(anomaly_list)}
+For each phrase identified as a target, convert it to the following format (similar to a hyperlink in Markdown): [<phrase>](<target>), where "<phrase>" denotes the original text of the identified phrase, "<target>" denotes the name of the target that the phrase is identified as. 
+
 Below are requirements:
-1. Include anatomic modifiers essential for precise localization when highlighting anatomical structures, such as "right", "left", "upper", "lower", "anterior", "posterior", "pulmonary", etc., when highlighting anatomical structures. But you must not highlight them when they are not modifying any anatomical structures.
-2. Avoid highlighting any targets explicitly stated as absent, negated, or otherwise indicated as not present or uncertain in the findings. For example, do not highlight terms in statements such as "There is no pleural effusion or pneumothorax" and "No pleural effusion, pneumothorax, or focal consolidation is present."
-3. Do not highlight targets that are too coarse, ambiguous, or amorphous to be spatially localized. E.g., you should not highlight "free fluid", "chest".
-4. If the very same target occurs multiple times, highlight the first occurrence. E.g., in the context of "The abdominal aorta is observed. An accessory hepatic artery arises from the abdominal aorta.", the second "abdominal aorta" should not be highlighted as it is the same target as the first one.
-5. Different targets, even with the same name, should be highlighted respectively. E.g., in "A lesion is observed upperside, another lesion is observed on the right", both two "lesions" should be highlighted respectively. 
-6. The output should be exactly the original text with additional tags, do not output any additional information. Even if no target is present in the text, the output should be the same as input.
-
-Enclose each relevant phrase to be highlighted with "<p>" and "</p>" tags. Some examples:
-Example input 1:
-Trachea, both main bronchi are normal. The ascending aorta has a transverse diameter of 40 mm and is minimally enlarged. Heart size is within normal limits. There is no pericardial thickening or effusion. There are calcified lymph nodes smaller than 1 cm in the mediastinum and left pulmonary hilus. When examined in the lung parenchyma window; A linear fibrotic band is observed in the posterobasal segment of the lower lobe of the right lung. Within the sections, the density of stones with a diameter of 1 cm in the gallbladder draws attention.
-Example output 1:
-<p>Trachea</p>, both main <p>bronchi</p> are normal. The ascending <p>aorta</p> has a transverse diameter of 40 mm and is minimally enlarged. <p>Heart</p> size is within normal limits. There is no pericardial thickening or effusion. There are calcified <p>lymph nodes</p> smaller than 1 cm in the <p>mediastinum</p>. When examined in the lung parenchyma window; A linear <p>fibrotic band</p> is observed in the posterobasal segment of the <p>lower lobe of the right lung</p>. Within the sections, the density of <p>stones</p> with a diameter of 1 cm in the <p>gallbladder</p> draws attention.
-Example input 2:
-The lungs appear hyperexpanded suggestive of chronic obstructive pulmonary disease. A focal nodule is noted posterior to the sternum. Additionally, there is enlargement of the left main pulmonary artery.  Cardiac silhouette is normal. Bibasilar opacities are visualized likely representative of bronchiectasis and fibrosis.  Calcifications of the origin of the great vessels are noted.
-Example output 2
-The <p>lungs</p> appear hyperexpanded suggestive of chronic obstructive pulmonary disease. A focal <p>nodule</p> is noted posterior to the <p>sternum</p>. Additionally, there is enlargement of the <p>left main pulmonary artery</p>.  <p>Cardiac silhouette</p> is normal. <p>Bibasilar opacities</p> are visualized likely representative of bronchiectasis and fibrosis.  <p>Calcifications</p> of the origin of the <p>great vessels</p> are noted.
+1. Include anatomic modifiers essential for precise localization when highlighting anatomical structures, such as "right", "left", "upper", "lower", "anterior", "posterior", "pulmonary". But you must not include them when they are not modifying any anatomical structures.
+2. Exclude any target explicitly stated as absent, negated, or otherwise indicated as not present or uncertain in the findings. For example, nothing should be included in the following negative statements:
+  - There is no pleural effusion or pneumothorax
+  - No pleural effusion, pneumothorax, or focal consolidation is present.
+3. Do not include targets that are too coarse, ambiguous, or amorphous to be spatially localized. E.g., you should not highlight "free fluid", "chest".
+4. The output should be exactly the original text with additional tags, do not output any additional information. Even if no target is present in the text, the output should be the same as input.
 """
+tag_examples = {
+    'CT-RATE': [
+        (
+            'Heart contour and size are normal. No pleural-pericardial effusion or thickening was detected. Trachea and both main bronchi are open. Minimal peribronchial thickness increase is observed. There are more prominent centriacinar emphysema and bulla-bleb formations in the upper lobes of both lungs. There are linear areas of atelectasis in both lungs and accompanying nonspecific ground-glass areas in the lower lobe posterior segments. There is a millimetric nonspecific nodule in the upper lobe of the left lung. No pathological increase in wall thickness was observed in the esophagus.',
+            'Findings: [Heart](heart) contour and size are normal. No pleural-pericardial effusion or thickening was detected. [Trachea](trachea) and both [main bronchi](main bronchus) are open. Minimal [peribronchial thickness](peribronchial thickening) increase is observed. There are more prominent centriacinar [emphysema](pulmonary emphysema) and bulla-bleb formations in the [upper lobes of both lungs](lung upper lobe). There are linear areas of [atelectasis](atelectasis) in both [lungs](lung) and accompanying nonspecific [ground-glass areas](pulmonary opacification) in the lower lobe posterior segments. There is a millimetric nonspecific [nodule](lung nodule) in the [upper lobe of the left lung](left lung upper lobe). No pathological increase in wall thickness was observed in the [esophagus](esophagus).',
+        ),
+        (
+            'Trachea, both main bronchi are open. Mediastinal main vascular structures, heart contour, size are normal. Thoracic aorta diameter is normal. Pericardial effusion-thickening was not observed. No enlarged lymph nodes in prevascular, pre-paratracheal, subcarinal or bilateral hilar-axillary pathological dimensions were detected. When examined in the lung parenchyma window; A calcific nodule with a diameter of 4 mm was observed in the paravertebral area in the superior lower lobe of the right lung. Upper abdominal organs included in the sections are normal. No space-occupying lesion was detected in the liver that entered the cross-sectional area. Bilateral adrenal glands were normal and no space-occupying lesion was detected.',
+            '[Trachea](trachea), both [main bronchi](main bronchus) are open. Mediastinal main vascular structures, [heart](heart) contour, size are normal. [Thoracic aorta](thoracic aorta) diameter is normal. Pericardial effusion-thickening was not observed. No enlarged lymph nodes in prevascular, pre-paratracheal, subcarinal or bilateral hilar-axillary pathological dimensions were detected. When examined in the lung parenchyma window; A calcific [nodule](lung nodule) with a diameter of 4 mm was observed in the paravertebral area in the [superior lower lobe of the right lung](right lung upper lobe). Upper abdominal organs included in the sections are normal. No space-occupying lesion was detected in the [liver](liver) that entered the cross-sectional area. Bilateral [adrenal glands](adrenal gland) were normal and no space-occupying lesion was detected.',
+        ),
+    ],
+    'MIMIC-CXR': [
+        (
+            'The lungs appear hyperexpanded suggestive of chronic obstructive pulmonary disease.',
+            'The [lungs](lung) appear hyperexpanded suggestive of chronic obstructive pulmonary disease.',
+        ),
+        (
+            'A focal nodule is noted posterior to the sternum.',
+            'A [focal nodule](lung nodule) is noted posterior to the sternum.',
+        ),
+        (
+            'Additionally, there is enlargement of the left main pulmonary artery.',
+            'Additionally, there is enlargement of the [left main pulmonary artery](left main pulmonary artery).',
+        ),
+        (
+            'Cardiac silhouette is normal. Bibasilar opacities are visualized likely representative of bronchiectasis and fibrosis.  Calcifications of the origin of the great vessels are noted.',
+            'The <p>lungs</p> appear hyperexpanded suggestive of chronic obstructive pulmonary disease. A focal <p>nodule</p> is noted posterior to the <p>sternum</p>. Additionally, there is enlargement of the <p>left main pulmonary artery</p>.  <p>Cardiac silhouette</p> is normal. <p>Bibasilar opacities</p> are visualized likely representative of bronchiectasis and fibrosis.  <p>Calcifications</p> of the origin of the <p>great vessels</p> are noted.',
+        ),
+    ]
+}
 
-system_prompt2 = """
-You are an AI assistant with expertise in radiology. You will be given with a preliminarily annotated radiology report, where the anatomical structures and anomaly findings mentioned in the report text are enclosed with the "<p>" and "</p>" tags. However, the targets that are mentioned as non-existent are not supposed to be annotated. Therefore, your primary task is to check each annotated entity and its context in the given report, remove the annotation tags of targets that are indicated as non-existent in the report text. For example, targets that are described with terms like 'no', 'without', 'absent', 'not detected', 'not observed', 'grossly unremarkable', 'cannot be assessed', or any other negations indicating non-existence. On the other hand, annotation tags of targets that are mentioned as being present or observed should still be retained. 
+prompt_filter = {
+    'system_prompt':
+"""You are an AI assistant with expertise in radiology. You will be given with a preliminarily annotated radiology report, where the anatomical structures and anomaly findings mentioned in the report text are enclosed with the "<p>" and "</p>" tags. However, the targets that are mentioned as non-existent are not supposed to be annotated. Therefore, your primary task is to check each annotated entity and its context in the given report, remove the annotation tags of targets that are indicated as non-existent in the report text. For example, targets that are described with terms like 'no', 'without', 'absent', 'not detected', 'not observed', 'grossly unremarkable', 'cannot be assessed', or any other negations indicating non-existence. On the other hand, annotation tags of targets that are mentioned as being present or observed should still be retained. 
 
 Your output should be exactly the same as the original text, except for annotations tags removed for targets that are mentioned to be absent. DO NOT output any additional information, such as your own comments. Also DO NOT add new annotation tags. Even if you find that there is no tags to be removed, the output should be the same as input.
-
-Here is an example to illustrate how you should perform your task.
-Example input: 
-Lateral view somewhat limited due to overlying motion artifact. The <p>lungs</p> are low in volume.  There is no focal airspace <p>consolidation<p> to suggest <p>pneumonia</p>.  A 1.2-cm <p>calcified granuloma</p> just below the medial aspect of the right <p>hemidiaphragm</p> is unchanged from prior study.  No <p>pleural effusions</p> or <p>pulmonary edema</p>. There is no <p>pneumothorax</p>. The inferior <p>sternotomy wire</p> is fractured but unchanged. Surgical clips and vascular markers in the <p>thorax</p> are related to prior CABG surgery.
-
-Example output: 
-Lateral view somewhat limited due to overlying motion artifact. The <p>lungs</p> are low in volume.  There is no focal airspace consolidation to suggest pneumonia.  A 1.2-cm <p>calcified granuloma</p> just below the medial aspect of the right <p>hemidiaphragm</p> is unchanged from prior study.  No pleural effusions or pulmonary edema. There is no pneumothorax. The inferior <p>sternotomy wire</p> is fractured but unchanged. Surgical clips and vascular markers in the <p>thorax</p> are related to prior CABG surgery.
-
-Example explanation:
-In the sentence "No <p>pleural effusions</p> or <p>pulmonary edema</p>", both "pleural effusions" and "pulmonary edema" are suggested to be absent according to the context, therefore their annotations should be removed. The 
-"""
+""",
+    'examples': [
+        (
+            'Lateral view somewhat limited due to overlying motion artifact. The <p>lungs</p> are low in volume.  There is no focal airspace <p>consolidation</p> to suggest <p>pneumonia</p>.  A 1.2-cm <p>calcified granuloma</p> just below the medial aspect of the right <p>hemidiaphragm</p> is unchanged from prior study.  No <p>pleural effusions</p> or <p>pulmonary edema</p>. There is no <p>pneumothorax</p>. The inferior <p>sternotomy wire</p> is fractured but unchanged. Surgical clips and vascular markers in the <p>thorax</p> are related to prior CABG surgery.',
+            'Lateral view somewhat limited due to overlying motion artifact. The <p>lungs</p> are low in volume.  There is no focal airspace consolidation to suggest pneumonia.  A 1.2-cm <p>calcified granuloma</p> just below the medial aspect of the right <p>hemidiaphragm</p> is unchanged from prior study.  No pleural effusions or pulmonary edema. There is no pneumothorax. The inferior <p>sternotomy wire</p> is fractured but unchanged. Surgical clips and vascular markers in the <p>thorax</p> are related to prior CABG surgery.',
+            'In the sentence "No <p>pleural effusions</p> or <p>pulmonary edema</p>", both "pleural effusions" and "pulmonary edema" are suggested to be absent according to the context, therefore their annotations should be removed.',
+        )
+    ]
+}
 
 def llama3_user_prompt(text: str):
     user_prompt = f"""
@@ -115,10 +142,41 @@ Your output:
 """
     return user_prompt
 
+def build_conv(
+    tokenizer: PreTrainedTokenizerFast,
+    system_prompt: str,
+    examples: list[tuple[str, str]],
+    query: str,
+):
+    conv = [
+        {
+            'role': 'system',
+            'content': system_prompt,
+        },
+        *cytoolz.concat(
+            (
+                {
+                    'role': 'user',
+                    'content': query_e,
+                },
+                {
+                    'role': 'assistant',
+                    'content': response_e,
+                },
+            )
+            for query_e, response_e in examples
+        ),
+        {
+            'role': 'user',
+            'content': query,
+        },
+    ]
+    return tokenizer.apply_chat_template(conv, tokenizer=False)
+
 def process(dataset: str, num_samples: tuple[int, int, int] = None, is_first: bool = True):
     output_dir = PROCESSED_VG_DATA_ROOT / dataset
     output_dir.mkdir(exist_ok=True, parents=True)
-    src_dir = (PROCESSED_VL_DATA_ROOT if is_first else PROCESSED_VG_DATA_ROOT) / dataset
+    # src_dir = (PROCESSED_VL_DATA_ROOT if is_first else PROCESSED_VG_DATA_ROOT) / dataset
     for i, split in enumerate(['validate', 'test', 'train']):
         data_path = src_dir / (f'{split}-processed.json' if is_first else f'{split}.json')
         if not data_path.exists():
@@ -132,7 +190,7 @@ def process(dataset: str, num_samples: tuple[int, int, int] = None, is_first: bo
         prompts = []
         for item in data:
             user_prompt = llama3_user_prompt(item['processed_report' if is_first else 'annotation'])
-            prompt = (system_prompt1 if is_first else system_prompt2) + '\n' + user_prompt
+            prompt = (system_prompt_tag if is_first else system_prompt_filter) + '\n' + user_prompt
             prompts.append(prompt)
         responses = llm.generate(prompts, sampling_params)
         for j, output in enumerate(responses):
@@ -153,10 +211,11 @@ def main():
         max_model_len=2048,
         enable_prefix_caching=True,
     )
-
-    parser = ArgumentParser()
-    parser.add_argument('--first', action='store_true')
-    args = parser.parse_args()
+    tokenizer = llm.get_tokenizer()
+    print(tokenizer)
+    # parser = ArgumentParser()
+    # parser.add_argument('--first', action='store_true')
+    # args = parser.parse_args()
     datasets = [
         # ('MIMIC-CXR', (10, 10, 10)),
         # ('CT-RATE', (10, 10, 10)),
@@ -165,7 +224,7 @@ def main():
     ]
     for dataset, num_samples in datasets:
         print(dataset)
-        process(dataset, num_samples, args.first)
+        process(dataset, num_samples)
 
 if __name__ == '__main__':
     main()
