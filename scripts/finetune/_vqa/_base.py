@@ -5,13 +5,14 @@ from torchvision.io import read_image, ImageReadMode
 from torchvision.transforms.v2 import functional as tvtf
 from transformers import PreTrainedTokenizer
 
-from scripts.finetune._utils import intensity_norm_, _pad_inputs, CE_IGNORE_INDEX
 from luolib.data.utils import list_data_collate
 from luolib.datamodule import ExpDataModuleBase
 from luolib.types import tuple2_t
+from monai import transforms as mt
+
 from mmmm.data.dataset.vl import get_vl_data_list
 from mmmm.data.defs import Split
-from monai import transforms as mt
+from _utils import intensity_norm_, _pad_inputs, CE_IGNORE_INDEX
 
 class VQATransform(mt.Randomizable):
     def __init__(self, tokenizer: PreTrainedTokenizer, resize: tuple2_t[int], max_seq_len: int | None):
@@ -69,7 +70,7 @@ class VQATransform(mt.Randomizable):
                 'input_ids': input_ids,
                 'labels': labels,
                 'attention_mask': torch.ones_like(input_ids),
-            }
+            },
         }
 
 

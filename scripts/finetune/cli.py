@@ -1,11 +1,6 @@
 from lightning.pytorch.cli import LightningArgumentParser
 from transformers import AutoTokenizer
 
-# from _vqa.cogvlm import FinetuneCogVLM
-# from _vqa.llavanext import FinetuneLlavaNEXT
-# from _vqa.llavamed import FinetuneLlavaMed
-# from _vqa.m3d import FinetuneM3D
-# from _vqa.radfm import FinetuneRadFM
 from luolib.datamodule import ExpDataModuleBase
 from luolib.lightning import LightningModule
 from luolib.lightning.cli import LightningCLI

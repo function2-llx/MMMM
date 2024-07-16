@@ -5,6 +5,8 @@ from jsonargparse import class_from_function
 import torch
 from transformers import LlamaTokenizer
 
+from luolib.types import PathLike
+
 class MMMMTokenizer(LlamaTokenizer):
     sys_token = '<sys>'
     sys_token_id: int
@@ -42,7 +44,7 @@ class MMMMTokenizer(LlamaTokenizer):
             setattr(self, f'{token_name}_id', special_token_id)
 
     @classmethod
-    def build(cls, hf_model_path: Path, use_seg_token: bool = False, share_seg_token: bool = True):
+    def build(cls, hf_model_path: PathLike, use_seg_token: bool = False, share_seg_token: bool = True):
         # no type hint (https://github.com/huggingface/transformers/blob/v4.38.2/src/transformers/tokenization_utils_base.py#L1827)
         # will cause jsonargparse fail (https://github.com/omni-us/jsonargparse/issues/454).
         return cls.from_pretrained(
