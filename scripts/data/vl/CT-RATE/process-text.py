@@ -9,10 +9,10 @@ from mmmm.data.target_tax import TargetCategory
 dataset_dir = ORIGIN_VL_DATA_ROOT / 'CT-RATE/dataset'
 
 labels = [
-    ('Arterial wall calcification', 'calcification'),
+    ('Arterial wall calcification', 'arterial calcification'),
     ('Cardiomegaly', 'cardiomegaly'),
     ('Pericardial effusion', 'pericardial effusion'),
-    ('Coronary artery wall calcification', 'calcification'),  # too hard to accurately taxonomize
+    ('Coronary artery wall calcification', 'arterial calcification'),  # too hard to accurately taxonomize
     ('Hiatal hernia', 'hiatal hernia'),
     ('Lymphadenopathy', 'lymphadenopathy'),
     ('Emphysema', 'pulmonary emphysema'),
@@ -77,6 +77,8 @@ def main():
                         study['anomaly_pos'].append(anomaly_name)
                     else:
                         study['anomaly_neg'].append(anomaly_name)
+                for _label in ['pos', 'neg']:
+                    study[f'anomaly_{_label}'] = list(set(study[f'anomaly_{_label}']))
                 data.append(study)
         (output_dir / f'{split}-raw.json').write_bytes(orjson.dumps(data, option=orjson.OPT_INDENT_2))
 
