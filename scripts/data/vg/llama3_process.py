@@ -9,8 +9,8 @@ from vllm import LLM, SamplingParams
 
 from mmmm.data.defs import PROCESSED_VG_DATA_ROOT, PROCESSED_VL_DATA_ROOT
 
-model_id = "/data/llama3/Meta-Llama-3-8B-Instruct-hf"
-# model_id = "/data/llama3/Meta-Llama-3-70B-Instruct-hf"
+# model_id = "/data/llama3/Meta-Llama-3-8B-Instruct-hf"
+model_id = "/data/llama3/Meta-Llama-3-70B-Instruct-hf"
 # model_id = "/data/new_llm/Llama3-OpenBioLLM-70B"
 
 # model_name = model_id.split("/")[-1]
@@ -84,21 +84,22 @@ anomaly_list = [
     'peribronchial thickening',
     'bronchiectasis',
     'interlobular septal thickening',
+    'vascular calcification',  # good luck!
 ]
 
 
-tag_system_prompt = f"""You are an AI assistant with expertise in radiology. Your main task is to meticulously review a provided sentence from a radiology report and accurately identify the specified anatomical structures and anomaly findings mentioned in the report.
+tag_system_prompt = f"""You are an AI assistant with expertise in radiology. Your main task is to meticulously review a provided radiology report and accurately identify the specified anatomical structures and anomaly findings mentioned in the report.
 The names of targets to be identified are primarily specified as follows:
 - anatomy list (with optional anatomical modifiers): {'; '.join(anatomy_list)}
 - anomaly list: {'; '.join(anomaly_list)}
-For each phrase identified as a target, convert it to the following format (similar to a hyperlink in Markdown): [<phrase>](<target>), where "<phrase>" denotes the original text of the identified phrase, "<target>" denotes the name of the target that the phrase is identified as. 
+For each phrase identified as a target, convert it to the following format (similar to a hyperlink in Markdown): [<phrase>](<target>), where "<phrase>" denotes the original text of the identified phrase, "<target>" denotes the name of the target provided above that the phrase is identified as.
 
 Below are requirements:
 1. Include anatomic modifiers essential for precise localization when highlighting anatomical structures, such as "right", "left", "upper", "lower", "anterior", "posterior", "pulmonary". But you must not include them when they are not modifying any anatomical structures.
 2. Exclude any target explicitly stated as absent, negated, or otherwise indicated as not present or uncertain in the findings. For example, nothing should be included in the following negative statements:
   - There is no pleural effusion or pneumothorax
   - No pleural effusion, pneumothorax, or focal consolidation is present.
-3. Do not include targets that are too coarse, ambiguous, or amorphous to be spatially localized. E.g., you should not highlight "free fluid", "chest".
+3. Do not include targets that are too coarse, ambiguous, or amorphous to be spatially localized, such as "free fluid", "chest", "abdomen".
 4. The output should be exactly the original text with additional tags, do not output any additional information. Even if no target is present in the text, the output should be the same as input.
 """
 tag_examples = {
@@ -111,23 +112,35 @@ tag_examples = {
             'Trachea, both main bronchi are open. Mediastinal main vascular structures, heart contour, size are normal. Thoracic aorta diameter is normal. Pericardial effusion-thickening was not observed. No enlarged lymph nodes in prevascular, pre-paratracheal, subcarinal or bilateral hilar-axillary pathological dimensions were detected. When examined in the lung parenchyma window; A calcific nodule with a diameter of 4 mm was observed in the paravertebral area in the superior lower lobe of the right lung. Upper abdominal organs included in the sections are normal. No space-occupying lesion was detected in the liver that entered the cross-sectional area. Bilateral adrenal glands were normal and no space-occupying lesion was detected.',
             '[Trachea](trachea), both [main bronchi](main bronchus) are open. Mediastinal main vascular structures, [heart](heart) contour, size are normal. [Thoracic aorta](thoracic aorta) diameter is normal. Pericardial effusion-thickening was not observed. No enlarged lymph nodes in prevascular, pre-paratracheal, subcarinal or bilateral hilar-axillary pathological dimensions were detected. When examined in the lung parenchyma window; A calcific [nodule](lung nodule) with a diameter of 4 mm was observed in the paravertebral area in the [superior lower lobe of the right lung](right lung upper lobe). Upper abdominal organs included in the sections are normal. No space-occupying lesion was detected in the [liver](liver) that entered the cross-sectional area. Bilateral [adrenal glands](adrenal gland) were normal and no space-occupying lesion was detected.',
         ),
+        (
+            'No occlusive pathology was observed in the lumen. Although the mediastinum cannot be evaluated optimally in non-contrast examination; The mediastinal main vascular structures are normal in heart contour and size. Pericardial effusion-thickening was not observed. Thoracic esophageal calibration was normal and no significant tumoral wall thickening was detected. Sliding type hiatal hernia is observed at the lower end of the esophagus. Focal patchy ground glass densities and interlobar and interlobular septal thickenings are observed in the right lung lower lobe anterobasal and left lung lower lobe anteromediobasal segment. Correlation with clinical and laboratory is recommended for atypical pneumonia. A nonspecific subpleural millimetric nodule was observed in the left superior lingular segment in both lungs. Liver, gall bladder, spleen, pancreas, both adrenal glands, and both kidneys are normal. Intraabdominal free fluid-collection was not observed. Bone structures in the study area are natural. Vertebral corpus heights are preserved.',
+            'No occlusive pathology was observed in the lumen. Although the mediastinum cannot be evaluated optimally in non-contrast examination; The mediastinal main vascular structures are normal in [heart](heart) contour and size. Pericardial effusion-thickening was not observed. Thoracic esophageal calibration was normal and no significant tumoral wall thickening was detected. Sliding type [hiatal hernia](hiatal hernia) is observed at the lower end of the [esophagus](esophagus). Focal patchy [ground glass densities](pulmonary opacification) and interlobar and [interlobular septal thickenings](interlobular septal thickening) are observed in the [right lung lower lobe](right lung lower lobe) anterobasal and [left lung lower lobe](left lung lower lobe) anteromediobasal segment. Correlation with clinical and laboratory is recommended for atypical pneumonia. A nonspecific subpleural millimetric [nodule](lung nodule) was observed in the left superior lingular segment in both [lungs](lung). [Liver](liver), [gall bladder](gallbladder), [spleen](spleen), [pancreas](pancreas), both [adrenal glands](adrenal gland), and both [kidneys](kidney) are normal. Intraabdominal free fluid-collection was not observed. Bone structures in the study area are natural. Vertebral corpus heights are preserved.',
+        ),
     ],
     'MIMIC-CXR': [
         (
-            'The lungs appear hyperexpanded suggestive of chronic obstructive pulmonary disease.',
-            'The [lungs](lung) appear hyperexpanded suggestive of chronic obstructive pulmonary disease.',
+            'Lungs are fully expanded and clear without focal consolidation or suspicious pulmonary nodules.  No pleural effusions.  Mild cardiomegaly is present without pulmonary vascular congestion or pulmonary edema.  Descending thoracic aorta is tortuous.  Median sternotomy wires are well aligned and intact.',
+            '[Lungs](lung) are fully expanded and clear without focal consolidation or suspicious pulmonary nodules.  No pleural effusions.  Mild [cardiomegaly](cardiomegaly) is present without pulmonary vascular congestion or pulmonary edema.  Descending [thoracic aorta](thoracic aorta) is tortuous.  Median sternotomy wires are well aligned and intact.',
         ),
         (
-            'A focal nodule is noted posterior to the sternum.',
-            'A [focal nodule](lung nodule) is noted posterior to the sternum.',
+            'Airspace consolidation is noted within the left lower lobe compatible with pneumonia.  Right lung is clear.  Imaged osseous structures are intact. No free air below the right hemidiaphragm is seen.',
+            'Airspace [consolidation](pulmonary consolidation) is noted within the [left lower lobe](left lung lower lobe) compatible with pneumonia.  [Right lung](right lung) is clear.  Imaged osseous structures are intact. No free air below the right hemidiaphragm is seen.',
         ),
         (
-            'Additionally, there is enlargement of the left main pulmonary artery.',
-            'Additionally, there is enlargement of the [left main pulmonary artery](left main pulmonary artery).',
+            'Moderate to severe cardiomegaly.  A hiatal hernia is present.  Minimal atelectasis is seen in the right base, and the lungs are otherwise clear.  No pneumothorax or pleural effusion is seen.',
+            'Moderate to severe [cardiomegaly](cardiomegaly).  A [hiatal hernia](hiatal hernia) is present.  Minimal [atelectasis](atelectasis) is seen in the right base, and the [lungs](lung) are otherwise clear.  No pneumothorax or pleural effusion is seen.',
         ),
         (
-            'Cardiac silhouette is normal. Bibasilar opacities are visualized likely representative of bronchiectasis and fibrosis.  Calcifications of the origin of the great vessels are noted.',
-            'The <p>lungs</p> appear hyperexpanded suggestive of chronic obstructive pulmonary disease. A focal <p>nodule</p> is noted posterior to the <p>sternum</p>. Additionally, there is enlargement of the <p>left main pulmonary artery</p>.  <p>Cardiac silhouette</p> is normal. <p>Bibasilar opacities</p> are visualized likely representative of bronchiectasis and fibrosis.  <p>Calcifications</p> of the origin of the <p>great vessels</p> are noted.',
+            'Dual lumen right-sided central venous catheter seen with the tip in the upper right atrium. Mild prominence of interstitial markings is seen. No large effusion is present. The cardiomediastinal silhouette is within normal limits. No acute osseous abnormalities are identified.',
+            'Dual lumen right-sided central venous catheter seen with the tip in the upper [right atrium](right atrium). Mild prominence of interstitial markings is seen. No large effusion is present. The cardiomediastinal silhouette is within normal limits. No acute osseous abnormalities are identified.',
+        ),
+        (
+            'The lungs appear hyperexpanded. A focal nodule is noted posterior to the sternum. Additionally, there is enlargement of the left main pulmonary artery.  Cardiac silhouette is normal.  Bibasilar opacities are visualized.  Calcifications of the origin of the great vessels are noted.',
+            'The [lungs](lung) appear hyperexpanded. A [focal nodule](lung nodule) is noted posterior to the sternum. Additionally, there is enlargement of the [left main pulmonary artery](left main pulmonary artery).  Cardiac silhouette is normal.  [Bibasilar opacities](pulmonary opacification) are visualized.  [Calcifications](vascular calcification) of the origin of the great vessels are noted.',
+        ),
+        (
+            'The heart is normal.  The hilar and mediastinal contours are normal. There is a right sided pneumothorax.  The right hemidiaphragm is elevated.  The left lung is clear. Rib fractures are seen bilaterally.',
+            'The [heart](heart) is normal.  The hilar and mediastinal contours are normal. There is a right sided [pneumothorax](pneumothorax).  The right hemidiaphragm is elevated.  The [left lung](left lung) is clear. [Rib fractures](rib fracture) are seen bilaterally.',
         ),
     ]
 }
@@ -213,7 +226,7 @@ def process(dataset: str, split: str, num_samples: int):
 
 def main():
     for dataset, num_samples_dict in [
-        # ('MIMIC-CXR', {'train': 10, 'test': 10}),
+        ('MIMIC-CXR', {'train': 10, 'test': 10}),
         ('CT-RATE', {'train': 10, 'test': 10}),
     ]:
         for split, num_samples in num_samples_dict.items():
