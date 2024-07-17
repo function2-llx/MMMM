@@ -118,6 +118,7 @@ class MMMMVQATransform(VQATransform):
             'vlm_inputs': vlm_inputs,
         }
 
+
 class MMMMVQADataModule(VQADataModule):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -125,3 +126,14 @@ class MMMMVQADataModule(VQADataModule):
     def train_transform(self) -> Callable:
         self.tokenizer = MMMMTokenizer.build('lmsys/vicuna-7b-v1.5')
         return MMMMVQATransform(self.tokenizer, resize=(0, 0), max_seq_len=None)
+
+    def _collate_fn(self, batch: list[dict]):
+        vlm_inputs_list: list[dict] = []
+        for x in batch:
+            vlm_inputs_list.append(x.pop('vlm_inputs'))
+        from _utils import _pad_inputs
+        ret = {
+            'image': [x['image'] for x in batch],
+            'vlm_inputs': _pad_inputs(vlm_inputs_list, self.tokenizer.pad_token_id),
+        }
+        return ret
