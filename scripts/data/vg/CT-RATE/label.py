@@ -3,32 +3,22 @@ from pathlib import Path
 import cytoolz
 import einops
 import inflect
-import matplotlib
-import torch
 from jsonargparse import ActionConfigFile, ArgumentParser
 from lightning.fabric.utilities import move_data_to_device
 from lightning.pytorch.plugins import HalfPrecision
-from matplotlib import pyplot as plt
-from matplotlib.colors import ListedColormap
-from matplotlib.patches import Rectangle
+import torch
 import torchvision.transforms.v2.functional as tvtf
 from tqdm import tqdm
 
 from luolib.utils import load_pt_zst
 from luolib.utils.misc import ensure_rgb
-from mmmm.misc import IndexTrackerBinary
-from monai.config import NdarrayOrTensor
 from monai.inferers import sliding_window_inference
-from monai.utils import BlendMode, convert_to_tensor
+from monai.utils import BlendMode
 
 from mmmm.data import get_target_tax
 from mmmm.data.defs import Split
 from mmmm.data.sparse import Sparse
 from mmmm.data.target_tax import TargetClass
-from mmmm.models.segvol.modeling.sam import InstanceSamOutput
-
-from _data import _collate_fn
-from _model import AlignSam
 
 engine = inflect.engine()
 _stop_words = {'the'}
@@ -72,6 +62,10 @@ def _dice(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
     return 2 * (x * y).sum() / (x.sum() + y.sum())
 
 def main():
+    from _utils import parse_grounded_report
+    report = '[Heart](heart) contour and size are normal. No pleural-pericardial effusion or thickening was detected. [Trachea](trachea) and both [main bronchi](main bronchus) are open. Minimal [peribronchial thickness](peribronchial thickening) increase is observed. There are more prominent centriacinar [emphysema](pulmonary emphysema) and bulla-bleb formations in the [upper lobes of both lungs](lung upper lobe). There are linear areas of [atelectasis](atelectasis) in both [lungs](lung) and accompanying nonspecific [ground-glass areas](pulmonary opacification) in the lower lobe posterior segments. There is a millimetric nonspecific [nodule](lung nodule) in the [upper lobe of the left lung](left lung upper lobe). No pathological increase in wall thickness was observed in the [esophagus](esophagus).'
+    parse_grounded_report(report)
+    exit(0)
     parser = ArgumentParser()
     parser.add_argument('-c', action=ActionConfigFile)
     parser.add_class_arguments(AlignSam, 'model')

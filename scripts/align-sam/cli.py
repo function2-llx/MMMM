@@ -5,8 +5,8 @@ from lightning.pytorch.cli import LightningArgumentParser
 
 from luolib.lightning.cli import LightningCLI
 
-from _data import DataModule
-from _model import AlignSam
+from mmmm.models.sam.data import DataModule
+from mmmm.models.sam import AlignSam
 
 class CLI(LightningCLI):
     model: AlignSam
