@@ -1,3 +1,5 @@
+import re
+
 import cytoolz
 import numpy as np
 import orjson
@@ -5,21 +7,31 @@ import torch
 from transformers import PreTrainedTokenizerFast
 from vllm import LLM, SamplingParams
 
-from mmmm.data.defs import PROCESSED_VG_DATA_ROOT
+from mmmm.data.defs import PROCESSED_VG_DATA_ROOT, PROCESSED_VL_DATA_ROOT
 
 model_id = "/data/llama3/Meta-Llama-3-8B-Instruct-hf"
 # model_id = "/data/llama3/Meta-Llama-3-70B-Instruct-hf"
 # model_id = "/data/new_llm/Llama3-OpenBioLLM-70B"
 
-model_name = model_id.split("/")[-1]
+# model_name = model_id.split("/")[-1]
 
+llm = LLM(
+    model=model_id,
+    tensor_parallel_size=torch.cuda.device_count(),
+    disable_custom_all_reduce=True,
+    # max_model_len=8192,
+    enable_prefix_caching=True,
+)
+tokenizer = llm.get_tokenizer()
 sampling_params = SamplingParams(
     temperature=0.,
     max_tokens=1024,
-    stop=["<|eot_id|>"],
+    stop=['<|eot_id|>'],
 )
 
 llm: LLM
+tokenizer: PreTrainedTokenizerFast
+sampling_params: SamplingParams
 
 anatomy_list = [
     '[left; right] adrenal gland',
@@ -77,8 +89,8 @@ anomaly_list = [
 
 tag_system_prompt = f"""You are an AI assistant with expertise in radiology. Your main task is to meticulously review a provided sentence from a radiology report and accurately identify the specified anatomical structures and anomaly findings mentioned in the report.
 The names of targets to be identified are primarily specified as follows:
-- anatomy (with optional anatomical modifiers): {'; '.join(anatomy_list)}
-- anomaly: {'; '.join(anomaly_list)}
+- anatomy list (with optional anatomical modifiers): {'; '.join(anatomy_list)}
+- anomaly list: {'; '.join(anomaly_list)}
 For each phrase identified as a target, convert it to the following format (similar to a hyperlink in Markdown): [<phrase>](<target>), where "<phrase>" denotes the original text of the identified phrase, "<target>" denotes the name of the target that the phrase is identified as. 
 
 Below are requirements:
@@ -93,7 +105,7 @@ tag_examples = {
     'CT-RATE': [
         (
             'Heart contour and size are normal. No pleural-pericardial effusion or thickening was detected. Trachea and both main bronchi are open. Minimal peribronchial thickness increase is observed. There are more prominent centriacinar emphysema and bulla-bleb formations in the upper lobes of both lungs. There are linear areas of atelectasis in both lungs and accompanying nonspecific ground-glass areas in the lower lobe posterior segments. There is a millimetric nonspecific nodule in the upper lobe of the left lung. No pathological increase in wall thickness was observed in the esophagus.',
-            'Findings: [Heart](heart) contour and size are normal. No pleural-pericardial effusion or thickening was detected. [Trachea](trachea) and both [main bronchi](main bronchus) are open. Minimal [peribronchial thickness](peribronchial thickening) increase is observed. There are more prominent centriacinar [emphysema](pulmonary emphysema) and bulla-bleb formations in the [upper lobes of both lungs](lung upper lobe). There are linear areas of [atelectasis](atelectasis) in both [lungs](lung) and accompanying nonspecific [ground-glass areas](pulmonary opacification) in the lower lobe posterior segments. There is a millimetric nonspecific [nodule](lung nodule) in the [upper lobe of the left lung](left lung upper lobe). No pathological increase in wall thickness was observed in the [esophagus](esophagus).',
+            '[Heart](heart) contour and size are normal. No pleural-pericardial effusion or thickening was detected. [Trachea](trachea) and both [main bronchi](main bronchus) are open. Minimal [peribronchial thickness](peribronchial thickening) increase is observed. There are more prominent centriacinar [emphysema](pulmonary emphysema) and bulla-bleb formations in the [upper lobes of both lungs](lung upper lobe). There are linear areas of [atelectasis](atelectasis) in both [lungs](lung) and accompanying nonspecific [ground-glass areas](pulmonary opacification) in the lower lobe posterior segments. There is a millimetric nonspecific [nodule](lung nodule) in the [upper lobe of the left lung](left lung upper lobe). No pathological increase in wall thickness was observed in the [esophagus](esophagus).',
         ),
         (
             'Trachea, both main bronchi are open. Mediastinal main vascular structures, heart contour, size are normal. Thoracic aorta diameter is normal. Pericardial effusion-thickening was not observed. No enlarged lymph nodes in prevascular, pre-paratracheal, subcarinal or bilateral hilar-axillary pathological dimensions were detected. When examined in the lung parenchyma window; A calcific nodule with a diameter of 4 mm was observed in the paravertebral area in the superior lower lobe of the right lung. Upper abdominal organs included in the sections are normal. No space-occupying lesion was detected in the liver that entered the cross-sectional area. Bilateral adrenal glands were normal and no space-occupying lesion was detected.',
@@ -135,19 +147,14 @@ Your output should be exactly the same as the original text, except for annotati
     ]
 }
 
-def llama3_user_prompt(text: str):
-    user_prompt = f"""
-Your input: {text}
-Your output:
-"""
-    return user_prompt
+# def llama3_user_prompt(text: str):
+#     user_prompt = f"""
+# Your input: {text}
+# Your output:
+# """
+#     return user_prompt
 
-def build_conv(
-    tokenizer: PreTrainedTokenizerFast,
-    system_prompt: str,
-    examples: list[tuple[str, str]],
-    query: str,
-):
+def build_few_shot_conv(system_prompt: str, examples: list[tuple[str, str]], query: str):
     conv = [
         {
             'role': 'system',
@@ -171,60 +178,46 @@ def build_conv(
             'content': query,
         },
     ]
-    return tokenizer.apply_chat_template(conv, tokenizer=False)
+    return tokenizer.apply_chat_template(conv, tokenize=False)
 
-def process(dataset: str, num_samples: tuple[int, int, int] = None, is_first: bool = True):
+def process(dataset: str, split: str, num_samples: int):
     output_dir = PROCESSED_VG_DATA_ROOT / dataset
     output_dir.mkdir(exist_ok=True, parents=True)
-    # src_dir = (PROCESSED_VL_DATA_ROOT if is_first else PROCESSED_VG_DATA_ROOT) / dataset
-    for i, split in enumerate(['validate', 'test', 'train']):
-        data_path = src_dir / (f'{split}-processed.json' if is_first else f'{split}.json')
-        if not data_path.exists():
-            print(f'split file: "{data_path}" not found')
-            continue
-        data = orjson.loads(data_path.read_bytes())
-        R = np.random.RandomState(42)
-        R.shuffle(data)
-        if num_samples[i] >= 0:
-            data = data[:num_samples[i]]
-        prompts = []
-        for item in data:
-            user_prompt = llama3_user_prompt(item['processed_report' if is_first else 'annotation'])
-            prompt = (system_prompt_tag if is_first else system_prompt_filter) + '\n' + user_prompt
-            prompts.append(prompt)
-        responses = llm.generate(prompts, sampling_params)
-        for j, output in enumerate(responses):
-            generated_text = output.outputs[0].text
-            # generated_text = generated_text.replace("Output: ", '')
-            # generated_text = generated_text.replace("```", '')
-            data[j]['annotation' if is_first else 'annotation-filtered'] = generated_text
-        output_path = output_dir / (f'{split}.json' if is_first else f'{split}-filtered.json')
-        output_path.write_bytes(orjson.dumps(data, option=orjson.OPT_INDENT_2))
+    report_pattern = re.compile(r'Findings:(.*?)(?=Impression:)Impression:(.*)', re.DOTALL)
+    data_path = PROCESSED_VL_DATA_ROOT / dataset / f'{split}-processed.json'
+    if not data_path.exists():
+        print(f'split file: "{data_path}" not found')
+        return
+    data: list[dict] = orjson.loads(data_path.read_bytes())
+    R = np.random.RandomState(42)
+    R.shuffle(data)
+    if num_samples >= 0:
+        data = data[:num_samples]
+    prompts = []
+    impressions = []
+    for item in data:
+        item.pop('findings')
+        item.pop('impression')
+        report = item['processed_report']
+        match = report_pattern.match(report)
+        findings, impression = match.group(1).strip(), match.group(2).strip()
+        impressions.append(impression)
+        prompts.append(
+            build_few_shot_conv(tag_system_prompt, tag_examples[dataset], findings),
+        )
+    responses = llm.generate(prompts, sampling_params)
+    for i, output in enumerate(responses):
+        tagged_findings = output.outputs[0].text
+        data[i]['tagged_report'] = f'Findings: {tagged_findings}\nImpression: {impressions[i]}'
+    (output_dir / f'{split}.json').write_bytes(orjson.dumps(data, option=orjson.OPT_INDENT_2))
 
 def main():
-    global llm
-
-    llm = LLM(
-        model=model_id,
-        tensor_parallel_size=torch.cuda.device_count(),
-        disable_custom_all_reduce=True,
-        max_model_len=2048,
-        enable_prefix_caching=True,
-    )
-    tokenizer = llm.get_tokenizer()
-    print(tokenizer)
-    # parser = ArgumentParser()
-    # parser.add_argument('--first', action='store_true')
-    # args = parser.parse_args()
-    datasets = [
-        # ('MIMIC-CXR', (10, 10, 10)),
-        # ('CT-RATE', (10, 10, 10)),
-        ('MIMIC-CXR', (0, 100, 3000)),
-        ('CT-RATE', (0, 100, 2000)),
-    ]
-    for dataset, num_samples in datasets:
-        print(dataset)
-        process(dataset, num_samples)
+    for dataset, num_samples_dict in [
+        # ('MIMIC-CXR', {'train': 10, 'test': 10}),
+        ('CT-RATE', {'train': 10, 'test': 10}),
+    ]:
+        for split, num_samples in num_samples_dict.items():
+            process(dataset, split, num_samples)
 
 if __name__ == '__main__':
     main()
