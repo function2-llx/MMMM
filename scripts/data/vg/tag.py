@@ -87,8 +87,9 @@ Below are requirements:
 2. Exclude any target explicitly stated as absent, negated, or otherwise indicated as not present or uncertain in the findings. For example, nothing should be included in the following negative statements:
   - There is no pleural effusion or pneumothorax
   - No pleural effusion, pneumothorax, or focal consolidation is present.
-3. Do not include targets that are too coarse, ambiguous, or amorphous to be spatially localized, such as "free fluid", "chest", "abdomen".
-4. The output should be exactly the original text extended with additional tags. Do not alter the input, or output any additional information. Even if no target is identified in the text, the output should be the same as input.
+3. A special case to tag: the enlargement of cardiac silhouette or heart can be tagged as "cardiomegaly".
+4. Do not include targets that are too coarse, ambiguous, or amorphous to be spatially localized, such as "free fluid", "chest", "abdomen".
+5. The output should be exactly the original text extended with additional tags. Do not alter the input, or output any additional information. Even if no target is identified in the text, the output should be the same as input.
 """
 tag_examples = {
     'CT-RATE': [
@@ -132,7 +133,7 @@ tag_examples = {
         ),
         (
             'Right upper lobe consolidation in posterior segment is present.  The lungs are hyperinflated.  6 mm right lower lobe nodule is present.  Small right pleural effusion is present.  There is no pneumothorax.  Mediastinal and cardiac contours are normal.',
-            '[Right upper lobe](right lung upper lobe) [consolidation](pulmonary consolidation) in posterior segment is present.  The [lungs](lung) are hyperinflated.  6 mm [right lower lobe](right lung lower lobe) [nodule](lung nodule) is present.  Small right [pleural effusion](pleural effusion) is present.  There is no pneumothorax.  Mediastinal and [cardiac contours](heart) are normal.',
+            'Right upper lobe [consolidation](pulmonary consolidation) in posterior segment is present.  The [lungs](lung) are hyperinflated.  6 mm right lower lobe [nodule](lung nodule) is present.  Small right [pleural effusion](pleural effusion) is present.  There is no pneumothorax.  Mediastinal and [cardiac contours](heart) are normal.',
         ),
         (
             'In the left mid and lower lung, there is an opacity concerning for pneumonia.  The right lung appears clear.  There is no pleural effusion on the right.  There is no evidence of pneumothorax in either lung.  The left hemidiaphragm is not well seen and a small left pleural effusion cannot be ruled out.',
@@ -161,6 +162,22 @@ tag_examples = {
         (
             'Bibasilar opacities are likely due to layering effusions. The upper lung fields appear normal. A rounded retrocardiac opacity is seen, which is suspicious for hiatal hernia.  The cardiomediastinal silhouette is enlarged. Degenerative changes are seen within the left shoulder. An endotracheal tube is seen terminating 3.2 cm above the carina.  A dual pacing device is seen within the left chest wall.',
             '[Bibasilar opacities](pulmonary opacification) are likely due to layering effusions. The upper [lung](lung) fields appear normal. A rounded retrocardiac opacity is seen, which is suspicious for [hiatal hernia](hiatal hernia).  The [cardiomediastinal silhouette](heart) is enlarged. Degenerative changes are seen within the left shoulder. An endotracheal tube is seen terminating 3.2 cm above the carina.  A dual pacing device is seen within the left chest wall.',
+        ),
+        (
+            'No definite pneumothorax.  Cardiac size is normal.  Bilateral low lung volumes.  Left mid lung and left lung base opacities likely reflect atelectasis.  Small left pleural effusion.  Median sternotomy wires are seen.  Right IJ catheter tip terminates in the lower SVC.',
+            'No definite pneumothorax.  [Cardiac](heart) size is normal.  Bilateral low [lung](lung) volumes.  Left mid lung and left lung base [opacities](pulmonary opacification) likely reflect [atelectasis](atelectasis).  Small left [pleural effusion](pleural effusion).  Median sternotomy wires are seen.  Right IJ catheter tip terminates in the lower SVC.',
+        ),
+        (
+            'Swan-Ganz catheter is in proximal right pulmonary artery.  NG tube enters the proximal stomach and is out of view.  ET tube is in appropriate position.    Aeration is seen in the upper lobes bilaterally with density of right lower lobe opacity with central lucency worrisome for cavitation. Left lower lobe opacity and small bilateral pleural effusions are present. Heart size is top normal with normal mediastinal contour.',
+            'Swan-Ganz catheter is in proximal [right pulmonary artery](right pulmonary artery).  NG tube enters the proximal [stomach](stomach) and is out of view.  ET tube is in appropriate position.    Aeration is seen in the [upper lobes](lung upper lobe) bilaterally with density of right lower lobe [opacity](pulmonary opacification) with central lucency worrisome for cavitation. Left lower lobe [opacity](pulmonary opacification) and small bilateral [pleural effusions](pleural effusion) are present. [Heart](heart) size is top normal with normal mediastinal contour.',
+        ),
+        (
+            'Mild cardiomegaly. Mild to moderate pulmonary edema. There is no pneumothorax. Retrocardiac opacities are likely atelectasis. Bilateral effusions are present. Central catheter tip is in the cavoatrial junction. Osseous metastasis is seen.',
+            'Mild [cardiomegaly](cardiomegaly). Mild to moderate [pulmonary edema](pulmonary edema). There is no pneumothorax. Retrocardiac [opacities](pulmonary opacification) are likely [atelectasis](atelectasis). Bilateral [effusions](pleural effusion) are present. Central catheter tip is in the cavoatrial junction. Osseous metastasis is seen.',
+        ),
+        (
+            'The heart is enlarged.  A left-sided cardiac generator pack projects leads into the right atrium and ventricle.  Bilateral upper zone opacities are present.  The hilar contours are within normal limits.  There is no effusion, edema, or pneumothorax.',
+            'The [heart](heart) is enlarged.  A left-sided cardiac generator pack projects leads into the [right atrium](right atrium) and [ventricle](right ventricle).  Bilateral upper zone [opacities](pulmonary opacification) are present.  The hilar contours are within normal limits.  There is no effusion, edema, or pneumothorax.',
         ),
     ]
 }
@@ -193,10 +210,6 @@ filter_examples = {
         (
             'In the [left mid and lower lung](left lung), there is an [opacity](pulmonary opacification) concerning for pneumonia.  The [right lung](right lung) appears clear.  There is no [pleural effusion](pleural effusion) on the right.  There is no evidence of [pneumothorax](pneumothorax) in either [lung](lung).  The left hemidiaphragm is not well seen and a small left [pleural effusion](pleural effusion) cannot be ruled out.',
             'In the [left mid and lower lung](left lung), there is an [opacity](pulmonary opacification) concerning for pneumonia.  The [right lung](right lung) appears clear.  There is no pleural effusion on the right.  There is no evidence of pneumothorax in either [lung](lung).  The left hemidiaphragm is not well seen and a small left pleural effusion cannot be ruled out.',
-        ),
-        (
-            'No definite pneumothorax.  Cardiac size is normal.  Bilateral low lung volumes.  Left mid lung and left lung base opacities likely reflect atelectasis.  Small left pleural effusion.  Median sternotomy wires are seen.  Right IJ catheter tip terminates in the lower SVC.',
-            'No definite pneumothorax.  [Cardiac](heart) size is normal.  Bilateral low [lung](lung) volumes.  [Left mid lung](left lung) and left lung base [opacities](pulmonary opacification) likely reflect [atelectasis](atelectasis).  Small left [pleural effusion](pleural effusion).  Median sternotomy wires are seen.  Right IJ catheter tip terminates in the lower SVC.',
         ),
     ],
     'CT-RATE': [
@@ -329,7 +342,7 @@ def main():
 
     for dataset, num_samples_dict in [
         ('MIMIC-CXR', {'train': 2000, 'test': 500}),
-        ('CT-RATE', {'train': 500, 'test': 0}),
+        # ('CT-RATE', {'train': 500, 'test': 0}),
     ]:
         for split, num_samples in num_samples_dict.items():
             process(dataset, split, num_samples)
