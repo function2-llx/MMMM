@@ -1,5 +1,4 @@
 import re
-import sys
 
 import cytoolz
 from jsonargparse import ArgumentParser
