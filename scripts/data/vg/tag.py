@@ -156,7 +156,11 @@ tag_examples = {
         ),
         (
             'Left lower lung linear opacities are present.  The heart size is normal and there is no evidence of vascular congestion, pleural effusion, or pneumothorax.  Elevation of the right hemidiaphragmatic contour is seen.  The bones and soft tissues are normal.',
-            '[Left lower lung](left lung lower lobe) linear [opacities](pulmonary opacification) are present.  The [heart](heart) size is normal and there is no evidence of vascular congestion, pleural effusion, or pneumothorax.  Elevation of the right hemidiaphragmatic contour is seen.  The bones and soft tissues are normal.',
+            'Left lower lung linear [opacities](pulmonary opacification) are present.  The [heart](heart) size is normal and there is no evidence of vascular congestion, pleural effusion, or pneumothorax.  Elevation of the right hemidiaphragmatic contour is seen.  The bones and soft tissues are normal.',
+        ),
+        (
+            'Bibasilar opacities are likely due to layering effusions. The upper lung fields appear normal. A rounded retrocardiac opacity is seen, which is suspicious for hiatal hernia.  The cardiomediastinal silhouette is enlarged. Degenerative changes are seen within the left shoulder. An endotracheal tube is seen terminating 3.2 cm above the carina.  A dual pacing device is seen within the left chest wall.',
+            '[Bibasilar opacities](pulmonary opacification) are likely due to layering effusions. The upper [lung](lung) fields appear normal. A rounded retrocardiac opacity is seen, which is suspicious for [hiatal hernia](hiatal hernia).  The [cardiomediastinal silhouette](heart) is enlarged. Degenerative changes are seen within the left shoulder. An endotracheal tube is seen terminating 3.2 cm above the carina.  A dual pacing device is seen within the left chest wall.',
         ),
     ]
 }
@@ -189,6 +193,10 @@ filter_examples = {
         (
             'In the [left mid and lower lung](left lung), there is an [opacity](pulmonary opacification) concerning for pneumonia.  The [right lung](right lung) appears clear.  There is no [pleural effusion](pleural effusion) on the right.  There is no evidence of [pneumothorax](pneumothorax) in either [lung](lung).  The left hemidiaphragm is not well seen and a small left [pleural effusion](pleural effusion) cannot be ruled out.',
             'In the [left mid and lower lung](left lung), there is an [opacity](pulmonary opacification) concerning for pneumonia.  The [right lung](right lung) appears clear.  There is no pleural effusion on the right.  There is no evidence of pneumothorax in either [lung](lung).  The left hemidiaphragm is not well seen and a small left pleural effusion cannot be ruled out.',
+        ),
+        (
+            'No definite pneumothorax.  Cardiac size is normal.  Bilateral low lung volumes.  Left mid lung and left lung base opacities likely reflect atelectasis.  Small left pleural effusion.  Median sternotomy wires are seen.  Right IJ catheter tip terminates in the lower SVC.',
+            'No definite pneumothorax.  [Cardiac](heart) size is normal.  Bilateral low [lung](lung) volumes.  [Left mid lung](left lung) and left lung base [opacities](pulmonary opacification) likely reflect [atelectasis](atelectasis).  Small left [pleural effusion](pleural effusion).  Median sternotomy wires are seen.  Right IJ catheter tip terminates in the lower SVC.',
         ),
     ],
     'CT-RATE': [
@@ -320,8 +328,8 @@ def main():
     )
 
     for dataset, num_samples_dict in [
-        ('MIMIC-CXR', {'train': 500, 'test': 500}),
-        ('CT-RATE', {'train': 500, 'test': 500}),
+        ('MIMIC-CXR', {'train': 2000, 'test': 500}),
+        ('CT-RATE', {'train': 500, 'test': 0}),
     ]:
         for split, num_samples in num_samples_dict.items():
             process(dataset, split, num_samples)
