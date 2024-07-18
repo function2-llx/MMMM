@@ -161,7 +161,7 @@ tag_examples = {
         ),
         (
             'Bibasilar opacities are likely due to layering effusions. The upper lung fields appear normal. A rounded retrocardiac opacity is seen, which is suspicious for hiatal hernia.  The cardiomediastinal silhouette is enlarged. Degenerative changes are seen within the left shoulder. An endotracheal tube is seen terminating 3.2 cm above the carina.  A dual pacing device is seen within the left chest wall.',
-            '[Bibasilar opacities](pulmonary opacification) are likely due to layering effusions. The upper [lung](lung) fields appear normal. A rounded retrocardiac opacity is seen, which is suspicious for [hiatal hernia](hiatal hernia).  The [cardiomediastinal silhouette](heart) is enlarged. Degenerative changes are seen within the left shoulder. An endotracheal tube is seen terminating 3.2 cm above the carina.  A dual pacing device is seen within the left chest wall.',
+            '[Bibasilar opacities](pulmonary opacification) are likely due to layering effusions. The upper [lung](lung) fields appear normal. A rounded retrocardiac opacity is seen, which is suspicious for [hiatal hernia](hiatal hernia).  The [cardiomediastinal silhouette](heart) is [enlarged](cardiomegaly). Degenerative changes are seen within the left shoulder. An endotracheal tube is seen terminating 3.2 cm above the carina.  A dual pacing device is seen within the left chest wall.',
         ),
         (
             'No definite pneumothorax.  Cardiac size is normal.  Bilateral low lung volumes.  Left mid lung and left lung base opacities likely reflect atelectasis.  Small left pleural effusion.  Median sternotomy wires are seen.  Right IJ catheter tip terminates in the lower SVC.',
@@ -177,7 +177,7 @@ tag_examples = {
         ),
         (
             'The heart is enlarged.  A left-sided cardiac generator pack projects leads into the right atrium and ventricle.  Bilateral upper zone opacities are present.  The hilar contours are within normal limits.  There is no effusion, edema, or pneumothorax.',
-            'The [heart](heart) is enlarged.  A left-sided cardiac generator pack projects leads into the [right atrium](right atrium) and [ventricle](right ventricle).  Bilateral upper zone [opacities](pulmonary opacification) are present.  The hilar contours are within normal limits.  There is no effusion, edema, or pneumothorax.',
+            'The [heart](heart) is [enlarged](cardiomegaly).  A left-sided cardiac generator pack projects leads into the [right atrium](right atrium) and [ventricle](right ventricle).  Bilateral upper zone [opacities](pulmonary opacification) are present.  The hilar contours are within normal limits.  There is no effusion, edema, or pneumothorax.',
         ),
     ]
 }
@@ -193,7 +193,7 @@ filter_examples = {
     'MIMIC-CXR': [
         (
             'Left-sided pacemaker device is noted with leads terminating in the [right atrium](right atrium), [right ventricle](right ventricle), and coronary sinus.  The [heart](heart) size is mildly enlarged.  The [aortic knob](thoracic aorta) is calcified.  Mild [pulmonary edema](pulmonary edema) with perihilar haziness and vascular indistinctness is seen.  Focal opacities at [lung](lung) bases may reflect areas of [atelectasis](atelectasis) though infection cannot be excluded.  Small bilateral [pleural effusions](pleural effusion) may be present.  No [pneumothorax](pneumothorax) is identified.',
-            'Left-sided pacemaker device is noted with leads terminating in the [right atrium](right atrium), [right ventricle](right ventricle), and coronary sinus.  The [heart](heart) size is mildly enlarged.  The [aortic knob](thoracic aorta) is calcified.  Mild [pulmonary edema](pulmonary edema) with perihilar haziness and vascular indistinctness is seen.  Focal opacities at [lung](lung) bases may reflect areas of [atelectasis](atelectasis) though infection cannot be excluded.  Small bilateral [pleural effusions](pleural effusion) may be present.  No pneumothorax is identified.',
+            'Left-sided pacemaker device is noted with leads terminating in the [right atrium](right atrium), [right ventricle](right ventricle), and coronary sinus.  The [heart](heart) size is mildly [enlarged](cardiomegaly).  The [aortic knob](thoracic aorta) is calcified.  Mild [pulmonary edema](pulmonary edema) with perihilar haziness and vascular indistinctness is seen.  Focal opacities at [lung](lung) bases may reflect areas of [atelectasis](atelectasis) though infection cannot be excluded.  Small bilateral [pleural effusions](pleural effusion) may be present.  No pneumothorax is identified.',
         ),
         (
             'A endotracheal tube terminates 3.4 cm above the [carina](trachea).  There is an orogastric tube terminating within the [stomach](stomach).  A confluent right mid lower zone opacity with a central rounded lucency is seen, which may reflect cavitary lesion or abscess.  No underlying consolidations are present.  No [pneumothorax](pneumothorax) is seen.',
@@ -201,7 +201,7 @@ filter_examples = {
         ),
         (
             'Mild-to-moderate [pulmonary edema](pulmonary edema) is present with interstitial markings.  Small bilateral [pleural effusions](pleural effusion) are not seen.  There is no focal consolidation or [pneumothorax](pneumothorax).  [Heart](heart) size is moderately enlarged.  A left chest wall Port-A-Cath terminates in the [RA](right atrium).  Vertebroplasties are seen.',
-            'Mild-to-moderate [pulmonary edema](pulmonary edema) is present with interstitial markings.  Small bilateral pleural effusions are not seen.  There is no focal consolidation or pneumothorax.  [Heart](heart) size is moderately enlarged.  A left chest wall Port-A-Cath terminates in the [RA](right atrium).  Vertebroplasties are seen.',
+            'Mild-to-moderate [pulmonary edema](pulmonary edema) is present with interstitial markings.  Small bilateral pleural effusions are not seen.  There is no focal consolidation or pneumothorax.  [Heart](heart) size is moderately [enlarged](cardiomegaly).  A left chest wall Port-A-Cath terminates in the [RA](right atrium).  Vertebroplasties are seen.',
         ),
         (
             'An endotracheal tube terminates 4.1 cm above the [carina](trachea).  An enteric tube terminates in the proximal [stomach](stomach) and could be advanced for ideal positioning.  Low [lung](lung) volumes. Minimal elevation of the right hemidiaphragm is present.  The [left lung](left lung) base is not visualized.  Increased opacity at the base of the [left lung](left lung) may reflect [atelectasis](atelectasis).  Mild [vascular congestion](pulmonary vascular congestion) with mild [pulmonary edema](pulmonary edema) is seen.  No [pneumothorax](pneumothorax) is seen.',
@@ -258,7 +258,7 @@ _target_pattern = re.compile(r'\[(.*?)\]\((.*?)\)')
 
 def process(dataset: str, split: str, num_samples: int):
     print(dataset, split, num_samples)
-    report_pattern = re.compile(r'Findings:(.*?)(?=Impression:)Impression:(.*)', re.DOTALL)
+    report_pattern = re.compile(r'.*?(?=Findings:)Findings:(.*?)(?=Impression:)Impression:(.*)', re.DOTALL)
     data_path = PROCESSED_VL_DATA_ROOT / dataset / f'{split}-processed.json'
     if not data_path.exists():
         print(f'split file: "{data_path}" not found')
@@ -341,8 +341,8 @@ def main():
     )
 
     for dataset, num_samples_dict in [
-        ('MIMIC-CXR', {'train': 2000, 'test': 500}),
-        # ('CT-RATE', {'train': 500, 'test': 0}),
+        ('MIMIC-CXR', {'train': 20000, 'test': -1}),
+        ('CT-RATE', {'train': 5000, 'test': 0}),
     ]:
         for split, num_samples in num_samples_dict.items():
             process(dataset, split, num_samples)
