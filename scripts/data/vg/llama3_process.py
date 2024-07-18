@@ -1,7 +1,8 @@
-import os
 import re
+import sys
 
 import cytoolz
+from jsonargparse import ArgumentParser
 import numpy as np
 import orjson
 import torch
@@ -10,27 +11,6 @@ from transformers import PreTrainedTokenizerFast
 from vllm import LLM, SamplingParams
 
 from mmmm.data.defs import PROCESSED_VG_DATA_ROOT, PROCESSED_VL_DATA_ROOT
-
-# model_id = "/data/llama3/Meta-Llama-3-8B-Instruct-hf"
-model_id = os.getenv('GRG_MODEL_ID', '/data/llama3/Meta-Llama-3-70B-Instruct-hf')
-# model_id = "/data/new_llm/Llama3-OpenBioLLM-70B"
-
-# model_name = model_id.split("/")[-1]
-
-llm = LLM(
-    model=model_id,
-    tensor_parallel_size=torch.cuda.device_count(),
-    disable_custom_all_reduce=True,
-    max_model_len=4096,
-    enable_prefix_caching=True,
-    gpu_memory_utilization=0.95,
-)
-tokenizer = llm.get_tokenizer()
-sampling_params = SamplingParams(
-    temperature=0.,
-    max_tokens=2048,
-    stop=['<|eot_id|>'],
-)
 
 llm: LLM
 tokenizer: PreTrainedTokenizerFast
@@ -226,8 +206,8 @@ def process(dataset: str, split: str, num_samples: int):
         print(f'split file: "{data_path}" not found')
         return
     data: list[dict] = orjson.loads(data_path.read_bytes())
-    R = np.random.RandomState(42)
-    R.shuffle(data)
+    rng = np.random.default_rng(42)
+    rng.shuffle(data)
     if num_samples >= 0:
         data = data[:num_samples]
     tag_prompts = []
@@ -247,9 +227,8 @@ def process(dataset: str, split: str, num_samples: int):
     tag_responses = llm.generate(tag_prompts, sampling_params)
 
     filter_prompts = []
-    for i, tag_response in enumerate(tqdm(tag_responses, 'building filter inputs')):
-        tagged_findings = tag_response.outputs[0].text
-        data[i]['tagged_findings'] = tagged_findings
+    for i, item in enumerate(tqdm(data, 'building filter inputs')):
+        data[i]['tagged_findings'] = tagged_findings = tag_responses[i].outputs[0].text
         filter_prompts.append(
             build_few_shot_conv(filter_system_prompt, filter_examples[dataset], tagged_findings),
         )
@@ -257,32 +236,57 @@ def process(dataset: str, split: str, num_samples: int):
     filter_responses = llm.generate(filter_prompts, sampling_params)
     for i, item in enumerate(tqdm(data, 'post processing')):
         findings_prefix = 'Findings: '
-        prefix_offset = len(findings_prefix)
+        # will accumulate the total length of reduced tags
+        offset = len(findings_prefix)
+        item['filtered_tagged_findings'] = filtered_tagged_findings = filter_responses[i].outputs[0].text
+        # NOTE: the `_target_pattern` will be matched twice, once for `sub`, once for `finditer`
+        ref_findings = _target_pattern.sub(r'\1', filtered_tagged_findings)
+        item['ref_report'] = ref_report = f'{findings_prefix}{ref_findings}\nImpression: {impressions[i]}'
         tags = []
-        filtered_tagged_findings = filter_responses[i].outputs[0].text
-        # NOTE: the pattern is matched twice, once for `sub`, once for `finditer`
         for match in _target_pattern.finditer(filtered_tagged_findings):
             # do not strip `phrase` for safety
             phrase, target = match.group(1), match.group(2).strip()
-            start = prefix_offset + match.start(1) - 1
+            start = offset + match.start()
+            end = start + len(phrase)
+            assert phrase == ref_report[start:end]
             tags.append({
                 'phrase': phrase,
                 'target': target,
                 'start': start,
-                'end': start + len(phrase),
+                'end': end,
             })
-        ref_findings = _target_pattern.sub(r'\1', filtered_tagged_findings)
-        ref_report = f'{findings_prefix}{ref_findings}\nImpression: {impressions[i]}'
-        item['ref_report'] = ref_report
+            # accumulate the length of reduced `[](<target>)`
+            offset -= len(target) + 4
+        # order matters for eyes
         item['tags'] = tags
     output_dir = PROCESSED_VG_DATA_ROOT / dataset
     output_dir.mkdir(exist_ok=True, parents=True)
     (output_dir / f'{split}.json').write_bytes(orjson.dumps(data, option=orjson.OPT_INDENT_2))
 
 def main():
+    global llm, tokenizer, sampling_params
+    parser = ArgumentParser()
+    parser.add_class_arguments(
+        LLM, 'llm',
+        default=dict(
+            tensor_parallel_size=torch.cuda.device_count(),
+            disable_custom_all_reduce=True,
+            enable_prefix_caching=True,
+        ),
+    )
+    args = parser.parse_args()
+    init = parser.instantiate_classes(args)
+    llm = init.llm
+    tokenizer = llm.get_tokenizer()
+    sampling_params = SamplingParams(
+        temperature=0.,
+        max_tokens=2048,
+        stop=['<|eot_id|>'],
+    )
+
     for dataset, num_samples_dict in [
-        ('MIMIC-CXR', {'train': 10, 'test': 10}),
-        ('CT-RATE', {'train': 10, 'test': 10}),
+        ('MIMIC-CXR', {'train': 500, 'test': 500}),
+        ('CT-RATE', {'train': 500, 'test': 500}),
     ]:
         for split, num_samples in num_samples_dict.items():
             process(dataset, split, num_samples)
