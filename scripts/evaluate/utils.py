@@ -247,6 +247,7 @@ class LlamaMetrics:
                     },
                 ],
                 tokenize=False,
+                add_generation_prompt=True,
             )
             for _, row in df.iterrows()
         ]

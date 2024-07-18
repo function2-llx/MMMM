@@ -85,12 +85,14 @@ def process_reports(model: LLM, sampling_params: SamplingParams, dataset: str, s
             prompts = [tokenizer.apply_chat_template(
                 [{'role': 'user', 'content': mimic_cxr_prompt_1.format(input=x)}],
                 tokenize=False,
+                add_generation_prompt=True,
             ) for x in reports]
             responses = model.generate(prompts, sampling_params)
             processed1 = [x.outputs[0].text for x in responses]
             prompts = [tokenizer.apply_chat_template(
                 [{'role': 'user', 'content': mimic_cxr_prompt_2.format(input=x)}],
                 tokenize=False,
+                add_generation_prompt=True,
             ) for x in processed1]
             responses = model.generate(prompts, sampling_params)
             processed2 = [x.outputs[0].text for x in responses]
@@ -105,6 +107,7 @@ def process_reports(model: LLM, sampling_params: SamplingParams, dataset: str, s
             prompts = [tokenizer.apply_chat_template(
                 [{'role': 'user', 'content': ct_rate_prompt.format(input=x)}],
                 tokenize=False,
+                add_generation_prompt=True,
             ) for _, x in filtered]
             responses = model.generate(prompts, sampling_params)
             filtered_processed = [x.outputs[0].text for x in responses]
@@ -121,6 +124,7 @@ def process_reports(model: LLM, sampling_params: SamplingParams, dataset: str, s
             prompts = [tokenizer.apply_chat_template(
                 [{'role': 'user', 'content': open_i_prompt.format(input=x)}],
                 tokenize=False,
+                add_generation_prompt=True,
             ) for x in reports]
             responses = model.generate(prompts, sampling_params)
             processed = [x.outputs[0].text for x in responses]
@@ -145,6 +149,7 @@ def process_captions(model: LLM, sampling_params: SamplingParams, dataset: str, 
         prompts = [tokenizer.apply_chat_template(
             [{'role': 'user', 'content': roco_prompt.format(input=x)}],
             tokenize=False,
+            add_generation_prompt=True,
         ) for x in captions]
         responses = model.generate(prompts, sampling_params)
         processed = [x.outputs[0].text for x in responses]

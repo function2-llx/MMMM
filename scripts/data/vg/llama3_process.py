@@ -214,7 +214,7 @@ def build_few_shot_conv(system_prompt: str, examples: list[tuple[str, str]], que
             'content': query,
         },
     ]
-    return tokenizer.apply_chat_template(conv, tokenize=False)
+    return tokenizer.apply_chat_template(conv, tokenize=False, add_generation_prompt=True)
 
 _target_pattern = re.compile(r'\[(.*?)\]\((.*?)\)')
 
@@ -281,8 +281,8 @@ def process(dataset: str, split: str, num_samples: int):
 
 def main():
     for dataset, num_samples_dict in [
-        ('MIMIC-CXR', {'train': 500, 'test': 500}),
-        ('CT-RATE', {'train': 500, 'test': 500}),
+        ('MIMIC-CXR', {'train': 10, 'test': 10}),
+        ('CT-RATE', {'train': 10, 'test': 10}),
     ]:
         for split, num_samples in num_samples_dict.items():
             process(dataset, split, num_samples)
