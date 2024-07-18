@@ -5,7 +5,6 @@ import cytoolz
 import numpy as np
 import orjson
 import torch
-from nltk import sent_tokenize
 from tqdm import tqdm
 from transformers import PreTrainedTokenizerFast
 from vllm import LLM, SamplingParams
@@ -24,7 +23,7 @@ llm = LLM(
     disable_custom_all_reduce=True,
     max_model_len=4096,
     enable_prefix_caching=True,
-    # gpu_memory_utilization=0.5,
+    gpu_memory_utilization=0.95,
 )
 tokenizer = llm.get_tokenizer()
 sampling_params = SamplingParams(
@@ -149,33 +148,47 @@ tag_examples = {
     ]
 }
 
-filter_system_prompt = """You are an AI assistant with expertise in radiology. You will be given with a preliminarily annotated sentence from a radiology report. In the sentence, some of the anatomical structures and anomaly findings are identified and annotated with the following format: [<phrase>](<target>), where "<phrase>" denotes the original text of the identified phrase, "<target>" denotes the standard name of the corresponding target. However, the targets that are mentioned to be non-existent in the image should not be annotated. Therefore, your primary task is to check each annotated entity and its context in the given report, remove the annotation tags of targets that are indicated as non-existent in the report text. For example, targets that are described with terms like 'no', 'without', 'absent', 'not detected', 'not observed', 'grossly unremarkable', 'cannot be assessed', or any other negations indicating non-existence. On the other hand, annotation tags of targets that are mentioned as being present or observed should still be retained. 
+filter_system_prompt = """You are an AI assistant with expertise in radiology. You will be given with a preliminarily annotated radiology report. In the given report, some of the phrases of anatomical structures and anomaly findings are annotated with the following format: [<phrase>](<target>), where "<phrase>" denotes the original text of the annotated phrase, "<target>" denotes the standard name of the corresponding target.
 
-Your output should be exactly the same as the original text, except for annotations tags removed for targets that are mentioned to be absent. DO NOT output any additional information, such as your own comments. Also DO NOT add new annotation tags. Even if you find that there is no tags to be removed, the output should be the same as input.
+However, targets that are mentioned to be non-existent in the report text may be wrongly included for annotating.  Therefore, your primary task is to check each annotated entity and its context in the given report, remove the annotation tags of phrases that are indicated as non-existent in the report text. For example, phrases that are described with terms like 'no', 'without', 'absent', 'not detected', 'not observed', 'grossly unremarkable', 'cannot be assessed', or any other negations indicating non-existence. To do the removal, for each annotation of "[<phrase>](<target>)" to be removed, convert it to "<phrase>". On the other hand, annotation tags of targets that are mentioned as being present or observed should still be retained.
+
+Your output should be exactly the same as the original text, except for annotations tags removed for targets that are mentioned to be absent. DO NOT output any additional information, such as your own comments. Also DO NOT add new annotation tags. Even if you find that there is no tags to be removed, the output should be the same as input with all tags kept.
 """
 
-filter_examples = [
-    (
-        'Lateral view somewhat limited due to overlying motion artifact.',
-        'Lateral view somewhat limited due to overlying motion artifact.',
-    ),
-    (
-        'The [lungs](lungs) are low in volume.',
-        'The [lungs](lungs) are low in volume.',
-    ),
-    (
-        'There is no focal airspace [consolidation](pulmonary consolidation) to suggest pneumonia.',
-        'There is no focal airspace consolidation to suggest pneumonia.',
-    ),
-    (
-        'No [pleural effusions](pleural effusion) or [pulmonary edema](pulmonary edema).',
-        'No pleural effusions or pulmonary edema.',
-    ),
-    (
-        'There is no [pneumothorax](pneumothorax).',
-        'There is no pneumothorax.',
-    ),
-]
+filter_examples = {
+    'MIMIC-CXR': [
+        (
+            'Left-sided pacemaker device is noted with leads terminating in the [right atrium](right atrium), [right ventricle](right ventricle), and coronary sinus.  The [heart](heart) size is mildly enlarged.  The [aortic knob](thoracic aorta) is calcified.  Mild [pulmonary edema](pulmonary edema) with perihilar haziness and vascular indistinctness is seen.  Focal opacities at [lung](lung) bases may reflect areas of [atelectasis](atelectasis) though infection cannot be excluded.  Small bilateral [pleural effusions](pleural effusion) may be present.  No [pneumothorax](pneumothorax) is identified.',
+            'Left-sided pacemaker device is noted with leads terminating in the [right atrium](right atrium), [right ventricle](right ventricle), and coronary sinus.  The [heart](heart) size is mildly enlarged.  The [aortic knob](thoracic aorta) is calcified.  Mild [pulmonary edema](pulmonary edema) with perihilar haziness and vascular indistinctness is seen.  Focal opacities at [lung](lung) bases may reflect areas of [atelectasis](atelectasis) though infection cannot be excluded.  Small bilateral [pleural effusions](pleural effusion) may be present.  No pneumothorax is identified.',
+        ),
+        (
+            'A endotracheal tube terminates 3.4 cm above the [carina](trachea).  There is an orogastric tube terminating within the [stomach](stomach).  A confluent right mid lower zone opacity with a central rounded lucency is seen, which may reflect cavitary lesion or abscess.  No underlying consolidations are present.  No [pneumothorax](pneumothorax) is seen.',
+            'A endotracheal tube terminates 3.4 cm above the [carina](trachea).  There is an orogastric tube terminating within the [stomach](stomach).  A confluent right mid lower zone opacity with a central rounded lucency is seen, which may reflect cavitary lesion or abscess.  No underlying consolidations are present.  No pneumothorax is seen.',
+        ),
+        (
+            'Mild-to-moderate [pulmonary edema](pulmonary edema) is present with interstitial markings.  Small bilateral [pleural effusions](pleural effusion) are not seen.  There is no focal consolidation or [pneumothorax](pneumothorax).  [Heart](heart) size is moderately enlarged.  A left chest wall Port-A-Cath terminates in the [RA](right atrium).  Vertebroplasties are seen.',
+            'Mild-to-moderate [pulmonary edema](pulmonary edema) is present with interstitial markings.  Small bilateral pleural effusions are not seen.  There is no focal consolidation or pneumothorax.  [Heart](heart) size is moderately enlarged.  A left chest wall Port-A-Cath terminates in the [RA](right atrium).  Vertebroplasties are seen.',
+        ),
+        (
+            'An endotracheal tube terminates 4.1 cm above the [carina](trachea).  An enteric tube terminates in the proximal [stomach](stomach) and could be advanced for ideal positioning.  Low [lung](lung) volumes. Minimal elevation of the right hemidiaphragm is present.  The [left lung](left lung) base is not visualized.  Increased opacity at the base of the [left lung](left lung) may reflect [atelectasis](atelectasis).  Mild [vascular congestion](pulmonary vascular congestion) with mild [pulmonary edema](pulmonary edema) is seen.  No [pneumothorax](pneumothorax) is seen.',
+            'An endotracheal tube terminates 4.1 cm above the [carina](trachea).  An enteric tube terminates in the proximal [stomach](stomach) and could be advanced for ideal positioning.  Low [lung](lung) volumes. Minimal elevation of the right hemidiaphragm is present.  The left lung base is not visualized.  Increased opacity at the base of the [left lung](left lung) may reflect [atelectasis](atelectasis).  Mild [vascular congestion](pulmonary vascular congestion) with mild [pulmonary edema](pulmonary edema) is seen.  No pneumothorax is seen.',
+        ),
+    ],
+    'CT-RATE': [
+        (
+            'CTO is normal. Calibration of mediastinal major vascular structures is natural. Calcific [atheroma plaques](vascular calcification) are observed in the coronary arteries. Thoracic [esophagus](esophagus) calibration was normal and no significant pathological wall thickening was detected. No lymph node with pathological size and configuration was detected in the mediastinum and hilar level. One or two lymph nodes, the largest of which is 13x10 mm in size, are observed at the right hilar level. When examined in the lung parenchyma window; [mosaic attenuation pattern](pulmonary opacification) is observed in both [lungs](lung) (small vessel disease?, small airway disease?). Mild sequelae changes are observed in both [lungs](lung). On this background, a [nodule](lung nodule) of approximately 5x3 mm in size is observed in the [right lung upper lobe](right lung upper lobe) caudal. No [pleural effusion](pleural effusion) [pneumothorax](pneumothorax) was detected. In the sections passing through the upper abdomen, a decrease in density consistent with hepatosteatosis is observed in the [liver](liver). Degenerative changes are observed in the bone structure entering the examination area.',
+            'CTO is normal. Calibration of mediastinal major vascular structures is natural. Calcific [atheroma plaques](vascular calcification) are observed in the coronary arteries. Thoracic [esophagus](esophagus) calibration was normal and no significant pathological wall thickening was detected. No lymph node with pathological size and configuration was detected in the mediastinum and hilar level. One or two lymph nodes, the largest of which is 13x10 mm in size, are observed at the right hilar level. When examined in the lung parenchyma window; [mosaic attenuation pattern](pulmonary opacification) is observed in both [lungs](lung) (small vessel disease?, small airway disease?). Mild sequelae changes are observed in both [lungs](lung). On this background, a [nodule](lung nodule) of approximately 5x3 mm in size is observed in the [right lung upper lobe](right lung upper lobe) caudal. No pleural effusion pneumothorax was detected. In the sections passing through the upper abdomen, a decrease in density consistent with hepatosteatosis is observed in the [liver](liver). Degenerative changes are observed in the bone structure entering the examination area.'
+        ),
+        (
+            'Mediastinal structures were evaluated as suboptimal since the examination was unenhanced. As far as can be seen; Calcified atherosclerotic changes were observed in the [coronary artery](coronary artery) wall. [Heart](heart) sizes are slightly increased. Minimal calcified atherosclerotic changes were observed in the wall of the [thoracic aorta](thoracic aorta). Pericardial thickening-effusion was not detected. [Trachea](trachea) and lumen of both [main bronchi](main bronchus) are open. No occlusive pathology was detected in the [trachea](trachea) and lumen of both [main bronchi](main bronchus). Thoracic [esophagus](esophagus) calibration was normal and no significant pathological wall thickening was detected. No lymph node was detected in mediastinal and bilateral hilar pathological size and appearance. When examined in the lung parenchyma window; Mild [emphysematous changes](pulmonary emphysema) were observed in both [lungs](lung). A mosaic attenuation pattern was observed in both [lungs](lung) (small airway disease?, small vessel disease?). A millimetric nonspecific parenchymal [nodule](lung nodule) was observed in the [left lung](left lung). Bilateral [pleural thickening-effusion](pleural effusion) was not observed. No significant pathology was detected in the upper abdominal sections that entered the examination area. Left-facing [scoliosis](scoliosis) was observed in the thoracic vertebrae. Mild degenerative changes were observed in bone structures.',
+            'Mediastinal structures were evaluated as suboptimal since the examination was unenhanced. As far as can be seen; Calcified atherosclerotic changes were observed in the [coronary artery](coronary artery) wall. [Heart](heart) sizes are slightly increased. Minimal calcified atherosclerotic changes were observed in the wall of the [thoracic aorta](thoracic aorta). Pericardial thickening-effusion was not detected. [Trachea](trachea) and lumen of both [main bronchi](main bronchus) are open. No occlusive pathology was detected in the [trachea](trachea) and lumen of both [main bronchi](main bronchus). Thoracic [esophagus](esophagus) calibration was normal and no significant pathological wall thickening was detected. No lymph node was detected in mediastinal and bilateral hilar pathological size and appearance. When examined in the lung parenchyma window; Mild [emphysematous changes](pulmonary emphysema) were observed in both [lungs](lung). A mosaic attenuation pattern was observed in both [lungs](lung) (small airway disease?, small vessel disease?). A millimetric nonspecific parenchymal [nodule](lung nodule) was observed in the [left lung](left lung). Bilateral pleural thickening-effusion was not observed. No significant pathology was detected in the upper abdominal sections that entered the examination area. Left-facing [scoliosis](scoliosis) was observed in the thoracic vertebrae. Mild degenerative changes were observed in bone structures.',
+        ),
+        (
+            'No occlusive pathology was observed in the lumen of the [trachea](trachea) and both [main bronchi](main bronchus). The mediastinum could not be evaluated optimally in the non-contrast examination. As far as can be seen; mediastinal main vascular structures, [heart](heart) contour, size are normal. Pericardial effusion-thickening was not observed. Millimetric calcific [atheroma plaques](vascular calcification) were observed in the [left coronary arteries](left coronary artery). Thoracic [esophagus](esophagus) calibration was normal and no significant pathological wall thickening was detected. No enlarged lymph nodes in prevascular, pre-paratracheal, subcarinal or bilateral hilar-axillary pathological dimensions were detected. When examined in the lung parenchyma window; Mosaic attenuation pattern was observed in both [lungs](lung), especially in the [lower lobes](lung lower lobe). Segmental-subsegmental [peribronchial thickening](peribronchial thickening) and luminal narrowing were observed in both [lungs](lung). Mosaic attenuation was found to be secondary to small airway stenosis. [Pleuroparenchymal fibroatelectasis](atelectasis) sequelae changes were observed in the [middle lobe of the right lung](right lung middle lobe) and the [inferior lingular segment of the left lung upper lobe](left lung upper lobe). No mass lesion, pneumonic infiltration or contusion area was observed in the lung parenchyma. When the upper abdominal organs included in the sections were evaluated; No space-occupying lesion was detected in the [liver](liver) that entered the cross-sectional area. The [gallbladder](gallbladder) was not observed (operated). Two [angiomyolipomas](angiomyolipoma) with 4.5 and 7.5 mm diameters were observed in the middle part of the [left kidney](left kidney). Bilateral [adrenal glands](adrenal gland) were normal and no space-occupying lesion was detected. Bone structures in the study area are natural. Vertebral corpus heights are preserved.',
+            'No occlusive pathology was observed in the lumen of the [trachea](trachea) and both [main bronchi](main bronchus). The mediastinum could not be evaluated optimally in the non-contrast examination. As far as can be seen; mediastinal main vascular structures, [heart](heart) contour, size are normal. Pericardial effusion-thickening was not observed. Millimetric calcific [atheroma plaques](vascular calcification) were observed in the [left coronary arteries](left coronary artery). Thoracic [esophagus](esophagus) calibration was normal and no significant pathological wall thickening was detected. No enlarged lymph nodes in prevascular, pre-paratracheal, subcarinal or bilateral hilar-axillary pathological dimensions were detected. When examined in the lung parenchyma window; Mosaic attenuation pattern was observed in both [lungs](lung), especially in the [lower lobes](lung lower lobe). Segmental-subsegmental [peribronchial thickening](peribronchial thickening) and luminal narrowing were observed in both [lungs](lung). Mosaic attenuation was found to be secondary to small airway stenosis. [Pleuroparenchymal fibroatelectasis](atelectasis) sequelae changes were observed in the [middle lobe of the right lung](right lung middle lobe) and the [inferior lingular segment of the left lung upper lobe](left lung upper lobe). No mass lesion, pneumonic infiltration or contusion area was observed in the lung parenchyma. When the upper abdominal organs included in the sections were evaluated; No space-occupying lesion was detected in the [liver](liver) that entered the cross-sectional area. The gallbladder was not observed (operated). Two [angiomyolipomas](angiomyolipoma) with 4.5 and 7.5 mm diameters were observed in the middle part of the [left kidney](left kidney). Bilateral [adrenal glands](adrenal gland) were normal and no space-occupying lesion was detected. Bone structures in the study area are natural. Vertebral corpus heights are preserved.'
+        ),
+    ]
+}
 
 def build_few_shot_conv(system_prompt: str, examples: list[tuple[str, str]], query: str):
     conv = [
@@ -232,42 +245,35 @@ def process(dataset: str, split: str, num_samples: int):
             build_few_shot_conv(tag_system_prompt, tag_examples[dataset], findings),
         )
     tag_responses = llm.generate(tag_prompts, sampling_params)
-    sent_offsets = [0]
+
     filter_prompts = []
     for i, tag_response in enumerate(tqdm(tag_responses, 'building filter inputs')):
         tagged_findings = tag_response.outputs[0].text
         data[i]['tagged_findings'] = tagged_findings
-        sentences = sent_tokenize(tagged_findings)
-        for sent in sentences:
-            filter_prompts.append(
-                build_few_shot_conv(filter_system_prompt, filter_examples, sent),
-            )
-        sent_offsets.append(len(filter_prompts))
+        filter_prompts.append(
+            build_few_shot_conv(filter_system_prompt, filter_examples[dataset], tagged_findings),
+        )
+
     filter_responses = llm.generate(filter_prompts, sampling_params)
     for i, item in enumerate(tqdm(data, 'post processing')):
-        tags = []
         findings_prefix = 'Findings: '
         prefix_offset = len(findings_prefix)
-        ref_sentences = []
-        sent_slice = slice(sent_offsets[i], sent_offsets[i + 1])
-        data[i]['filtered_tagged_findings'] = ' '.join(response.outputs[0].text for response in filter_responses[sent_slice])
-        for response in filter_responses[sent_slice]:
-            tagged_sent = response.outputs[0].text
-            for match in _target_pattern.finditer(tagged_sent):
-                # do not strip `phrase` for safety
-                phrase, target = match.group(1), match.group(2).strip()
-                start = prefix_offset + match.start(1) - 1
-                ref_sent = _target_pattern.sub(r'\1', 'tagged_sent')
-                ref_sentences.append(ref_sent)
-                tags.append({
-                    'phrase': phrase,
-                    'target': target,
-                    'start': start,
-                    'end': start + len(phrase),
-                })
-        ref_findings = ' '.join(ref_sentences)
-        for tag in tags:
-            assert tag['phrase'] == ref_findings[tag['start']:tag['end']]
+        tags = []
+        filtered_tagged_findings = filter_responses[i].outputs[0].text
+        # NOTE: the pattern is matched twice, once for `sub`, once for `finditer`
+        for match in _target_pattern.finditer(filtered_tagged_findings):
+            # do not strip `phrase` for safety
+            phrase, target = match.group(1), match.group(2).strip()
+            start = prefix_offset + match.start(1) - 1
+            tags.append({
+                'phrase': phrase,
+                'target': target,
+                'start': start,
+                'end': start + len(phrase),
+            })
+        ref_findings = _target_pattern.sub(r'\1', filtered_tagged_findings)
+        ref_report = f'{findings_prefix}{ref_findings}\nImpression: {impressions[i]}'
+        item['ref_report'] = ref_report
         item['tags'] = tags
     output_dir = PROCESSED_VG_DATA_ROOT / dataset
     output_dir.mkdir(exist_ok=True, parents=True)
@@ -275,8 +281,8 @@ def process(dataset: str, split: str, num_samples: int):
 
 def main():
     for dataset, num_samples_dict in [
-        ('MIMIC-CXR', {'train': 10, 'test': 10}),
-        ('CT-RATE', {'train': 10, 'test': 10}),
+        ('MIMIC-CXR', {'train': 500, 'test': 500}),
+        ('CT-RATE', {'train': 500, 'test': 500}),
     ]:
         for split, num_samples in num_samples_dict.items():
             process(dataset, split, num_samples)
