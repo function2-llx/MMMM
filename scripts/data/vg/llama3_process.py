@@ -47,22 +47,28 @@ anatomy_list = [
     'thyroid',
 ]
 anomaly_list = [
+    # VinDr-CXR label
     'atelectasis',
     'cardiomegaly',
+    'clavicle fracture',
     'pulmonary consolidation',
     'pulmonary edema',
-    'widened mediastinum',
-    'rib fracture',
-    'pulmonary fibrosis',
-    'lung nodule',
+    'pulmonary emphysema',
+    'pulmonary infiltrate',
     'pulmonary opacification',
+    'mediastinal shift',
+    'lung nodule',
     'pleural effusion',
+    'pleural thickening',
     'pneumothorax',
-
+    'pulmonary fibrosis',
+    'rib fracture',
+    # MIMIC-CXR label
+    'widened mediastinum',
+    # CT-RATE label
     'pericardial effusion',
     'hiatal hernia',
     'lymphadenopathy',
-    'pulmonary emphysema',
     'peribronchial thickening',
     'bronchiectasis',
     'interlobular septal thickening',
@@ -118,11 +124,39 @@ tag_examples = {
         ),
         (
             'The lungs appear hyperexpanded. A focal nodule is noted posterior to the sternum. Additionally, there is enlargement of the left main pulmonary artery.  Cardiac silhouette is normal.  Bibasilar opacities are visualized.  Calcifications of the origin of the great vessels are noted.',
-            'The [lungs](lung) appear hyperexpanded. A [focal nodule](lung nodule) is noted posterior to the sternum. Additionally, there is enlargement of the [left main pulmonary artery](left main pulmonary artery).  Cardiac silhouette is normal.  [Bibasilar opacities](pulmonary opacification) are visualized.  [Calcifications](vascular calcification) of the origin of the great vessels are noted.',
+            'The [lungs](lung) appear hyperexpanded. A [focal nodule](lung nodule) is noted posterior to the sternum. Additionally, there is enlargement of the [left main pulmonary artery](left main pulmonary artery).  [Cardiac silhouette](heart) is normal.  [Bibasilar opacities](pulmonary opacification) are visualized.  [Calcifications](vascular calcification) of the origin of the great vessels are noted.',
         ),
         (
             'The heart is normal.  The hilar and mediastinal contours are normal. There is a right sided pneumothorax.  The right hemidiaphragm is elevated.  The left lung is clear. Rib fractures are seen bilaterally.',
             'The [heart](heart) is normal.  The hilar and mediastinal contours are normal. There is a right sided [pneumothorax](pneumothorax).  The right hemidiaphragm is elevated.  The [left lung](left lung) is clear. [Rib fractures](rib fracture) are seen bilaterally.',
+        ),
+        (
+            'Right upper lobe consolidation in posterior segment is present.  The lungs are hyperinflated.  6 mm right lower lobe nodule is present.  Small right pleural effusion is present.  There is no pneumothorax.  Mediastinal and cardiac contours are normal.',
+            '[Right upper lobe](right lung upper lobe) [consolidation](pulmonary consolidation) in posterior segment is present.  The [lungs](lung) are hyperinflated.  6 mm [right lower lobe](right lung lower lobe) [nodule](lung nodule) is present.  Small right [pleural effusion](pleural effusion) is present.  There is no pneumothorax.  Mediastinal and [cardiac contours](heart) are normal.',
+        ),
+        (
+            'In the left mid and lower lung, there is an opacity concerning for pneumonia.  The right lung appears clear.  There is no pleural effusion on the right.  There is no evidence of pneumothorax in either lung.  The left hemidiaphragm is not well seen and a small left pleural effusion cannot be ruled out.',
+            'In the [left mid and lower lung](left lung), there is an [opacity](pulmonary opacification) concerning for pneumonia.  The [right lung](right lung) appears clear.  There is no pleural effusion on the right.  There is no evidence of pneumothorax in either [lung](lung).  The left hemidiaphragm is not well seen and a small left pleural effusion cannot be ruled out.'
+        ),
+        (
+            'The lungs are clear, without focal infiltrate, pleural effusion, or pneumothorax.  The heart size is normal.  The mediastinal silhouette is unremarkable.  A left mid clavicular fracture is noted.  A left lower lung opacity is likely a nipple shadow.',
+            'The [lungs](lung) are clear, without focal infiltrate, pleural effusion, or pneumothorax.  The [heart](heart) size is normal.  The mediastinal silhouette is unremarkable.  A left mid [clavicular fracture](clavicle fracture) is noted.  A left lower [lung opacity](pulmonary opacification) is likely a nipple shadow.',
+        ),
+        (
+            'Cardiac, mediastinal and hilar contours are normal.  Pulmonary vasculature is normal.  No focal consolidation, pleural effusion or pneumothorax is present.  There are no acute osseous abnormalities.',
+            '[Cardiac](heart), mediastinal and hilar contours are normal.  Pulmonary vasculature is normal.  No focal consolidation, pleural effusion or pneumothorax is present.  There are no acute osseous abnormalities.',
+        ),
+        (
+            'Left-sided pacer device is in position. Left-sided central venous catheter is in position. Enlarged cardiomediastinal silhouette is seen. Mild pulmonary vascular congestion/interstitial edema and a small left pleural effusion are present. A trace right pleural effusion is difficult to exclude. Evidence of old left-sided rib fractures is seen.',
+            'Left-sided pacer device is in position. Left-sided central venous catheter is in position. [Enlarged cardiomediastinal silhouette](cardiomegaly) is seen. Mild pulmonary vascular congestion/[interstitial edema](pulmonary edema) and a small left [pleural effusion](pleural effusion) are present. A trace right pleural effusion is difficult to exclude. Evidence of old left-sided [rib fractures](rib fracture) is seen.',
+        ),
+        (
+            'There is opacification projecting in the lateral aspect of the right upper lobe demonstrated along the fissure.  There is associated overlying pleural abnormality relating to rib fractures.  There are no pleural effusions or pneumothorax.  The cardiomediastinal and hilar contours demonstrate moderate cardiomegaly and tortuosity of thoracic aorta.  A large hiatal hernia is present.  Pulmonary vascularity is not increased.  There are extensive rib fractures of varying ages.  There is lytic destruction of several right-sided lower thoracic ribs.  There is an old left clavicular fracture.  There are multiple wedge compression deformities of the thoracolumbar spine.',
+            'There is [opacification](pulmonary opacification) projecting in the lateral aspect of the [right upper lobe](right lung upper lobe) demonstrated along the fissure.  There is associated overlying pleural abnormality relating to [rib fractures](rib fracture).  There are no pleural effusions or pneumothorax.  The cardiomediastinal and hilar contours demonstrate moderate [cardiomegaly](cardiomegaly) and tortuosity of [thoracic aorta](thoracic aorta).  A large [hiatal hernia](hiatal hernia) is present.  Pulmonary vascularity is not increased.  There are extensive [rib fractures](rib fracture) of varying ages.  There is lytic destruction of several [right-sided lower thoracic ribs](right rib).  There is an old left [clavicular fracture](clavicle fracture).  There are multiple wedge compression deformities of the thoracolumbar spine.',
+        ),
+        (
+            'Left lower lung linear opacities are present.  The heart size is normal and there is no evidence of vascular congestion, pleural effusion, or pneumothorax.  Elevation of the right hemidiaphragmatic contour is seen.  The bones and soft tissues are normal.',
+            '[Left lower lung](left lung lower lobe) linear [opacities](pulmonary opacification) are present.  The [heart](heart) size is normal and there is no evidence of vascular congestion, pleural effusion, or pneumothorax.  Elevation of the right hemidiaphragmatic contour is seen.  The bones and soft tissues are normal.',
         ),
     ]
 }
@@ -152,10 +186,14 @@ filter_examples = {
             'An endotracheal tube terminates 4.1 cm above the [carina](trachea).  An enteric tube terminates in the proximal [stomach](stomach) and could be advanced for ideal positioning.  Low [lung](lung) volumes. Minimal elevation of the right hemidiaphragm is present.  The [left lung](left lung) base is not visualized.  Increased opacity at the base of the [left lung](left lung) may reflect [atelectasis](atelectasis).  Mild [vascular congestion](pulmonary vascular congestion) with mild [pulmonary edema](pulmonary edema) is seen.  No [pneumothorax](pneumothorax) is seen.',
             'An endotracheal tube terminates 4.1 cm above the [carina](trachea).  An enteric tube terminates in the proximal [stomach](stomach) and could be advanced for ideal positioning.  Low [lung](lung) volumes. Minimal elevation of the right hemidiaphragm is present.  The left lung base is not visualized.  Increased opacity at the base of the [left lung](left lung) may reflect [atelectasis](atelectasis).  Mild [vascular congestion](pulmonary vascular congestion) with mild [pulmonary edema](pulmonary edema) is seen.  No pneumothorax is seen.',
         ),
+        (
+            'In the [left mid and lower lung](left lung), there is an [opacity](pulmonary opacification) concerning for pneumonia.  The [right lung](right lung) appears clear.  There is no [pleural effusion](pleural effusion) on the right.  There is no evidence of [pneumothorax](pneumothorax) in either [lung](lung).  The left hemidiaphragm is not well seen and a small left [pleural effusion](pleural effusion) cannot be ruled out.',
+            'In the [left mid and lower lung](left lung), there is an [opacity](pulmonary opacification) concerning for pneumonia.  The [right lung](right lung) appears clear.  There is no pleural effusion on the right.  There is no evidence of pneumothorax in either [lung](lung).  The left hemidiaphragm is not well seen and a small left pleural effusion cannot be ruled out.',
+        ),
     ],
     'CT-RATE': [
         (
-            'CTO is normal. Calibration of mediastinal major vascular structures is natural. Calcific [atheroma plaques](vascular calcification) are observed in the coronary arteries. Thoracic [esophagus](esophagus) calibration was normal and no significant pathological wall thickening was detected. No lymph node with pathological size and configuration was detected in the mediastinum and hilar level. One or two lymph nodes, the largest of which is 13x10 mm in size, are observed at the right hilar level. When examined in the lung parenchyma window; [mosaic attenuation pattern](pulmonary opacification) is observed in both [lungs](lung) (small vessel disease?, small airway disease?). Mild sequelae changes are observed in both [lungs](lung). On this background, a [nodule](lung nodule) of approximately 5x3 mm in size is observed in the [right lung upper lobe](right lung upper lobe) caudal. No [pleural effusion](pleural effusion) [pneumothorax](pneumothorax) was detected. In the sections passing through the upper abdomen, a decrease in density consistent with hepatosteatosis is observed in the [liver](liver). Degenerative changes are observed in the bone structure entering the examination area.',
+            'CTO is normal. Calibration of mediastinal major vascular structures is natural. Calcific [atheroma plaques](vascular calcification) are observed in the coronary arteries. Thoracic [esophagus](esophagus) calibration was normal and no significant pathological wall thickening was detected. No lymph node with pathological size and configuration was detected in the mediastinum and hilar level. One or two lymph nodes, the largest of which is 13x10 mm in size, are observed at the right hilar level. When examined in the lung parenchyma window; [mosaic attenuation pattern](pulmonary opacification) is observed in both [lungs](lung) (small vessel disease?, small airway disease?). Mild sequelae changes are observed in both [lungs](lung). On this background, a [nodule](lung nodule) of approximately 5x3 mm in size is observed in the [right lung upper lobe](right lung upper lobe) caudal. No [pleural effusion](pleural effusion) or [pneumothorax](pneumothorax) was detected. In the sections passing through the upper abdomen, a decrease in density consistent with hepatosteatosis is observed in the [liver](liver). Degenerative changes are observed in the bone structure entering the examination area.',
             'CTO is normal. Calibration of mediastinal major vascular structures is natural. Calcific [atheroma plaques](vascular calcification) are observed in the coronary arteries. Thoracic [esophagus](esophagus) calibration was normal and no significant pathological wall thickening was detected. No lymph node with pathological size and configuration was detected in the mediastinum and hilar level. One or two lymph nodes, the largest of which is 13x10 mm in size, are observed at the right hilar level. When examined in the lung parenchyma window; [mosaic attenuation pattern](pulmonary opacification) is observed in both [lungs](lung) (small vessel disease?, small airway disease?). Mild sequelae changes are observed in both [lungs](lung). On this background, a [nodule](lung nodule) of approximately 5x3 mm in size is observed in the [right lung upper lobe](right lung upper lobe) caudal. No pleural effusion pneumothorax was detected. In the sections passing through the upper abdomen, a decrease in density consistent with hepatosteatosis is observed in the [liver](liver). Degenerative changes are observed in the bone structure entering the examination area.'
         ),
         (
@@ -213,8 +251,6 @@ def process(dataset: str, split: str, num_samples: int):
     findings_list = []
     impressions = []
     for item in tqdm(data, 'building tag inputs'):
-        item.pop('findings')
-        item.pop('impression')
         report = item['processed_report']
         match = report_pattern.match(report)
         findings, impression = match.group(1).strip(), match.group(2).strip()
