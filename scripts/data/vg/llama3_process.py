@@ -1,16 +1,19 @@
+import os
 import re
 
 import cytoolz
 import numpy as np
 import orjson
 import torch
+from nltk import sent_tokenize
+from tqdm import tqdm
 from transformers import PreTrainedTokenizerFast
 from vllm import LLM, SamplingParams
 
 from mmmm.data.defs import PROCESSED_VG_DATA_ROOT, PROCESSED_VL_DATA_ROOT
 
 # model_id = "/data/llama3/Meta-Llama-3-8B-Instruct-hf"
-model_id = "/data/llama3/Meta-Llama-3-70B-Instruct-hf"
+model_id = os.getenv('GRG_MODEL_ID', '/data/llama3/Meta-Llama-3-70B-Instruct-hf')
 # model_id = "/data/new_llm/Llama3-OpenBioLLM-70B"
 
 # model_name = model_id.split("/")[-1]
@@ -19,13 +22,14 @@ llm = LLM(
     model=model_id,
     tensor_parallel_size=torch.cuda.device_count(),
     disable_custom_all_reduce=True,
-    # max_model_len=8192,
+    max_model_len=4096,
     enable_prefix_caching=True,
+    # gpu_memory_utilization=0.5,
 )
 tokenizer = llm.get_tokenizer()
 sampling_params = SamplingParams(
     temperature=0.,
-    max_tokens=1024,
+    max_tokens=2048,
     stop=['<|eot_id|>'],
 )
 
@@ -100,7 +104,7 @@ Below are requirements:
   - There is no pleural effusion or pneumothorax
   - No pleural effusion, pneumothorax, or focal consolidation is present.
 3. Do not include targets that are too coarse, ambiguous, or amorphous to be spatially localized, such as "free fluid", "chest", "abdomen".
-4. The output should be exactly the original text with additional tags, do not output any additional information. Even if no target is present in the text, the output should be the same as input.
+4. The output should be exactly the original text extended with additional tags. Do not alter the input, or output any additional information. Even if no target is identified in the text, the output should be the same as input.
 """
 tag_examples = {
     'CT-RATE': [
@@ -145,27 +149,33 @@ tag_examples = {
     ]
 }
 
-prompt_filter = {
-    'system_prompt':
-"""You are an AI assistant with expertise in radiology. You will be given with a preliminarily annotated radiology report, where the anatomical structures and anomaly findings mentioned in the report text are enclosed with the "<p>" and "</p>" tags. However, the targets that are mentioned as non-existent are not supposed to be annotated. Therefore, your primary task is to check each annotated entity and its context in the given report, remove the annotation tags of targets that are indicated as non-existent in the report text. For example, targets that are described with terms like 'no', 'without', 'absent', 'not detected', 'not observed', 'grossly unremarkable', 'cannot be assessed', or any other negations indicating non-existence. On the other hand, annotation tags of targets that are mentioned as being present or observed should still be retained. 
+filter_system_prompt = """You are an AI assistant with expertise in radiology. You will be given with a preliminarily annotated sentence from a radiology report. In the sentence, some of the anatomical structures and anomaly findings are identified and annotated with the following format: [<phrase>](<target>), where "<phrase>" denotes the original text of the identified phrase, "<target>" denotes the standard name of the corresponding target. However, the targets that are mentioned to be non-existent in the image should not be annotated. Therefore, your primary task is to check each annotated entity and its context in the given report, remove the annotation tags of targets that are indicated as non-existent in the report text. For example, targets that are described with terms like 'no', 'without', 'absent', 'not detected', 'not observed', 'grossly unremarkable', 'cannot be assessed', or any other negations indicating non-existence. On the other hand, annotation tags of targets that are mentioned as being present or observed should still be retained. 
 
 Your output should be exactly the same as the original text, except for annotations tags removed for targets that are mentioned to be absent. DO NOT output any additional information, such as your own comments. Also DO NOT add new annotation tags. Even if you find that there is no tags to be removed, the output should be the same as input.
-""",
-    'examples': [
-        (
-            'Lateral view somewhat limited due to overlying motion artifact. The <p>lungs</p> are low in volume.  There is no focal airspace <p>consolidation</p> to suggest <p>pneumonia</p>.  A 1.2-cm <p>calcified granuloma</p> just below the medial aspect of the right <p>hemidiaphragm</p> is unchanged from prior study.  No <p>pleural effusions</p> or <p>pulmonary edema</p>. There is no <p>pneumothorax</p>. The inferior <p>sternotomy wire</p> is fractured but unchanged. Surgical clips and vascular markers in the <p>thorax</p> are related to prior CABG surgery.',
-            'Lateral view somewhat limited due to overlying motion artifact. The <p>lungs</p> are low in volume.  There is no focal airspace consolidation to suggest pneumonia.  A 1.2-cm <p>calcified granuloma</p> just below the medial aspect of the right <p>hemidiaphragm</p> is unchanged from prior study.  No pleural effusions or pulmonary edema. There is no pneumothorax. The inferior <p>sternotomy wire</p> is fractured but unchanged. Surgical clips and vascular markers in the <p>thorax</p> are related to prior CABG surgery.',
-            'In the sentence "No <p>pleural effusions</p> or <p>pulmonary edema</p>", both "pleural effusions" and "pulmonary edema" are suggested to be absent according to the context, therefore their annotations should be removed.',
-        )
-    ]
-}
+"""
 
-# def llama3_user_prompt(text: str):
-#     user_prompt = f"""
-# Your input: {text}
-# Your output:
-# """
-#     return user_prompt
+filter_examples = [
+    (
+        'Lateral view somewhat limited due to overlying motion artifact.',
+        'Lateral view somewhat limited due to overlying motion artifact.',
+    ),
+    (
+        'The [lungs](lungs) are low in volume.',
+        'The [lungs](lungs) are low in volume.',
+    ),
+    (
+        'There is no focal airspace [consolidation](pulmonary consolidation) to suggest pneumonia.',
+        'There is no focal airspace consolidation to suggest pneumonia.',
+    ),
+    (
+        'No [pleural effusions](pleural effusion) or [pulmonary edema](pulmonary edema).',
+        'No pleural effusions or pulmonary edema.',
+    ),
+    (
+        'There is no [pneumothorax](pneumothorax).',
+        'There is no pneumothorax.',
+    ),
+]
 
 def build_few_shot_conv(system_prompt: str, examples: list[tuple[str, str]], query: str):
     conv = [
@@ -193,9 +203,10 @@ def build_few_shot_conv(system_prompt: str, examples: list[tuple[str, str]], que
     ]
     return tokenizer.apply_chat_template(conv, tokenize=False)
 
+_target_pattern = re.compile(r'\[(.*?)\]\((.*?)\)')
+
 def process(dataset: str, split: str, num_samples: int):
-    output_dir = PROCESSED_VG_DATA_ROOT / dataset
-    output_dir.mkdir(exist_ok=True, parents=True)
+    print(dataset, split, num_samples)
     report_pattern = re.compile(r'Findings:(.*?)(?=Impression:)Impression:(.*)', re.DOTALL)
     data_path = PROCESSED_VL_DATA_ROOT / dataset / f'{split}-processed.json'
     if not data_path.exists():
@@ -206,22 +217,60 @@ def process(dataset: str, split: str, num_samples: int):
     R.shuffle(data)
     if num_samples >= 0:
         data = data[:num_samples]
-    prompts = []
+    tag_prompts = []
+    findings_list = []
     impressions = []
-    for item in data:
+    for item in tqdm(data, 'building tag inputs'):
         item.pop('findings')
         item.pop('impression')
         report = item['processed_report']
         match = report_pattern.match(report)
         findings, impression = match.group(1).strip(), match.group(2).strip()
+        findings_list.append(findings)
         impressions.append(impression)
-        prompts.append(
+        tag_prompts.append(
             build_few_shot_conv(tag_system_prompt, tag_examples[dataset], findings),
         )
-    responses = llm.generate(prompts, sampling_params)
-    for i, output in enumerate(responses):
-        tagged_findings = output.outputs[0].text
-        data[i]['tagged_report'] = f'Findings: {tagged_findings}\nImpression: {impressions[i]}'
+    tag_responses = llm.generate(tag_prompts, sampling_params)
+    sent_offsets = [0]
+    filter_prompts = []
+    for i, tag_response in enumerate(tqdm(tag_responses, 'building filter inputs')):
+        tagged_findings = tag_response.outputs[0].text
+        data[i]['tagged_findings'] = tagged_findings
+        sentences = sent_tokenize(tagged_findings)
+        for sent in sentences:
+            filter_prompts.append(
+                build_few_shot_conv(filter_system_prompt, filter_examples, sent),
+            )
+        sent_offsets.append(len(filter_prompts))
+    filter_responses = llm.generate(filter_prompts, sampling_params)
+    for i, item in enumerate(tqdm(data, 'post processing')):
+        tags = []
+        findings_prefix = 'Findings: '
+        prefix_offset = len(findings_prefix)
+        ref_sentences = []
+        sent_slice = slice(sent_offsets[i], sent_offsets[i + 1])
+        data[i]['filtered_tagged_findings'] = ' '.join(response.outputs[0].text for response in filter_responses[sent_slice])
+        for response in filter_responses[sent_slice]:
+            tagged_sent = response.outputs[0].text
+            for match in _target_pattern.finditer(tagged_sent):
+                # do not strip `phrase` for safety
+                phrase, target = match.group(1), match.group(2).strip()
+                start = prefix_offset + match.start(1) - 1
+                ref_sent = _target_pattern.sub(r'\1', 'tagged_sent')
+                ref_sentences.append(ref_sent)
+                tags.append({
+                    'phrase': phrase,
+                    'target': target,
+                    'start': start,
+                    'end': start + len(phrase),
+                })
+        ref_findings = ' '.join(ref_sentences)
+        for tag in tags:
+            assert tag['phrase'] == ref_findings[tag['start']:tag['end']]
+        item['tags'] = tags
+    output_dir = PROCESSED_VG_DATA_ROOT / dataset
+    output_dir.mkdir(exist_ok=True, parents=True)
     (output_dir / f'{split}.json').write_bytes(orjson.dumps(data, option=orjson.OPT_INDENT_2))
 
 def main():
