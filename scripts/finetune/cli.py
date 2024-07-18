@@ -8,22 +8,19 @@ from luolib.lightning.trainer import Trainer, PeftTrainer
 
 from peft import LoraConfig, get_peft_model
 
-class MyPeftTrainer(PeftTrainer):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs, save_embedding_layers=True)
-
 class CLI(LightningCLI):
     def add_arguments_to_parser(self, parser: LightningArgumentParser):
         super().add_arguments_to_parser(parser)
         parser.add_argument('--tokenizer', type=str)
         parser.add_argument('--lora', type=LoraConfig | None, default=None)
+        parser.add_argument('--peft', action='store_true')
         # parser.add_class_arguments(LoraConfig, 'lora')
 
     def instantiate_classes(self) -> None:
-        if self.active_config.lora is None:
-            self.trainer_class = Trainer
+        if self.active_config.lora is not None or self.active_config.peft:
+            self.trainer_class = PeftTrainer
         else:
-            self.trainer_class = MyPeftTrainer
+            self.trainer_class = Trainer
         super().instantiate_classes()
         tokenizer = AutoTokenizer.from_pretrained(self.active_config_init.tokenizer)
         # if isinstance(self.model, FinetuneM3D):

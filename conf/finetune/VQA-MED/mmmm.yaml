@@ -12,3 +12,4 @@ logger:
     name: mmmm_vqa-med
     save_dir: output/finetune/VQA-Med
     project: MMMM-FT
+peft: true

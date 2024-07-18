@@ -18,7 +18,7 @@ import monai.transforms as mt
 from mmmm.data.defs import ConvTurn
 from mmmm.data.utils import prepare_vlm_inputs
 from mmmm.data.dataset.misc import get_max_resize, intensity_norm
-from mmmm.models.mmmm import from_pretrained, MMMMForCausalLM, MMMMTokenizer
+from mmmm.models.mmmm import from_pretrained, MMMMTokenizer
 from _vqa._base import VQADataModule, VQATransform
 
 LANGUAGE_TOKEN_TYPE = 0
@@ -28,12 +28,11 @@ class FinetuneMMMM(PeftMixin, LightningModule):
     def __init__(self, *, adapter_path: Path):
         super().__init__()
 
-        model, tokenizer = from_pretrained('conf/model.yaml', adapter_path, True)
-
-        self.mmmm_model: MMMMForCausalLM = model
+        model, tokenizer = from_pretrained('conf/model.yaml', adapter_path, trainable=True)
+        self.mmmm_model = model
+        self.set_peft_model(self.mmmm_model.peft_model, 'mmmm_model.')
         self.mmmm_model.gradient_checkpointing_enable({'use_reentrant': False})
         self.train()
-
 
     def training_step(self, batch, *args, **kwargs):
         image: list[torch.Tensor] = batch['image']

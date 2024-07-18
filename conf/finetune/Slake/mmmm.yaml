@@ -12,3 +12,4 @@ logger:
     name: mmmm_slake
     save_dir: output/finetune/Slake
     project: MMMM-FT
+peft: true
