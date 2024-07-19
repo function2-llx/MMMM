@@ -53,7 +53,10 @@ class MMMMVQATransform(VQATransform):
     max_tokens_z = 4
     base_patch_size_z = 16
     patch_size_xy = 16
-    max_vision_tokens = 144
+
+    def __init__(self, *args, max_vision_tokens: int, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.max_vision_tokens = max_vision_tokens
 
     def image_transform(self, image_path: str):
         if image_path.endswith('.pt'):
@@ -98,7 +101,6 @@ class MMMMVQATransform(VQATransform):
         num_vision_tokens = (np.array(image.shape[1:]) // stride).prod().item()
         return image, patch_size, pool_size, num_vision_tokens
 
-
     def __call__(self, data):
         image, patch_size, pool_size, num_vision_tokens = self.image_transform(data['image'])
         pairs = [(qa['question'], qa['answer']) for qa in data['vqa']]
@@ -119,12 +121,14 @@ class MMMMVQATransform(VQATransform):
 
 
 class MMMMVQADataModule(VQADataModule):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, *args, max_vision_tokens: int, resize=(0, 0), **kwargs):
+        assert resize == (0, 0)
+        super().__init__(*args, **kwargs, resize=resize)
+        self.max_vision_tokens = max_vision_tokens
 
     def train_transform(self) -> Callable:
         self.tokenizer = MMMMTokenizer.build('lmsys/vicuna-7b-v1.5')
-        return MMMMVQATransform(self.tokenizer, resize=(0, 0), max_seq_len=None)
+        return MMMMVQATransform(self.tokenizer, resize=self.resize, max_seq_len=None, max_vision_tokens=self.max_vision_tokens)
 
     def _collate_fn(self, batch: list[dict]):
         vlm_inputs_list: list[dict] = []
