@@ -71,6 +71,7 @@ class MultiClassDataPoint(SegDataPoint):
     label: Path
     class_mapping: dict[int, str]
 
+# FIXME: this seems to be too narrow
 _CLIP_LOWER = norm.cdf(-3)
 _CLIP_UPPER = norm.cdf(3)
 

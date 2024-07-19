@@ -292,7 +292,7 @@ class LocalTransform(mt.Randomizable):
         if image.shape[0] == 1:
             # ensure RGB
             image = einops.repeat(image, '1 ... -> c ...', c=3).contiguous()
-        # no normalization for grounding image, following SegVol
+        # no normalization for grounding image, following SegVol. don't panic! they always append a `MinMaxNormalization` after intensity normalization
         grounding_image = image
         image = intensity_norm(image)
         vlm_inputs, conversation_text = prepare_vlm_inputs(
