@@ -11,7 +11,7 @@ from dynamic_network_architectures.initialization.weight_init import InitWeights
 
 from .transformer_decoder import TransformerDecoder,TransformerDecoderLayer
 from .SwinUNETR import SwinUNETR
-from .umamba_mid import UMambaMid
+# from .umamba_mid import UMambaMid
 
 class Maskformer(nn.Module):
     def __init__(self, vision_backbone='UNET', image_size=[288, 288, 96], patch_size=[32, 32, 32], deep_supervision=False):
@@ -96,23 +96,23 @@ class Maskformer(nn.Module):
                                    deep_supervision=deep_supervision,
                                    nonlin_first=False
                                    ),
-            'UMamba' : UMambaMid(
-                        input_channels=3,
-                        n_stages=6,
-                        features_per_stage=(64, 64, 128, 256, 512, 768),
-                        conv_op=nn.Conv3d,
-                        kernel_sizes=3,
-                        strides=(1, 2, 2, 2, 2, 2),
-                        n_conv_per_stage=(1, 1, 1, 1, 1, 1),
-                        n_conv_per_stage_decoder=(1, 1, 1, 1, 1),
-                        conv_bias=True,
-                        norm_op=nn.InstanceNorm3d,
-                        norm_op_kwargs={'eps': 1e-5, 'affine': True}, 
-                        dropout_op=None,
-                        dropout_op_kwargs=None,
-                        nonlin=nn.LeakyReLU, 
-                        nonlin_kwargs=None,
-                ),
+            # 'UMamba' : UMambaMid(
+            #             input_channels=3,
+            #             n_stages=6,
+            #             features_per_stage=(64, 64, 128, 256, 512, 768),
+            #             conv_op=nn.Conv3d,
+            #             kernel_sizes=3,
+            #             strides=(1, 2, 2, 2, 2, 2),
+            #             n_conv_per_stage=(1, 1, 1, 1, 1, 1),
+            #             n_conv_per_stage_decoder=(1, 1, 1, 1, 1),
+            #             conv_bias=True,
+            #             norm_op=nn.InstanceNorm3d,
+            #             norm_op_kwargs={'eps': 1e-5, 'affine': True},
+            #             dropout_op=None,
+            #             dropout_op_kwargs=None,
+            #             nonlin=nn.LeakyReLU,
+            #             nonlin_kwargs=None,
+            #     ),
         }[vision_backbone]
         
         self.backbone.apply(InitWeights_He(1e-2))

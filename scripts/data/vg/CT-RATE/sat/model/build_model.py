@@ -1,15 +1,7 @@
 import torch
-import torch.nn as nn
-import time
-import os
-from torch.nn.parallel import DistributedDataParallel as DDP
-
-import numpy as np
-
-from .maskformer import Maskformer
 
 from train.dist import is_master
-
+from .maskformer import Maskformer
 
 def get_parameter_number(model):
     total_num = sum(p.numel() for p in model.parameters())

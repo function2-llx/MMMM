@@ -1,0 +1,33 @@
+name: sat
+channels:
+- conda-forge
+- pytorch
+- nvidia
+- defaults
+dependencies:
+- python=3.11
+- numpy<2
+- scipy
+- pytorch::pytorch=2.3.1
+- pytorch::pytorch-cuda=12.1
+- pytorch::torchvision
+- ocl-icd-system  # https://github.com/conda-forge/openvino-feedstock/pull/73
+- einops
+- lightning
+- transformers
+- cytoolz
+- llvm-openmp<16  # https://github.com/pytorch/pytorch/issues/99625
+- ninja  # to load C++ extensions
+- pandas
+- pyarrow  # https://github.com/pandas-dev/pandas/issues/54466
+- openpyxl
+- nibabel
+- pydicom
+- zstandard
+- pip
+- pip:
+  - jsonargparse[signatures, omegaconf]
+  - mashumaro[orjson]
+  - monai
+  - positional_encodings
+  - -e model/dynamic-network-architectures-main

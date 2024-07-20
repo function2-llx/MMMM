@@ -36,33 +36,38 @@ def main(args):
     # set gpu
     if args.gpu:
         os.environ['CUDA_VISIBLE_DEVICES'] = args.pin_memory
-        
+
     torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))
-    device=torch.device("cuda", int(os.environ["LOCAL_RANK"]))
+    device = torch.device("cuda", int(os.environ["LOCAL_RANK"]))
     gpu_id = int(os.environ["LOCAL_RANK"])
-    torch.distributed.init_process_group(backend="nccl", init_method='env://', timeout=datetime.timedelta(seconds=7200))   # might takes a long time to sync between process
-    
+    torch.distributed.init_process_group(
+        backend="nccl", init_method='env://', timeout=datetime.timedelta(seconds=7200)
+    )  # might takes a long time to sync between process
+
     # dispaly
     if is_master():
         print('** GPU NUM ** : ', torch.cuda.device_count())  # 打印gpu数量
         print('** WORLD SIZE ** : ', torch.distributed.get_world_size())
     rank = dist.get_rank()
     print(f"** DDP ** : Start running DDP on rank {rank}.")
-    
+
     # file to save the inference results
     if is_master():
         Path(args.rcd_dir).mkdir(exist_ok=True, parents=True)
         print(f'Inference Results will be Saved to ** {args.rcd_dir} **')
 
     # dataset and loader
-    testset = Inference_Dataset(args.datasets_jsonl, args.max_queries, args.batchsize_3d)
+    testset = Inference_Dataset(str(Path(__file__).parent / 'data.jsonl'), args.max_queries, args.batchsize_3d)
     sampler = DistributedSampler(testset)
-    testloader = DataLoader(testset, sampler=sampler, batch_size=1, pin_memory=args.pin_memory, num_workers=args.num_workers, collate_fn=collate_fn)
+    testloader = DataLoader(
+        testset, sampler=sampler, batch_size=1, pin_memory=args.pin_memory, num_workers=args.num_workers,
+        collate_fn=collate_fn
+    )
     sampler.set_epoch(0)
-    
+
     # set model (by default gpu
     model = build_maskformer(args, device, gpu_id)
-    
+
     # load knowledge encoder
     text_encoder = Text_Encoder(
         text_encoder=args.text_encoder,
@@ -71,35 +76,30 @@ def main(args):
         open_bert_layer=12,
         open_modality_embed=False,
         gpu_id=gpu_id,
-        device=device
+        device=device,
     )
-    
+
     # load checkpoint if specified
     model, _, _ = load_checkpoint(
         checkpoint=args.checkpoint,
         resume=False,
         partial_load=args.partial_load,
-        model=model, 
-        device=device
+        model=model,
+        device=device,
     )
-    
+
     # choose how to evaluate the checkpoint
-    inference(model=model,
-              text_encoder=text_encoder,
-              device=device,
-              testset=testset,
-              testloader=testloader,
-              nib_dir=args.rcd_dir)
+    inference(
+        model=model,
+        text_encoder=text_encoder,
+        device=device,
+        testset=testset,
+        testloader=testloader,
+        nib_dir=args.rcd_dir,
+    )
 
 if __name__ == '__main__':
     # get configs
     args = parse_args()
-    
-    main(args)
 
-    
-    
-    
-        
-    
-    
+    main(args)

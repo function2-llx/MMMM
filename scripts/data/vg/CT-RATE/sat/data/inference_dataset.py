@@ -62,19 +62,26 @@ def contains(text, key):
             if k in text:
                 return True
         return False  
-    
-def Normalization(torch_image, image_type):
-    # rgb_list = ['rgb', 'photograph', 'laparoscopy', 'colonoscopy', 'microscopy', 'dermoscopy', 'fundus', 'fundus image']
-    np_image = torch_image.numpy()
-    if image_type.lower() == 'ct':
-        lower_bound, upper_bound = -500, 1000
-        np_image = np.clip(np_image, lower_bound, upper_bound)
-        np_image = (np_image - np.mean(np_image)) / np.std(np_image)
+
+def quantile(x: torch.Tensor, q: float, dim: int | None = None, keepdim: bool = False) -> torch.Tensor:
+    # workaround for https://github.com/pytorch/pytorch/issues/64947
+    assert 0 <= q <= 1
+    if dim is None:
+        x = x.view(-1)
+        k = round(x.numel() * q)
+        dim = 0
     else:
-        lower_bound, upper_bound = np.percentile(np_image, 0.5), np.percentile(np_image, 99.5)
-        np_image = np.clip(np_image, lower_bound, upper_bound)
-        np_image = (np_image - np.mean(np_image)) / np.std(np_image)
-    return torch.tensor(np_image)     
+        k = round(x.shape[dim] * q)
+    if k == 0:
+        k = 1
+    return x.kthvalue(k, dim, keepdim).values
+
+def Normalization(image: torch.Tensor, modality: str):
+    lower_bound = quantile(image, 0.5 / 100)
+    upper_bound = quantile(image, 99.5 / 100)
+    image = image.clip(lower_bound, upper_bound)
+    image = (image - image.mean()) / image.std()
+    return image
 
 def load_image(datum):
     orientation_code = datum['orientation_code'] if 'orientation_code' in datum else "RAS"
@@ -82,7 +89,7 @@ def load_image(datum):
     monai_loader = monai.transforms.Compose(
             [
                 monai.transforms.LoadImaged(keys=['image']),
-                monai.transforms.AddChanneld(keys=['image']),
+                monai.transforms.EnsureChannelFirstD(keys=['image']),
                 monai.transforms.Orientationd(axcodes=orientation_code, keys=['image']),   # zyx
                 monai.transforms.Spacingd(keys=["image"], pixdim=(1, 1, 3), mode=("bilinear")),
                 monai.transforms.CropForegroundd(keys=["image"], source_key="image"),

@@ -41,7 +41,7 @@ def inference(model, text_encoder, device, testset, testloader, nib_dir):
     model.eval()
     text_encoder.eval()
         
-    with torch.no_grad():
+    with torch.inference_mode():
         
         data_time = 0
         pred_time = 0
@@ -106,6 +106,7 @@ def inference(model, text_encoder, device, testset, testloader, nib_dir):
                         tmp = prediction_patch[b, :, :y2-y1, :x2-x1, :z2-z1] * gaussian[:y2-y1, :x2-x1, :z2-z1] # on gpu
                         prediction[:, y1:y2, x1:x2, z1:z2] += tmp.cpu()
                         accumulation[:, y1:y2, x1:x2, z1:z2] += gaussian[:y2-y1, :x2-x1, :z2-z1].cpu()
+                    del prediction_patch
                             
             # avg            
             prediction = prediction / accumulation
