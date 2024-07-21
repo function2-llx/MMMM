@@ -27,7 +27,7 @@ pool_size_xy = 2
 max_tokens_z = 4
 base_patch_size_z = 16
 patch_size_xy = 16
-max_vision_tokens = 144
+max_vision_tokens = 256
 
 
 def setup_mmmm(adapter: str):
