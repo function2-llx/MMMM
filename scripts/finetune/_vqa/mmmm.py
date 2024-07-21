@@ -108,7 +108,7 @@ class MMMMVQATransform(VQATransform):
         vlm_inputs, _ = prepare_vlm_inputs(
             [ConvTurn(*pair) for pair in pairs],
             self.tokenizer,
-            self.max_vision_tokens,
+            num_vision_tokens,
             inference=False,
             grounding=False,
             max_seq_len=self.max_seq_len,
