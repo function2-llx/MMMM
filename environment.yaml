@@ -41,5 +41,8 @@ dependencies:
   - vllm
   - pynrrd
   - pylidc  # for LIDC data
+  # for evaluation
   - evaluate
   - radgraph
+  - rouge_score
+  - bert_score
