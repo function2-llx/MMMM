@@ -769,41 +769,13 @@ class CogVLMForCausalLM(CogVLMPreTrainedModel):
             is_encoder_decoder: bool = False,
             standardize_cache_format: bool = False,
     ) -> Dict[str, Any]:
-        # update past_key_values
-        model_kwargs["past_key_values"] = self._extract_past_from_model_output(
-            outputs, standardize_cache_format=standardize_cache_format
+        token_type_ids = model_kwargs.pop('token_type_ids')
+        model_kwargs = super()._update_model_kwargs_for_generation(
+            outputs, model_kwargs, is_encoder_decoder, standardize_cache_format,
         )
-        if getattr(outputs, "state", None) is not None:
-            model_kwargs["state"] = outputs.state
-
-        # update token_type_ids with LANGUAGE_TOKEN_TYPE
-        if "token_type_ids" in model_kwargs:
-            token_type_ids = model_kwargs["token_type_ids"]
-            new_token_type_ids = torch.ones(size=(token_type_ids.shape[0], 1), dtype=token_type_ids.dtype,
-                                            device=token_type_ids.device) * LANGUAGE_TOKEN_TYPE
-            model_kwargs["token_type_ids"] = torch.cat([token_type_ids, new_token_type_ids], dim=-1)
-
-        # increase position_ids
-        if (position_ids := model_kwargs.get('position_ids')) is not None:
-            new_position_ids = position_ids[:, -1:] + 1
-            model_kwargs['position_ids'] = torch.cat([position_ids, new_position_ids], dim=-1)
-
-        if not is_encoder_decoder:
-            # update attention mask
-            if "attention_mask" in model_kwargs:
-                attention_mask = model_kwargs["attention_mask"]
-                model_kwargs["attention_mask"] = torch.cat(
-                    [attention_mask, attention_mask.new_ones((attention_mask.shape[0], 1))], dim=-1
-                )
-        else:
-            # update decoder attention mask
-            if "decoder_attention_mask" in model_kwargs:
-                decoder_attention_mask = model_kwargs["decoder_attention_mask"]
-                model_kwargs["decoder_attention_mask"] = torch.cat(
-                    [decoder_attention_mask, decoder_attention_mask.new_ones((decoder_attention_mask.shape[0], 1))],
-                    dim=-1,
-                )
-
+        new_token_type_ids = torch.ones(size=(token_type_ids.shape[0], 1), dtype=token_type_ids.dtype,
+                                        device=token_type_ids.device) * LANGUAGE_TOKEN_TYPE
+        model_kwargs["token_type_ids"] = torch.cat([token_type_ids, new_token_type_ids], dim=-1)
         return model_kwargs
 
     def _reorder_cache(self, past_key_values, beam_idx):
