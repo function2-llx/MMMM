@@ -124,7 +124,7 @@ def inference(model, text_encoder, test_set, test_loader, nib_dir, fabric: Fabri
             segobj = nib.nifti2.Nifti1Image(results, np.eye(4))
             nib.save(segobj, f'{nib_dir}/{dataset_name}/seg_{sample_id}.nii.gz')
 
-            image = batch['image'].numpy()
+            image = batch['image'].cpu().numpy()
             if image.ndim == 4:
                 image = image[0, :, :, :]  # h w d
             imgobj = nib.nifti2.Nifti1Image(image, np.eye(4))

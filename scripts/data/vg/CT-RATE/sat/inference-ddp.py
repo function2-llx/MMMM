@@ -39,7 +39,7 @@ def main(args):
         print(f'Inference Results will be Saved to ** {args.rcd_dir} **')
 
     # dataset and loader
-    testset = Inference_Dataset(str(Path(__file__).parent / 'data.jsonl'), args.max_queries, args.batchsize_3d)
+    testset = Inference_Dataset(str(Path(__file__).parent / 'data.json'), args.max_queries, args.batchsize_3d)
     sampler = DistributedSampler(testset)
     testloader = DataLoader(
         testset, sampler=sampler, batch_size=1, pin_memory=args.pin_memory, num_workers=args.num_workers,
