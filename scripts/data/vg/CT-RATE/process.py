@@ -79,9 +79,8 @@ def process_split(split: str, max_workers: int):
         max_workers=max_workers,
     )
 
-@CLI()
 def main(max_workers: int = 8):
     process_split('train', max_workers)
 
 if __name__ == '__main__':
-    main()
+    CLI(main)
