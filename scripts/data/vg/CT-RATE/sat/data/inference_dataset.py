@@ -79,8 +79,11 @@ def quantile(x: torch.Tensor, q: float, dim: int | None = None, keepdim: bool = 
 
 def Normalization(image: torch.Tensor, modality: str):
     image = image.contiguous()
-    lower_bound = quantile(image, 0.5 / 100)
-    upper_bound = quantile(image, 99.5 / 100)
+    if modality == 'ct':
+        lower_bound, upper_bound = -500, 1000
+    else:
+        lower_bound = quantile(image, 0.5 / 100)
+        upper_bound = quantile(image, 99.5 / 100)
     image = image.clip(lower_bound, upper_bound)
     image = (image - image.mean()) / image.std()
     return image

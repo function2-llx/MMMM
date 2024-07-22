@@ -1,36 +1,18 @@
-import os
 import datetime
-import random
+import os
+from pathlib import Path
 
-import numpy as np
 import torch
-import torch.backends.cudnn as cudnn
 import torch.distributed as dist
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
-from pathlib import Path
 
 from data.inference_dataset import Inference_Dataset, collate_fn
-
-from model.build_model import build_maskformer, load_checkpoint
-from model.text_encoder import Text_Encoder
-
-from train.dist import is_master
-
 from evaluate.inference_engine import inference
 from evaluate.params import parse_args
-
-def set_seed(config):
-    seed = config.seed
-    torch.manual_seed(seed)
-    np.random.seed(seed)
-    random.seed(seed)
-    cudnn.benchmark = True
-    # new seed
-    torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    cudnn.benchmark = False
-    cudnn.deterministic = True
+from model.build_model import build_maskformer, load_checkpoint
+from model.text_encoder import Text_Encoder
+from train.dist import is_master
 
 def main(args):
     # set gpu
