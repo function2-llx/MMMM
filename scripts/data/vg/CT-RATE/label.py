@@ -1,70 +1,177 @@
-from pathlib import Path
+from typing import TYPE_CHECKING
 
-import cytoolz
 import einops
-import inflect
-from jsonargparse import ActionConfigFile, ArgumentParser
-from lightning.fabric.utilities import move_data_to_device
-from lightning.pytorch.plugins import HalfPrecision
+import numpy as np
 import torch
-import torchvision.transforms.v2.functional as tvtf
-from tqdm import tqdm
+import torch.nn.functional as nnf
+from jsonargparse import ArgumentParser
+from lightning import Fabric
+from transformers import AutoModel, AutoTokenizer
 
+from luolib.data.utils import list_data_collate
+from luolib.types import PathLike
 from luolib.utils import load_pt_zst
-from luolib.utils.misc import ensure_rgb
+
 from monai.inferers import sliding_window_inference
-from monai.utils import BlendMode
+from mmmm.data.defs import PROCESSED_VG_DATA_ROOT
 
-from mmmm.data import get_target_tax
-from mmmm.data.defs import Split
-from mmmm.data.sparse import Sparse
-from mmmm.data.target_tax import TargetClass
+if TYPE_CHECKING:
+    import _stub.SegVol.model_segvol_single as _segvol
 
-engine = inflect.engine()
-_stop_words = {'the'}
+vg_data_dir = PROCESSED_VG_DATA_ROOT / 'CT-RATE'
 
-def singularize(word: str) -> str:
-    result = engine.singular_noun(word)
-    return result if result else word
+fabric = Fabric()
 
-def normalize(text: str):
-    words = text.split()
-    words = map(str.lower, words)
-    words = map(singularize, words)
-    words = filter(lambda w: w not in _stop_words, words)
-    text = ' '.join(words)
-    return text
-
-def parse_phrases(text: str):
-    start = '<p>'
-    end = '</p>'
-    ret = []
-    while (i := text.find(start)) >= 0:
-        text = text[i + len(start):]
-        j = text.find(end)
-        assert j >= 0
-        phrase = text[:j]
-        ret.append(phrase)
-        text = text[j + len(end):]
-    return ret
-
-target_tax = get_target_tax()
-phrase_mapping: dict[str, TargetClass]
-def build_phrase_mapping():
-    global phrase_mapping
-    phrase_mapping = {}
-    for target in target_tax.values():
-        for phrase in target.synonyms:
-            phrase_mapping[normalize(phrase)] = target
+# target_tax = get_target_tax()
+clip_tokenizer = AutoTokenizer.from_pretrained("BAAI/SegVol")
+segvol: '_segvol.SegVolModel' = AutoModel.from_pretrained("BAAI/SegVol", trust_remote_code=True, test_mode=True)
+segvol.model.text_encoder.tokenizer = clip_tokenizer
+segvol.eval()
+segvol = fabric.setup(segvol)
 
 @torch.no_grad()
 def _dice(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
     return 2 * (x * y).sum() / (x.sum() + y.sum())
 
+def intensity_norm(ct_narray):
+    ct_voxel_ndarray = ct_narray.copy()
+    ct_voxel_ndarray = ct_voxel_ndarray.flatten()
+    thred = np.mean(ct_voxel_ndarray)
+    voxel_filtered = ct_voxel_ndarray[(ct_voxel_ndarray > thred)]
+    upper_bound = np.percentile(voxel_filtered, 99.95)
+    lower_bound = np.percentile(voxel_filtered, 00.05)
+    mean = np.mean(voxel_filtered)
+    std = np.std(voxel_filtered)
+    ct_narray = np.clip(ct_narray, lower_bound, upper_bound)
+    ct_narray = (ct_narray - mean) / max(std, 1e-8)
+    return ct_narray
+
+def process_ct(path: PathLike):
+    """adapted from `SegVolProcessor.preprocess_ct_gt`"""
+    item = {}
+    if str(path).endswith('.pt.zst'):
+        ct_voxel_ndarray: np.ndarray = load_pt_zst(path).numpy()
+        # make SegVol happy
+        # ct_voxel_ndarray = einops.rearrange(ct_voxel_ndarray, 'c d h w -> c w h d')
+        ct_voxel_ndarray = einops.rearrange(ct_voxel_ndarray, 'c d h w -> c h w d')
+    else:
+        import monai.transforms as mt
+        loader = mt.Compose([
+            mt.LoadImage(ensure_channel_first=True),
+            mt.Orientation('RAS'),
+        ])
+        ct_voxel = loader(path)
+        ct_voxel_ndarray = ct_voxel.numpy()
+    ct_voxel_ndarray = intensity_norm(ct_voxel_ndarray)
+    item['image'] = ct_voxel_ndarray.astype(np.float32)
+    # dummy label
+    item['label'] = np.zeros_like(ct_voxel_ndarray, dtype=np.int16)
+
+    return item['image'], item['label']
+
+def logits2roi_coor(spatial_size, logits_global_single):
+    # crop predict
+    pred_global_single = torch.sigmoid(logits_global_single) > 0.5
+    ## get all pos idx
+    nonzero_indices = torch.nonzero(pred_global_single)
+    if nonzero_indices.shape[0] == 0:
+        return None, None, None, None, None, None
+    ## get boundary
+    min_d, max_d = nonzero_indices[:, 0].min(), nonzero_indices[:, 0].max()
+    min_h, max_h = nonzero_indices[:, 1].min(), nonzero_indices[:, 1].max()
+    min_w, max_w = nonzero_indices[:, 2].min(), nonzero_indices[:, 2].max()
+    ## padding
+    crop_d, crop_h, crop_w = max_d - min_d + 1, max_h - min_h + 1, max_w - min_w + 1,
+    window_d, window_h, window_w = spatial_size
+    padding_d, padding_h, padding_w = max(0, window_d-crop_d), max(0, window_h-crop_h), max(0, window_w-crop_w)
+    global_d, global_h, global_w = logits_global_single.shape
+    min_d = max(0, min_d - int(padding_d)//2)
+    min_h = max(0, min_h - int(padding_h)//2)
+    min_w = max(0, min_w - int(padding_w)//2)
+    max_d = min(global_d, max_d + int(padding_d)//2)
+    max_h = min(global_h, max_h + int(padding_h)//2)
+    max_w = min(global_w, max_w + int(padding_w)//2)
+    return min_d, min_h, min_w, max_d, max_h, max_w
+
+def forward_test(
+    self: '_segvol.SegVolModel',
+    image,
+    zoomed_image,
+    text_prompt: list[str],
+    use_zoom=True,
+):
+    # assert image.shape[0] == 1 and zoomed_image.shape[0] == 1, 'batch size should be 1'
+    # volume_shape = image[0][0].shape
+    # with torch.no_grad():
+    #     logits_global_single = self.model(zoomed_image, text=text_prompt)
+    # logits_global_single = nnf.interpolate(logits_global_single.cpu(), size=volume_shape, mode='nearest')
+    # if not use_zoom:
+    #     return logits_global_single
+    #
+    # min_d, min_h, min_w, max_d, max_h, max_w = logits2roi_coor(self.config.spatial_size, logits_global_single[0][0])
+    # if min_d is None:
+    #     print('Fail to detect foreground!')
+    #     return logits_global_single
+
+    # Crop roi
+    # image_single_cropped = image[:, :, min_d:max_d + 1, min_h:max_h + 1, min_w:max_w + 1]
+    ## inference
+    with torch.inference_mode():
+        logits_single_cropped = sliding_window_inference(
+            image,
+            self.config.spatial_size,
+            sw_batch_size=4,
+            predictor=self.model,
+            overlap=0.5,
+            text=text_prompt,
+            # mode='gaussian',
+            progress=True,
+        )
+        logits_single_cropped = logits_single_cropped.cpu().squeeze()
+    return logits_single_cropped[None, None]
+    # logits_global_single[:, :, min_d:max_d + 1, min_h:max_h + 1, min_w:max_w + 1] = logits_single_cropped
+    # return logits_global_single
+
+def infer_case(path: PathLike):
+    for category in ['left kidney', 'spleen', 'pancreas', 'liver', 'left lung', 'right lung', 'left lung upper lobe', 'heart']:
+        image, label = process_ct(path)
+        image = np.rot90(image, k=2, axes=(1, 2))
+        item: dict = segvol.processor.zoom_transform(image, label)
+        categories = [category]
+        item = list_data_collate([item])
+        item = fabric.to_device(item)
+        logits_mask = forward_test(
+            segvol,
+            image=item['image'],
+            zoomed_image=item['zoom_out_image'],
+            text_prompt=categories,
+            use_zoom=True
+        )
+        pred = logits_mask.sigmoid() > 0.5
+        from luolib.utils import IndexTracker
+        IndexTracker(
+            item['image'][0, 0],
+            pred[0, 0],
+            choose_max=True,
+            title=category,
+        )
+    # IndexTrackerBinary(
+    #     item['image'][0, 0],
+    #     pred[0],
+    # )
+    # pass
+
+# def process(split: str):
+#     # data_list = orjson.loads(vg_data_dir / f'{split}.json')
+#     'data/processed/vision-language/CT-RATE/image/train_19756_a/train_19756_a_2.pt.zst'
+
 def main():
-    from _utils import parse_grounded_report
-    report = '[Heart](heart) contour and size are normal. No pleural-pericardial effusion or thickening was detected. [Trachea](trachea) and both [main bronchi](main bronchus) are open. Minimal [peribronchial thickness](peribronchial thickening) increase is observed. There are more prominent centriacinar [emphysema](pulmonary emphysema) and bulla-bleb formations in the [upper lobes of both lungs](lung upper lobe). There are linear areas of [atelectasis](atelectasis) in both [lungs](lung) and accompanying nonspecific [ground-glass areas](pulmonary opacification) in the lower lobe posterior segments. There is a millimetric nonspecific [nodule](lung nodule) in the [upper lobe of the left lung](left lung upper lobe). No pathological increase in wall thickness was observed in the [esophagus](esophagus).'
-    parse_grounded_report(report)
+    from mmmm.models.sam.model import AlignSam
+    parser = ArgumentParser()
+    parser.add_class_arguments(AlignSam, 'model', )
+    # infer_case('data/processed/vision-language/CT-RATE/image/train_19756_a/train_19756_a_2.pt.zst')
+    # infer_case('train_19756_a_2.nii.gz')
+    infer_case('data/train_19756_a_1.nii.gz')
     exit(0)
     parser = ArgumentParser()
     parser.add_argument('-c', action=ActionConfigFile)
