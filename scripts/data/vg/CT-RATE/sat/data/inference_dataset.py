@@ -1,21 +1,15 @@
-import os
-import random
-import traceback
 import json
 import math
 
-from einops import rearrange, repeat, reduce
-import numpy as np
-import pandas as pd
 import torch
-from torch.utils.data import Dataset
 import torch.nn.functional as F
-import nibabel as nib
+from einops import repeat
+from torch.utils.data import Dataset
+
 import monai
 
-from train.dist import is_master
-
 def split_3d(image_tensor, crop_size=[288, 288, 96]):
+    image_tensor = image_tensor.as_tensor()
     # C H W D
     interval_h, interval_w, interval_d = crop_size[0] // 2, crop_size[1] // 2, crop_size[2] // 2
     split_idx = []
@@ -124,8 +118,7 @@ class Inference_Dataset(Dataset):
         self.batch_size = batch_size
         self.patch_size = patch_size
 
-        if is_master():
-            print(f'** DATASET ** : load {len(lines)} samples')
+        print(f'** DATASET ** : load {len(lines)} samples')
 
     def __len__(self):
         return len(self.lines)
