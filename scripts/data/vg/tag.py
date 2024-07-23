@@ -16,35 +16,47 @@ tokenizer: PreTrainedTokenizerFast
 sampling_params: SamplingParams
 
 anatomy_list = [
-    '[left; right] adrenal gland',
-    '[abdominal; thoracic] aorta',
-    '[left; right] clavicle',
-    'colon',
-    'duodenum',
-    'esophagus',
-    '[left; right] femur',
-    'gallbladder',
+    'trachea',
+    '[left; right] lung',
+    '[left; right] lung [lower; middle; upper] lobe',
+    '[left; right] main bronchus',
+
+    'heart',
     '[left; right] atrium',
     '[left; right] ventricle',
-    '[left; right] humerus',
-    '[left; right] [common; main] [iliac; pulmonary; subclavian; carotid; brachiocephalic] artery',
+    'aortic arch',
+    '[descending; ascending; thoracic; abdominal] aorta',
+    '[left; right] [common; main] [iliac; pulmonary; subclavian; carotid; brachiocephalic; coronary] artery',
     '[left; right] [common iliac; pulmonary; brachiocephalic] vein',
     '[inferior; superior] vena cava',
-    '[left; right] kidney',
-    'liver',
-    '[left; right] lung [lower; middle; upper] lobe',
-    'pancreas',
+
     '[left; right] rib [1-12]',
+    '[left; right] clavicle',
+    '[left; right] femur',
+    '[left; right] humerus',
     '[left; right] scapula',
+    '[cervical; thoracic; lumbar] vertebrae',
+    'C1-C7 vertebra',
+    'T1-T12 vertebra',
+    'L1-L6 vertebra',
+
+    'liver',
+    '[left; right] lobe of liver',
+    '[cervical; thoracic; abdominal] esophagus',
+    'colon',
+    'duodenum',
+    'gallbladder',
     'spleen',
     'stomach',
-    'trachea',
-    '[left; right] [main] bronchus',  # unable to segment, though
-    'bladder',
-    'heart',
-    '[left; right] atrial appendage',
-    '[left; right] lung',
+    'pancreas',
+
     'thyroid',
+    '[left; right] thyroid lobe',
+    '[left; right] adrenal gland',
+    '[left; right] kidney',
+    'bladder',
+    'uterus',
+    'prostate',
 ]
 anomaly_list = [
     # VinDr-CXR label
@@ -58,6 +70,7 @@ anomaly_list = [
     'pulmonary opacification',
     'mediastinal shift',
     'lung nodule',
+    'kidney cyst',
     'pleural effusion',
     'pleural thickening',
     'pneumothorax',
@@ -88,8 +101,8 @@ Below are requirements:
   - There is no pleural effusion or pneumothorax
   - No pleural effusion, pneumothorax, or focal consolidation is present.
 3. A special case to tag: the enlargement of cardiac silhouette or heart can be tagged as "cardiomegaly".
-4. Do not include targets that are too coarse, ambiguous, or amorphous to be spatially localized, such as "free fluid", "chest", "abdomen".
-5. The output should be exactly the original text extended with additional tags. Do not alter the input, or output any additional information. Even if no target is identified in the text, the output should be the same as input.
+4. Do not include targets that are too coarse, ambiguous, or amorphous to be spatially localized, such as "free fluid", "chest", "abdomen", "left".
+5. The output should be exactly the original text extended with additional tags. Do not alter the input, or generate any additional information.
 """
 tag_examples = {
     'CT-RATE': [
@@ -106,14 +119,26 @@ tag_examples = {
             'No occlusive pathology was observed in the lumen. Although the mediastinum cannot be evaluated optimally in non-contrast examination; The mediastinal main vascular structures are normal in [heart](heart) contour and size. Pericardial effusion-thickening was not observed. Thoracic esophageal calibration was normal and no significant tumoral wall thickening was detected. Sliding type [hiatal hernia](hiatal hernia) is observed at the lower end of the [esophagus](esophagus). Focal patchy [ground glass densities](pulmonary opacification) and interlobar and [interlobular septal thickenings](interlobular septal thickening) are observed in the [right lung lower lobe](right lung lower lobe) anterobasal and [left lung lower lobe](left lung lower lobe) anteromediobasal segment. Correlation with clinical and laboratory is recommended for atypical pneumonia. A nonspecific subpleural millimetric [nodule](lung nodule) was observed in the left superior lingular segment in both [lungs](lung). [Liver](liver), [gall bladder](gallbladder), [spleen](spleen), [pancreas](pancreas), both [adrenal glands](adrenal gland), and both [kidneys](kidney) are normal. Intraabdominal free fluid-collection was not observed. Bone structures in the study area are natural. Vertebral corpus heights are preserved.',
         ),
         (
-            'Mass lesions were observed in soft tissue density compatible with metastasis destructing the right 5th rib, left 4th and 5th ribs. The diameter of the mass that destroys the right 5th rib is 71 mm in the long axis, the longest diameter of the mass that destroys the left 4th rib is 50 mm, the left 5th rib The longest diameter of the destroying metastatic mass was 40 mm. As far as can be seen on non-contrast sections, the upper abdominal organs are normal. No space-occupying lesion was detected in the liver that entered the cross-sectional area. Bilateral adrenal glands were normal and no space-occupying lesion was detected. The gallbladder was not observed (operated). Multiple fractures were observed in the left hemithorax and sequelae in the right 2nd rib. Bone-destroying metastasis was observed in the posterior left 7th rib.',
-            'Mass lesions were observed in soft tissue density compatible with metastasis destructing the [right 5th rib](right rib 5), [left 4th](left rib 4) and [5th ribs](left rib 5). The diameter of the mass that destroys the [right 5th rib](right rib 5) is 71 mm in the long axis, the longest diameter of the mass that destroys the [left 4th rib](left rib 4) is 50 mm, the [left 5th rib](left rib 5) The longest diameter of the destroying metastatic mass was 40 mm. As far as can be seen on non-contrast sections, the upper abdominal organs are normal. No space-occupying lesion was detected in the [liver](liver) that entered the cross-sectional area. Bilateral [adrenal glands](adrenal gland) were normal and no space-occupying lesion was detected. The [gallbladder](gallbladder) was not observed (operated). Multiple [fractures](rib fracture) were observed in the left hemithorax and sequelae in the [right 2nd rib](right rib 2). Bone-destroying metastasis was observed in the posterior [left 7th rib](left rib 7).',
+            'Mass lesions were observed in soft tissue density compatible with metastasis destructing the right 5th rib, left 4th and 5th ribs. The diameter of the mass that destroys the right 5th rib is 71 mm in the long axis, the longest diameter of the mass that destroys the left 4th rib is 50 mm, the left 5th rib The longest diameter of the destroying metastatic mass was 40 mm. As far as can be seen on non-contrast sections, the upper abdominal organs are normal. No space-occupying lesion was detected in the liver that entered the cross-sectional area. Left adrenal glands was normal. The gallbladder was not observed (operated). Multiple fractures were observed in the left hemithorax and sequelae in the right 2nd rib. Bone-destroying metastasis was observed in the posterior left 7th rib.',
+            'Mass lesions were observed in soft tissue density compatible with metastasis destructing the [right 5th rib](right rib 5), [left 4th](left rib 4) and [5th ribs](left rib 5). The diameter of the mass that destroys the [right 5th rib](right rib 5) is 71 mm in the long axis, the longest diameter of the mass that destroys the [left 4th rib](left rib 4) is 50 mm, the [left 5th rib](left rib 5) The longest diameter of the destroying metastatic mass was 40 mm. As far as can be seen on non-contrast sections, the upper abdominal organs are normal. No space-occupying lesion was detected in the [liver](liver) that entered the cross-sectional area. [Left adrenal gland](left adrenal gland) was normal. The [gallbladder](gallbladder) was not observed (operated). Multiple [fractures](rib fracture) were observed in the left hemithorax and sequelae in the [right 2nd rib](right rib 2). Bone-destroying metastasis was observed in the posterior [left 7th rib](left rib 7).',
+        ),
+        (
+            'Heart contour size is natural. Pericardial thickening-effusion was not detected. Thoracic [esophagus](esophagus) calibration was normal and no significant pathological wall thickening was detected. When examined in the lung parenchyma window; Mild emphysematous changes were observed in both lungs. No pleural effusion was detected. The left lobe of the liver extends to the upper pole of the spleen (variation).',
+            '[Heart](heart) contour size is natural. Pericardial thickening-effusion was not detected. Thoracic [esophagus](esophagus) calibration was normal and no significant pathological wall thickening was detected. When examined in the lung parenchyma window; Mild [emphysematous changes](pulmonary emphysema) were observed in both [lungs](lung). No pleural effusion was detected. The [left lobe of the liver](left lobe of liver) extends to the upper pole of the [spleen](spleen) (variation). ',
+        ),
+        (
+            'The thoracic esophagus is in normal calibration. No pathological wall thickening was detected. When examined in the lung parenchyma window; Indentations due to rotoscoliosis in both lungs and compression atelectasis in areas adjacent to the vertebrae are noteworthy. A few nonspecific parenchymal nodules up to 5 mm in diameter were observed in both lungs. Scoliosis was observed in the thoracolumbar region. Hemivertebra appearance is remarkable in T5, T6 and T7 vertebrae. Externally applied surgical material was observed between C7 and T3 vertebrae.',
+            'The [thoracic esophagus](thoracic esophagus) is in normal calibration. No pathological wall thickening was detected. When examined in the lung parenchyma window; Indentations due to rotoscoliosis in both [lungs](lung) and [compression atelectasis](atelectasis) in areas adjacent to the [thoracic vertebrae](thoracic vertebrae) are noteworthy. A few nonspecific parenchymal [nodules](lung nodule) up to 5 mm in diameter were observed in both [lungs](lung). Scoliosis was observed in the thoracolumbar region. Hemivertebra appearance is remarkable in [T5](T5 vertebra), [T6](T6 vertebra) and [T7 vertebrae](T7 vertebra). Externally applied surgical material was observed between [C7](C7 vertebra) and [T3 vertebrae](T3 vertebra).'
+        ),
+        (
+            'The heart size has increased. Prominent calcific plaque formations are observed in the walls of the coronary artery, the arch of the aorta, and the wall of the descending aorta. In the right lung, it caused significant recession in the middle lobes of the pleural faces. In addition, prominent linear atelectasis areas are observed especially in the posterobasal segments, more prominently on the right in the lower lobes of both lungs. In the upper abdominal organs within the examination area; There is a stone with a diameter of 7 mm in the gallbladder lumen. There are several cysts, the largest of which reaches 10 cm, in the upper pole of the left kidney. When the bone is examined in the window, multisegmental degenerative changes are observed in the thoracic vertebral column. Thoracic kyphosis is normal.',
+            'The [heart](heart) size has [increased](cardiomegaly). [Atheroma plaques](vascular calcification) are observed in the walls of the [coronary artery](coronary artery), the [arch of the aorta](aortic arch), and the wall of the [descending aorta](descending aorta). In the [right lung](right lung), it caused significant recession in the middle lobes of the pleural faces. In addition, prominent linear [atelectasis](atelectasis) areas are observed especially in the posterobasal segments, more prominently on the right in [the lower lobes of both lungs](lung lower lobe). In the upper abdominal organs within the examination area; There is a stone with a diameter of 7 mm in the [gallbladder](gallbladder) lumen. There are several [cysts](kidney cyst), the largest of which reaches 10 cm, in the upper pole of the [left kidney](left kidney). When the bone is examined in the window, multisegmental degenerative changes are observed in the [thoracic vertebral column](thoracic vertebrae). Thoracic kyphosis is normal.',
         ),
     ],
     'MIMIC-CXR': [
         (
             'Lungs are fully expanded and clear without focal consolidation or suspicious pulmonary nodules.  No pleural effusions.  Mild cardiomegaly is present without pulmonary vascular congestion or pulmonary edema.  Descending thoracic aorta is tortuous.  Median sternotomy wires are well aligned and intact.',
-            '[Lungs](lung) are fully expanded and clear without focal consolidation or suspicious pulmonary nodules.  No pleural effusions.  Mild [cardiomegaly](cardiomegaly) is present without pulmonary vascular congestion or pulmonary edema.  Descending [thoracic aorta](thoracic aorta) is tortuous.  Median sternotomy wires are well aligned and intact.',
+            '[Lungs](lung) are fully expanded and clear without focal consolidation or suspicious pulmonary nodules.  No pleural effusions.  Mild [cardiomegaly](cardiomegaly) is present without pulmonary vascular congestion or pulmonary edema.  [Descending thoracic aorta](thoracic aorta) is tortuous.  Median sternotomy wires are well aligned and intact.',
         ),
         (
             'Airspace consolidation is noted within the left lower lobe compatible with pneumonia.  Right lung is clear.  Imaged osseous structures are intact. No free air below the right hemidiaphragm is seen.',
@@ -196,7 +221,7 @@ Your output should be exactly the same as the original text, except for annotati
 filter_examples = {
     'MIMIC-CXR': [
         (
-            'Left-sided pacemaker device is noted with leads terminating in the [right atrium](right atrium), [right ventricle](right ventricle), and coronary sinus.  The [heart](heart) size is mildly enlarged.  The [aortic knob](thoracic aorta) is calcified.  Mild [pulmonary edema](pulmonary edema) with perihilar haziness and vascular indistinctness is seen.  Focal opacities at [lung](lung) bases may reflect areas of [atelectasis](atelectasis) though infection cannot be excluded.  Small bilateral [pleural effusions](pleural effusion) may be present.  No [pneumothorax](pneumothorax) is identified.',
+            'Left-sided pacemaker device is noted with leads terminating in the [right atrium](right atrium), [right ventricle](right ventricle), and coronary sinus.  The [heart](heart) size is mildly enlarged.  The aortic knob is calcified.  Mild [pulmonary edema](pulmonary edema) with perihilar haziness and vascular indistinctness is seen.  Focal opacities at [lung](lung) bases may reflect areas of [atelectasis](atelectasis) though infection cannot be excluded.  Small bilateral [pleural effusions](pleural effusion) may be present.  No [pneumothorax](pneumothorax) is identified.',
             'Left-sided pacemaker device is noted with leads terminating in the [right atrium](right atrium), [right ventricle](right ventricle), and coronary sinus.  The [heart](heart) size is mildly [enlarged](cardiomegaly).  The [aortic knob](thoracic aorta) is calcified.  Mild [pulmonary edema](pulmonary edema) with perihilar haziness and vascular indistinctness is seen.  Focal opacities at [lung](lung) bases may reflect areas of [atelectasis](atelectasis) though infection cannot be excluded.  Small bilateral [pleural effusions](pleural effusion) may be present.  No pneumothorax is identified.',
         ),
         (
@@ -345,8 +370,8 @@ def main():
     )
 
     for dataset, num_samples_dict in [
-        ('MIMIC-CXR', {'train': 20000, 'test': -1}),
         ('CT-RATE', {'train': 5000, 'test': 0}),
+        ('MIMIC-CXR', {'train': 20000, 'test': -1}),
     ]:
         for split, num_samples in num_samples_dict.items():
             process(dataset, split, num_samples)
