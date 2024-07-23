@@ -47,15 +47,15 @@ supported_classes = {
 }
 
 def parse_targets(tags: list[dict]) -> list[str]:
-    for tag in tags:
-        if (target := tag['target']) in supported_classes)
+    # TODO: correct some class names
+    return list(set(target for tag in tags if (target := tag['target']) in supported_classes))
 
 def main(args):
     torch.set_float32_matmul_precision('medium')
     items = []
     split = 'train'
     for item in orjson.loads((vg_dataset_dir / f'{split}.json').read_bytes()):
-        targets = list(set(target for tag in item['tags'] if (target := tag['target']) in supported_classes))
+        targets = parse_targets(item['tags'])
         if len(targets) == 0:
             continue
         for image_path in item['image']:
