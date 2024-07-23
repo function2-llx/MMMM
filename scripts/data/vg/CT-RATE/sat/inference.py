@@ -1,8 +1,11 @@
 from pathlib import Path
 
+import orjson
 import torch
 from lightning import Fabric
 from torch.utils.data import DataLoader
+
+from luolib.utils.misc import min_stem
 
 from data.inference_dataset import Inference_Dataset, collate_fn
 from evaluate.inference_engine import inference
@@ -14,10 +17,6 @@ from model.text_encoder import Text_Encoder
 def build_maskformer(args):
     model = Maskformer(args.vision_backbone, args.crop_size, args.patch_size, args.deep_supervision)
 
-    # model = model.to(device)
-    # model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
-    # model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[gpu_id], find_unused_parameters=True)
-
     def get_parameter_number(model):
         total_num = sum(p.numel() for p in model.parameters())
         trainable_num = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -28,12 +27,52 @@ def build_maskformer(args):
 
     return model
 
-def main(args):
-    Path(args.rcd_dir).mkdir(exist_ok=True, parents=True)
-    print(f'Inference Results will be Saved to ** {args.rcd_dir} **')
+vl_dataset_dir = Path('data/processed/vision-language/CT-RATE')
+vg_dataset_dir = Path('data/processed/visual-grounding/CT-RATE')
 
-    # dataset and loader
-    test_set = Inference_Dataset(str(Path(__file__).parent / 'data.json'), args.max_queries, args.batchsize_3d)
+supported_classes = {
+    "bronchie",
+    "left lung upper lobe",
+    "left lung lower lobe",
+    "right lung lower lobe",
+    "right lung middle lobe",
+    "right lung upper lobe",
+    "heart",
+    "esophagus",
+    "adrenal gland",
+    "left adrenal gland",
+    "right adrenal gland",
+    "lung nodule",
+    # TODO
+}
+
+def parse_targets(tags: list[dict]) -> list[str]:
+    for tag in tags:
+        if (target := tag['target']) in supported_classes)
+
+def main(args):
+    torch.set_float32_matmul_precision('medium')
+    items = []
+    split = 'train'
+    for item in orjson.loads((vg_dataset_dir / f'{split}.json').read_bytes()):
+        targets = list(set(target for tag in item['tags'] if (target := tag['target']) in supported_classes))
+        if len(targets) == 0:
+            continue
+        for image_path in item['image']:
+            volume_name = min_stem(Path(image_path))
+            case, study, scan = volume_name.rsplit('_', 2)
+            volume_suffix = f'{split}/{case}/{case}_{study}/{volume_name}'
+            if (save_path := vg_dataset_dir / 'image' / f'{volume_suffix}_seg.pt.zst').exists():
+                continue
+            items.append({
+                'image': str(vg_dataset_dir / 'image' / f'{volume_suffix}.nii.gz'),
+                'save_path': save_path,
+                'modality': 'ct',
+                'dataset': 'CT-RATE',
+                'label': targets,
+            })
+
+    test_set = Inference_Dataset(items, args.max_queries, args.batchsize_3d)
     # sampler = DistributedSampler(testset)
     test_loader = DataLoader(
         test_set,
@@ -69,17 +108,9 @@ def main(args):
     model = fabric.setup(model)
     text_encoder = fabric.setup(text_encoder)
     test_loader = fabric.setup_dataloaders(test_loader)
-    inference(
-        model,
-        text_encoder,
-        test_set,
-        test_loader,
-        args.rcd_dir,
-        fabric,
-    )
+    inference(model, text_encoder, test_loader, args.batchsize_3d)
 
 if __name__ == '__main__':
     # get configs
     args = parse_args()
-
     main(args)

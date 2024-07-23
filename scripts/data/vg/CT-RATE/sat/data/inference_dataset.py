@@ -1,16 +1,13 @@
-import json
 import math
-from pathlib import Path
 
-import orjson
+import einops
 import torch
-import torch.nn.functional as F
-from einops import repeat
 from torch.utils.data import Dataset
 
 import monai
+from monai.data import MetaTensor
 
-def split_3d(image_tensor, crop_size=[288, 288, 96]):
+def split_3d(image_tensor, crop_size=(288, 288, 96)):
     image_tensor = image_tensor.as_tensor()
     # C H W D
     interval_h, interval_w, interval_d = crop_size[0] // 2, crop_size[1] // 2, crop_size[2] // 2
@@ -104,15 +101,13 @@ def load_image(datum):
     return img, datum['label'], datum['modality'], datum['image']
 
 class Inference_Dataset(Dataset):
-    def __init__(self, jsonl_file, max_queries=256, batch_size=2, patch_size=(288, 288, 96)):
+    def __init__(self, lines: list[dict], max_queries=256, batch_size=2, patch_size=(288, 288, 96)):
         """
         max_queries: num of queries in a batch. can be very large.
         batch_size: num of image patch in a batch. be careful with this if you have limited gpu memory.
         evaluated_samples: to resume from an interrupted evaluation
         """
-        # load data info
-        self.jsonl_file = jsonl_file
-        self.lines: list[dict] = orjson.loads(Path(jsonl_file).read_bytes())
+        self.lines = lines
 
         self.max_queries = max_queries
         self.batch_size = batch_size
@@ -150,64 +145,25 @@ class Inference_Dataset(Dataset):
         else:
             return mod
 
-    def _pad_if_necessary(self, patch):
-        # NOTE: depth must be pad to 96
-        b, c, h, w, d = patch.shape
-        t_h, t_w, t_d = self.patch_size
-        pad_in_h = 0 if h >= t_h else t_h - h
-        pad_in_w = 0 if w >= t_w else t_w - w
-        pad_in_d = 0 if d >= t_d else t_d - d
-        if pad_in_h + pad_in_w + pad_in_d > 0:
-            pad = (0, pad_in_d, 0, pad_in_w, 0, pad_in_h)
-            patch = F.pad(patch, pad, 'constant', 0)  # chwd
-        return patch
-
     def __getitem__(self, idx):
         datum = self.lines[idx]
+        img: MetaTensor
         img, labels, modality, image_path = load_image(datum)
-        c, h, w, d = img.shape
-
-        # image to patches
-        patches, y1y2_x1x2_z1z2_ls = split_3d(img, crop_size=[288, 288, 96])
-
-        # divide patches into batches
-        batch_num = len(patches) // self.batch_size if len(patches) % self.batch_size == 0 else len(
-            patches
-        ) // self.batch_size + 1
-        batched_patches = []
-        batched_y1y2_x1x2_z1z2 = []
-        for i in range(batch_num):
-            srt = i * self.batch_size
-            end = min(i * self.batch_size + self.batch_size, len(patches))
-            patch = torch.stack([patches[j] for j in range(srt, end)], dim=0)
-            # NOTE: depth must be pad to 96
-            patch = self._pad_if_necessary(patch)
-            # for single-channel images, e.g. mri and ct, pad to 3
-            # repeat sc image to mc
-            if patch.shape[1] == 1:
-                patch = repeat(patch, 'b c h w d -> b (c r) h w d', r=3)
-            batched_patches.append(patch)  # b, *patch_size
-            batched_y1y2_x1x2_z1z2.append([y1y2_x1x2_z1z2_ls[j] for j in range(srt, end)])
-
+        if img.shape[0] == 1:
+            img = einops.repeat(img, '1 ... -> c ...', c=3)
         # split labels into batches
         split_labels, split_n1n2 = self._split_labels(labels)  # [xxx, ...] [[n1, n2], ...]
         modality = self._merge_modality(modality.lower())
         for i in range(len(split_labels)):
             split_labels[i] = [label.lower() for label in split_labels[i]]
 
-        # the unique id of sample, used to name output
-        sample_id = image_path.split('/')[-1].replace('.nii.gz', '')  # 0.nii.gz -> 0
-
         return {
-            'dataset_name': datum['dataset'],
-            'sample_id': sample_id,
-            'image': img,
-            'batched_patches': batched_patches,
-            'batched_y1y2_x1x2_z1z2': batched_y1y2_x1x2_z1z2,
+            'image': img.as_tensor(),
+            'meta': img.meta,
+            'save_path': datum['save_path'],
             'split_queries': split_labels,
             'split_n1n2': split_n1n2,
             'labels': labels,
-            'chwd': [c, h, w, d],
             'modality': modality,
         }
 
