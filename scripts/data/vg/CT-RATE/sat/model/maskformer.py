@@ -14,7 +14,7 @@ from .SwinUNETR import SwinUNETR
 # from .umamba_mid import UMambaMid
 
 class Maskformer(nn.Module):
-    def __init__(self, vision_backbone='UNET', image_size=[288, 288, 96], patch_size=[32, 32, 32], deep_supervision=False):
+    def __init__(self, vision_backbone='UNET', image_size=(288, 288, 96), patch_size=(32, 32, 32), deep_supervision=False):
         """
         Args:
             vision_backbone (str, optional): visual backbone. Defaults to UNET.

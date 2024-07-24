@@ -54,7 +54,7 @@ def inference(
                     lambda patch: model(queries_ls, patch).sigmoid(),
                     overlap=0.5,
                     mode='gaussian',
-                    progress=True,
+                    # progress=True,
                 )[0]
                 original_affine = meta['original_affine']
                 prob = mt.SpatialResample(dtype=None).__call__(
