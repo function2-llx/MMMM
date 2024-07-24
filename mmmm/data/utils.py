@@ -3,12 +3,15 @@ from __future__ import annotations
 from pathlib import Path
 
 import einops
+from monai.data import MetaTensor
 import nibabel as nib
 import numpy as np
 import torch
 
+import monai.transforms as mt
 from luolib.types import PathLike
 from luolib.utils import load_pt_zst
+from luolib.utils.misc import min_stem
 
 from mmmm.tokenizer import MMMMTokenizer
 from .defs import CE_IGNORE_INDEX, ConvTurn, mmmm_debug
@@ -178,6 +181,12 @@ def save_as_nifti(path: PathLike, output_path: PathLike | None = None):
         nib.Nifti1Image(image.numpy(), np.eye(4)),
         output_path
     )
+
+def to_nrrd(seg_path: PathLike):
+    seg_path = Path(seg_path)
+    seg: MetaTensor = load_pt_zst(seg_path)
+    saver = mt.SaveImage(output_ext='.nrrd', output_dtype=np.uint8)
+    saver(seg, filename=seg_path.with_name(min_stem(seg_path)))
 
 """tokens of `VISION_TOKEN_TYPE` will be processed by VE"""
 LANGUAGE_TOKEN_TYPE = 0

@@ -95,6 +95,7 @@ def parse_supported_targets(tags: list[dict]) -> list[str]:
         target = correction.get(target, target)
         if target in supported_classes:
             targets.append(target)
+    targets = list(set(targets))
     return targets
 
 def main():
