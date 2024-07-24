@@ -1,10 +1,9 @@
-import argparse
 from pathlib import Path
 
 import jsonargparse
+from lightning import Fabric
 import orjson
 import torch
-from lightning import Fabric
 from torch.utils.data import DataLoader
 
 from luolib.utils.misc import min_stem
@@ -22,6 +21,7 @@ def parse_args():
     parser.add_argument("--max_queries", type=int, default=256)
     parser.add_argument("--sw_batch_size", type=int, default=2)
 
+    parser.add_argument("--pin_memory", action='store_true')
     parser.add_argument("--num_workers", type=int, default=4)
 
     parser.add_argument("--text_encoder_checkpoint", type=str)
@@ -39,7 +39,7 @@ def parse_args():
     return args
 
 def build_maskformer(args):
-    model = Maskformer(args.vision_backbone, args.crop_size, args.patch_size, args.deep_supervision)
+    model = Maskformer(args.vision_backbone, (288, 288, 96), args.patch_size, False)
 
     def get_parameter_number(model):
         total_num = sum(p.numel() for p in model.parameters())

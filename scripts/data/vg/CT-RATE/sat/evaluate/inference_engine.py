@@ -35,7 +35,7 @@ def inference(
     text_encoder.eval()
     with torch.inference_mode():
         # gaussian kernel to accumulate predcition
-        for batch in tqdm(test_loader, desc='iterate test dataloader'):
+        for batch in tqdm(test_loader, desc='iterate test dataloader', dynamic_ncols=True):
             try:
                 # data loading
                 meta = batch['meta']
