@@ -101,7 +101,7 @@ def load_image(datum):
     return img, datum['label'], datum['modality'], datum['image']
 
 class Inference_Dataset(Dataset):
-    def __init__(self, lines: list[dict], max_queries=256, batch_size=2, patch_size=(288, 288, 96)):
+    def __init__(self, lines: list[dict], max_queries=256, patch_size=(288, 288, 96)):
         """
         max_queries: num of queries in a batch. can be very large.
         batch_size: num of image patch in a batch. be careful with this if you have limited gpu memory.
@@ -110,7 +110,6 @@ class Inference_Dataset(Dataset):
         self.lines = lines
 
         self.max_queries = max_queries
-        self.batch_size = batch_size
         self.patch_size = patch_size
 
         print(f'** DATASET ** : load {len(self.lines)} samples')

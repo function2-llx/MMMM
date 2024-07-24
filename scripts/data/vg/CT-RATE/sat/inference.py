@@ -124,7 +124,7 @@ def main():
                 'label': targets,
             })
 
-    test_set = Inference_Dataset(items, args.max_queries, args.batchsize_3d)
+    test_set = Inference_Dataset(items, args.max_queries)
     test_loader = DataLoader(
         test_set,
         batch_size=1,
