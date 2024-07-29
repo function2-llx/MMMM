@@ -1,8 +1,10 @@
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
 
 import cytoolz
+from monai.data import MetaTensor, box_iou
+from monai.data.box_utils import clip_boxes_to_image
+import monai.transforms as mt
 import numpy as np
 import pandas as pd
 from scipy.sparse.csgraph import connected_components
@@ -10,9 +12,6 @@ import torch
 
 from luolib.transforms.box_ops import round_boxes
 from luolib.types import tuple3_t
-from monai.data import MetaTensor, box_iou
-from monai.data.box_utils import clip_boxes_to_image
-import monai.transforms as mt
 
 from ._base import DataPoint, DefaultImageLoaderMixin, Processor
 
@@ -103,6 +102,7 @@ class VinDrCXRProcessor(DefaultImageLoaderMixin, Processor):
 
     def image_loader(self, path: Path) -> MetaTensor:
         loader = mt.LoadImage(self.image_reader, image_only=True, dtype=self.image_dtype, ensure_channel_first=True)
+        # FIXME: h-w orientation
         image = loader(path)
         assert image.ndim == 4 and image.shape[-1] == 1
         image = self._adapt_to_3d(image[..., 0])

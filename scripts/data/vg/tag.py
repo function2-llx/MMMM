@@ -208,7 +208,7 @@ tag_examples = {
             'The heart is enlarged.  A left-sided cardiac generator pack projects leads into the right atrium and ventricle.  Bilateral upper zone opacities are present.  The hilar contours are within normal limits.  There is no effusion, edema, or pneumothorax.',
             'The [heart](heart) is [enlarged](cardiomegaly).  A left-sided cardiac generator pack projects leads into the [right atrium](right atrium) and [ventricle](right ventricle).  Bilateral upper zone [opacities](pulmonary opacification) are present.  The hilar contours are within normal limits.  There is no effusion, edema, or pneumothorax.',
         ),
-    ]
+    ],
 }
 
 filter_system_prompt = """You are an AI assistant with expertise in radiology. You will be given with a preliminarily annotated radiology report. In the given report, some of the phrases of anatomical structures and anomaly findings are annotated with the following format: [<phrase>](<target>), where "<phrase>" denotes the original text of the annotated phrase, "<target>" denotes the standard name of the corresponding target.
