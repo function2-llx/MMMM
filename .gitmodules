@@ -13,3 +13,6 @@
 [submodule "third-party/R2GenGPT"]
 	path = third-party/R2GenGPT
 	url = git@github.com:wang-zhanyu/R2GenGPT.git
+[submodule "scripts/data/vg/MIMIC-CXR/detrex/detectron2"]
+	path = scripts/data/vg/MIMIC-CXR/detrex/detectron2
+	url = https://github.com/facebookresearch/detectron2.git
