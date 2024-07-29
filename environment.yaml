@@ -6,9 +6,9 @@ channels:
 - defaults
 dependencies:
 - python=3.11
-- numpy
+- numpy<2
 - scikit-learn
-- pytorch::pytorch=2.3.1
+- pytorch::pytorch<2.4  # vllm compatible
 - pytorch::pytorch-cuda=12.1
 - pytorch::torchvision
 - ocl-icd-system  # https://github.com/conda-forge/openvino-feedstock/pull/73
@@ -32,13 +32,13 @@ dependencies:
 - pydicom
 - itk
 - zstandard
+- jsonargparse
+- omegaconf
+- mashumaro
+- orjson
 - pip
 - pip:
-  - jsonargparse[signatures, omegaconf]
-  - mashumaro[orjson]
-# comment out since we do not need bitsandbytes currently, and it can cause trouble: https://github.com/huggingface/peft/issues/1665
-#  - bitsandbytes  # bitsandbytes plays strangely with conda, it still depends on cudatoolkit=11.8
-  - xformers -i https://download.pytorch.org/whl/cu121
+  - xformers==v0.0.27 -i https://download.pytorch.org/whl/cu121  # not using PyTorch 2.4 and no pre-built binary for v0.0.27.post*
   - vllm
   - pynrrd
   - pylidc  # for LIDC data
