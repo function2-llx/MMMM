@@ -1,6 +1,5 @@
 from collections.abc import Hashable
 from dataclasses import dataclass
-import os
 from pathlib import Path
 
 import cytoolz
@@ -14,46 +13,21 @@ import orjson
 import pandas as pd
 from scipy.sparse.csgraph import connected_components
 import torch
-from torchvision.io import write_png
 import torchvision.transforms.v2.functional as tvtf
 from tqdm import tqdm
 
 from luolib.transforms.box_ops import round_boxes
-from luolib.types import tuple3_t
 from luolib.utils import get_cuda_device, process_map
 
-src_dir = Path('data/origin/local/VinDr-CXR')
-save_dir = Path(os.getenv("DETECTRON2_DATASETS", "datasets")) / "VinDr-CXR"
+from _utils import src_dir, save_dir, local_labels, _save_image
+
+split = 'train'
 
 @dataclass(kw_only=True)
 class VinDrCXRDataPoint:
     image_path: Path
     labels: list[Hashable]
     objects: list[Hashable]
-
-local_labels = [
-    'Aortic enlargement',
-    'Atelectasis',
-    'Calcification',
-    'Cardiomegaly',
-    'Clavicle fracture',
-    'Consolidation',
-    'Edema',
-    'Emphysema',
-    'Enlarged PA',
-    'ILD',
-    'Infiltration',
-    'Lung cavity',
-    'Lung cyst',
-    'Lung Opacity',
-    'Mediastinal shift',
-    'Nodule/Mass',
-    'Pleural effusion',
-    'Pleural thickening',
-    'Pneumothorax',
-    'Pulmonary fibrosis',
-    'Rib fracture',
-]
 
 def _remove_duplicate(objects: pd.DataFrame, boxes: np.ndarray) -> tuple[pd.DataFrame, np.ndarray]:
     rad_ids = objects['rad_id'].to_numpy()
@@ -72,10 +46,10 @@ def _remove_duplicate(objects: pd.DataFrame, boxes: np.ndarray) -> tuple[pd.Data
     boxes_ret = round_boxes(boxes_ret)
     return objects_ret, boxes_ret
 
-def _cluster(objects: pd.DataFrame, image_size: tuple3_t[int]):
+def _cluster(objects: pd.DataFrame, h: int, w: int):
     boxes = objects[['x_min', 'y_min', 'x_max', 'y_max']].to_numpy()
     boxes = round_boxes(boxes)
-    boxes, keep = clip_boxes_to_image(boxes, image_size)
+    boxes, keep = clip_boxes_to_image(boxes, (w, h))
     if boxes.shape[0] == 0:
         return boxes
     objects = objects[keep]
@@ -93,13 +67,8 @@ def _cluster(objects: pd.DataFrame, image_size: tuple3_t[int]):
     return mean_boxes
 
 loader = mt.LoadImage(reader='itkreader', ensure_channel_first=True)
-objects_df = pd.read_csv(src_dir / 'annotations/annotations_train.csv')
-labels_df = pd.read_csv(src_dir / 'annotations/image_labels_train.csv')
-
-def _write_png(image: torch.Tensor, path: Path):
-    tmp_save_path = path.with_name(f'.{path.name}')
-    write_png(image.cpu(), str(tmp_save_path))
-    tmp_save_path.rename(path)
+objects_df = pd.read_csv(src_dir / f'annotations/annotations_{split}.csv')
+labels_df = pd.read_csv(src_dir / f'annotations/image_labels_{split}.csv')
 
 def process_item(data_point: VinDrCXRDataPoint):
     key = data_point.image_path.stem
@@ -107,8 +76,8 @@ def process_item(data_point: VinDrCXRDataPoint):
     image = image.to(device=get_cuda_device())
     image = tvtf.to_dtype(image / image.max(), dtype=torch.uint8, scale=True)
     image = tvtf.equalize(image)
-    image_path = save_dir / f'train/{key}.png'
-    _write_png(image, image_path)
+    image_path = save_dir / f'{split}/{key}.jpeg'
+    _save_image(image, image_path)
     labels: pd.DataFrame = labels_df.loc[data_point.labels]
     objects: pd.DataFrame = objects_df.loc[data_point.objects]
     annotations = []
@@ -118,7 +87,7 @@ def process_item(data_point: VinDrCXRDataPoint):
         for class_name, class_objects_indexes in objects.groupby('class_name').groups.items():
             if class_name in {'No finding', 'Other lesion'}:
                 continue
-            boxes_np = _cluster(objects.loc[class_objects_indexes], image.shape[1:])
+            boxes_np = _cluster(objects.loc[class_objects_indexes], *image.shape[1:])
             boxes = boxes_np.tolist()
             class_idx = local_labels.index(class_name)
             for box in boxes:
@@ -143,15 +112,15 @@ def main():
         image_labels.setdefault(row['image_id'], []).append(index)
     items = (
         VinDrCXRDataPoint(
-            image_path=src_dir / f'train/{image_id}.dicom',
+            image_path=src_dir / f'{split}/{image_id}.dicom',
             labels=labels,
             objects=image_objects[image_id],
         )
         for image_id, labels in image_labels.items()
     )
-    (save_dir / 'train').mkdir(exist_ok=True, parents=True)
+    (save_dir / split).mkdir(exist_ok=True, parents=True)
     items = process_map(process_item, items, total=len(image_labels), max_workers=12, chunksize=10, dynamic_ncols=True)
-    (save_dir / 'train.json').write_bytes(orjson.dumps(items, option=orjson.OPT_INDENT_2))
+    (save_dir / f'{split}.json').write_bytes(orjson.dumps(items, option=orjson.OPT_INDENT_2))
 
 if __name__ == '__main__':
     main()
