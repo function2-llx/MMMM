@@ -12,10 +12,15 @@ few common configuration parameters currently defined in "configs/common/train.p
 To add more complicated training logic, you can easily add other configs
 in the config file and implement a new train_net.py to handle them.
 """
+from functools import partial
 import logging
 import os
+from pathlib import Path
 import sys
 import time
+
+from detectron2.data import DatasetCatalog
+import orjson
 import torch
 from torch.nn.parallel import DataParallel, DistributedDataParallel
 
@@ -87,7 +92,6 @@ class Trainer(SimpleTrainer):
         """
         assert self.model.training, "[Trainer] model was changed to eval mode!"
         assert torch.cuda.is_available(), "[Trainer] CUDA is required for AMP training!"
-        from torch.cuda.amp import autocast
 
         start = time.perf_counter()
         """
@@ -99,8 +103,9 @@ class Trainer(SimpleTrainer):
         """
         If you want to do something with the losses, you can wrap the model.
         """
-        loss_dict = self.model(data)
-        with autocast(enabled=self.amp):
+        with torch.amp.autocast('cuda', enabled=self.amp):
+            # move forward under autocast
+            loss_dict = self.model(data)
             if isinstance(loss_dict, torch.Tensor):
                 losses = loss_dict
                 loss_dict = {"total_loss": loss_dict}
@@ -246,12 +251,17 @@ def do_train(args, cfg):
         start_iter = 0
     trainer.train(start_iter, cfg.train.max_iter)
 
+def dataset_func(split: str):
+    assert split == 'train'
+    data_dir = Path(os.getenv('DETECTRON2_DATASETS')) / 'VinDr-CXR'
+    data = orjson.loads((data_dir / 'train.json').read_bytes())
+    return data
 
 def main(args):
     cfg = LazyConfig.load(args.config_file)
     cfg = LazyConfig.apply_overrides(cfg, args.opts)
     default_setup(cfg, args)
-
+    DatasetCatalog.register('vindr-cxr_train', partial(dataset_func, 'train'))
     if args.eval_only:
         model = instantiate(cfg.model)
         model.to(cfg.train.device)
@@ -263,6 +273,7 @@ def main(args):
 
 
 if __name__ == "__main__":
+    torch.set_float32_matmul_precision('medium')
     args = default_argument_parser().parse_args()
     launch(
         main,

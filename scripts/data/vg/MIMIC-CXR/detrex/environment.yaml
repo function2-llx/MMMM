@@ -9,7 +9,7 @@ dependencies:
 - numpy<2
 - scipy
 - pytorch::pytorch
-- pytorch::pytorch-cuda
+- pytorch::pytorch-cuda=12.1
 - pytorch::torchvision
 - pandas
 - opencv
@@ -28,6 +28,7 @@ dependencies:
 - itk
 - pip
 - pip:
+  - xformers -i https://download.pytorch.org/whl/cu121
   - fairscale
   - -e detectron2
   - -e .

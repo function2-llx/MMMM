@@ -15,6 +15,7 @@
 
 import torch
 import torch.nn as nn
+from torch.utils.checkpoint import checkpoint
 
 from detrex.layers import (
     FFN,
@@ -90,7 +91,8 @@ class DINOTransformerEncoder(TransformerLayerSequence):
     ):
 
         for layer in self.layers:
-            query = layer(
+            query = checkpoint(
+                layer,
                 query,
                 key,
                 value,
@@ -98,6 +100,7 @@ class DINOTransformerEncoder(TransformerLayerSequence):
                 attn_masks=attn_masks,
                 query_key_padding_mask=query_key_padding_mask,
                 key_padding_mask=key_padding_mask,
+                use_reentrant=False,
                 **kwargs,
             )
 

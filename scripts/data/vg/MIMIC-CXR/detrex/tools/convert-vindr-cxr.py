@@ -16,7 +16,6 @@ from scipy.sparse.csgraph import connected_components
 import torch
 from torchvision.io import write_png
 import torchvision.transforms.v2.functional as tvtf
-# from torchvision.utils import save_image
 from tqdm import tqdm
 
 from luolib.transforms.box_ops import round_boxes
@@ -99,18 +98,12 @@ labels_df = pd.read_csv(src_dir / 'annotations/image_labels_train.csv')
 
 def _write_png(image: torch.Tensor, path: Path):
     tmp_save_path = path.with_name(f'.{path.name}')
-    write_png(
-        einops.rearrange(image, 'c w h -> c h w').cpu(),
-        str(tmp_save_path),
-    )
+    write_png(image.cpu(), str(tmp_save_path))
     tmp_save_path.rename(path)
 
 def process_item(data_point: VinDrCXRDataPoint):
     key = data_point.image_path.stem
-    image = einops.rearrange(
-        loader(data_point.image_path).as_tensor(),
-        '1 w h 1 -> 1 h w',
-    )
+    image = einops.rearrange(loader(data_point.image_path).as_tensor(), '1 w h 1 -> 1 h w')
     image = image.to(device=get_cuda_device())
     image = tvtf.to_dtype(image / image.max(), dtype=torch.uint8, scale=True)
     image = tvtf.equalize(image)
@@ -142,7 +135,6 @@ def process_item(data_point: VinDrCXRDataPoint):
     }
 
 def main():
-    # only process the training set here
     image_objects = {}
     for index, row in tqdm(objects_df.iterrows(), 'iterating objects', total=objects_df.shape[0], dynamic_ncols=True):
         image_objects.setdefault(row['image_id'], []).append(index)
@@ -157,9 +149,8 @@ def main():
         )
         for image_id, labels in image_labels.items()
     )
-    items = cytoolz.take(100, items)
     (save_dir / 'train').mkdir(exist_ok=True, parents=True)
-    items = process_map(process_item, items, total=len(image_labels), max_workers=0, chunksize=10)
+    items = process_map(process_item, items, total=len(image_labels), max_workers=12, chunksize=10, dynamic_ncols=True)
     (save_dir / 'train.json').write_bytes(orjson.dumps(items, option=orjson.OPT_INDENT_2))
 
 if __name__ == '__main__':
