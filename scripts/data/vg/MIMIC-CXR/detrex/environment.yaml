@@ -32,4 +32,3 @@ dependencies:
   - fairscale
   - -e detectron2
   - -e .
-#  - xformers -i https://download.pytorch.org/whl/cu121

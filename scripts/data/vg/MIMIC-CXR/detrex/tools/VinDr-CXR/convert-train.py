@@ -119,7 +119,7 @@ def main():
         for image_id, labels in image_labels.items()
     )
     (save_dir / split).mkdir(exist_ok=True, parents=True)
-    items = process_map(process_item, items, total=len(image_labels), max_workers=12, chunksize=10, dynamic_ncols=True)
+    items = process_map(process_item, items, total=len(image_labels), max_workers=24, chunksize=10, dynamic_ncols=True)
     (save_dir / f'{split}.json').write_bytes(orjson.dumps(items, option=orjson.OPT_INDENT_2))
 
 if __name__ == '__main__':
