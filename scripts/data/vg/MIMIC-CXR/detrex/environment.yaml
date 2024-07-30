@@ -1,0 +1,34 @@
+name: detrex
+channels:
+- conda-forge
+- pytorch
+- nvidia
+- defaults
+dependencies:
+- python=3.11
+- numpy<2
+- scipy
+- pytorch::pytorch
+- pytorch::pytorch-cuda
+- pytorch::torchvision
+- pandas
+- opencv
+- ocl-icd-system  # https://github.com/conda-forge/openvino-feedstock/pull/73
+- einops
+- llvm-openmp<16  # https://github.com/pytorch/pytorch/issues/99625
+- monai
+- timm
+- orjson
+- ninja  # to load C++ extensions
+#- pandas
+#- pyarrow  # https://github.com/pandas-dev/pandas/issues/54466
+- wandb
+- zstandard
+- cytoolz
+- itk
+- pip
+- pip:
+  - fairscale
+  - -e detectron2
+  - -e .
+#  - xformers -i https://download.pytorch.org/whl/cu121
