@@ -21,7 +21,7 @@ import time
 
 from tqdm import trange
 
-from detectron2.data import DatasetCatalog
+from detectron2.data import DatasetCatalog, MetadataCatalog
 import orjson
 import torch
 from torch.nn.parallel import DataParallel, DistributedDataParallel
@@ -287,16 +287,45 @@ def do_train(args, cfg):
     trainer.train(start_iter, cfg.train.max_iter)
 
 def dataset_func(split: str):
-    assert split == 'train'
     data_dir = Path(os.getenv('DETECTRON2_DATASETS')) / 'VinDr-CXR'
-    data = orjson.loads((data_dir / 'train.json').read_bytes())
+    data = orjson.loads((data_dir / f'{split}.json').read_bytes())
+    for item in data:
+        if 'image_id' not in item:
+            item['image_id'] = Path(item['file_name']).stem
+
     return data
 
 def main(args):
     cfg = LazyConfig.load(args.config_file)
     cfg = LazyConfig.apply_overrides(cfg, args.opts)
     default_setup(cfg, args)
-    DatasetCatalog.register('vindr-cxr_train', partial(dataset_func, 'train'))
+    for split in ['train', 'test']:
+        name = f'vindr-cxr_{split}'
+        DatasetCatalog.register(name, partial(dataset_func, split))
+        meta = MetadataCatalog.get(name)
+        meta.thing_classes = [
+            'Aortic enlargement',
+            'Atelectasis',
+            'Calcification',
+            'Cardiomegaly',
+            'Clavicle fracture',
+            'Consolidation',
+            'Edema',
+            'Emphysema',
+            'Enlarged PA',
+            'ILD',
+            'Infiltration',
+            'Lung cavity',
+            'Lung cyst',
+            'Lung Opacity',
+            'Mediastinal shift',
+            'Nodule/Mass',
+            'Pleural effusion',
+            'Pleural thickening',
+            'Pneumothorax',
+            'Pulmonary fibrosis',
+            'Rib fracture',
+        ]
     if args.eval_only:
         model = instantiate(cfg.model)
         model.to(cfg.train.device)

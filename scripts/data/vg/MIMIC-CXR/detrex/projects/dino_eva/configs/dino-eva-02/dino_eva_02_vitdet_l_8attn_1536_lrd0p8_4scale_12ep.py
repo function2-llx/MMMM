@@ -33,6 +33,8 @@ model.backbone.net.window_block_indexes = (
 train.init_checkpoint = "/path/to/eva02_L_pt_m38m_p14to16.pt"
 train.output_dir = "./output/dino_eva_02_vitdet_l_8attn_1536_lrd0p8_4scale_12ep"
 
+dataloader.evaluator.output_dir = f'{train.output_dir}/eval'
+
 # max training iterations
 train.max_iter = 90000
 

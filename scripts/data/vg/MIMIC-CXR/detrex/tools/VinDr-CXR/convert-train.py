@@ -22,6 +22,7 @@ from luolib.utils import get_cuda_device, process_map
 from _utils import src_dir, save_dir, local_labels, _save_image
 
 split = 'train'
+# save_dir = save_dir.with_name(f'{save_dir.name}-sub')
 
 @dataclass(kw_only=True)
 class VinDrCXRDataPoint:
@@ -98,6 +99,7 @@ def process_item(data_point: VinDrCXRDataPoint):
                 })
     return {
         'file_name': str(image_path),
+        'image_id': image_path.stem,
         'height': image.shape[1],
         'width': image.shape[2],
         'annotations': annotations,
@@ -118,6 +120,8 @@ def main():
         )
         for image_id, labels in image_labels.items()
     )
+    # import cytoolz
+    # items = cytoolz.take(500, items)
     (save_dir / split).mkdir(exist_ok=True, parents=True)
     items = process_map(process_item, items, total=len(image_labels), max_workers=24, chunksize=10, dynamic_ncols=True)
     (save_dir / f'{split}.json').write_bytes(orjson.dumps(items, option=orjson.OPT_INDENT_2))

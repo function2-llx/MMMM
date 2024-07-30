@@ -18,6 +18,7 @@ dataloader.train.total_batch_size = 64
 # recompute boxes due to cropping
 dataloader.train.mapper.recompute_boxes = False
 
+dataloader.test.dataset.names = 'vindr-cxr_test'
 dataloader.test.mapper.augmentations = [
     L(T.ResizeShortestEdge)(short_edge_length=image_size, max_size=image_size),
 ]

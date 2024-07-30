@@ -22,6 +22,7 @@ class VinDrCXRDataPoint:
     objects: list[Hashable]
 
 split = 'test'
+# save_dir = save_dir.with_name(f'{save_dir.name}-sub')
 
 loader = mt.LoadImage(reader='itkreader', ensure_channel_first=True)
 objects_df = pd.read_csv(src_dir / f'annotations/annotations_{split}.csv')
@@ -57,6 +58,7 @@ def process_item(data_point: VinDrCXRDataPoint):
             })
     return {
         'file_name': str(image_path),
+        'image_id': image_path.stem,
         'height': image.shape[1],
         'width': image.shape[2],
         'annotations': annotations,
@@ -74,7 +76,7 @@ def main():
         for image_id, objects in image_objects.items()
     )
     # import cytoolz
-    # items = cytoolz.take(10, items)
+    # items = cytoolz.take(100, items)
     (save_dir / split).mkdir(exist_ok=True, parents=True)
     items = process_map(process_item, items, total=len(image_objects), max_workers=24, chunksize=10, dynamic_ncols=True)
     (save_dir / f'{split}.json').write_bytes(orjson.dumps(items, option=orjson.OPT_INDENT_2))
