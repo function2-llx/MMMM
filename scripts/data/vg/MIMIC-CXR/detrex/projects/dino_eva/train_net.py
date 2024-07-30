@@ -19,6 +19,8 @@ from pathlib import Path
 import sys
 import time
 
+from tqdm import trange
+
 from detectron2.data import DatasetCatalog
 import orjson
 import torch
@@ -37,6 +39,9 @@ from detectron2.engine import (
 from detectron2.engine.defaults import create_ddp_model
 from detectron2.evaluation import inference_on_dataset, print_csv_format
 from detectron2.utils import comm
+from detectron2.utils.events import EventStorage
+from detectron2.utils.file_io import PathManager
+from detrex.utils import WandbWriter
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir)))
 
@@ -75,9 +80,8 @@ class Trainer(SimpleTrainer):
 
         if amp:
             if grad_scaler is None:
-                from torch.cuda.amp import GradScaler
-
-                grad_scaler = GradScaler()
+                from torch.amp import GradScaler
+                grad_scaler = GradScaler('cuda')
             self.grad_scaler = grad_scaler
 
         # set True to use amp training
@@ -85,6 +89,31 @@ class Trainer(SimpleTrainer):
 
         # gradient clip hyper-params
         self.clip_grad_params = clip_grad_params
+
+    def train(self, start_iter: int, max_iter: int):
+        logger = logging.getLogger(__name__)
+        logger.info("Starting training from iteration {}".format(start_iter))
+
+        self.iter = self.start_iter = start_iter
+        self.max_iter = max_iter
+
+        with EventStorage(start_iter) as self.storage:
+            try:
+                self.before_train()
+                # use progress bar here
+                for self.iter in trange(start_iter, max_iter, desc='training', dynamic_ncols=True):
+                    self.before_step()
+                    self.run_step()
+                    self.after_step()
+                # self.iter == max_iter can be used by `after_train` to
+                # tell whether the training successfully finished or failed
+                # due to exceptions.
+                self.iter += 1
+            except Exception:
+                logger.exception("Exception during training:")
+                raise
+            finally:
+                self.after_train()
 
     def run_step(self):
         """
@@ -175,7 +204,7 @@ def do_train(args, cfg):
     logger.info("Model:\n{}".format(model))
     model.to(cfg.train.device)
 
-    # this is an hack of train_net
+    # this is a hack of train_net
     param_dicts = [
         {
             "params": [
@@ -224,7 +253,13 @@ def do_train(args, cfg):
         cfg.train.output_dir,
         trainer=trainer,
     )
-
+    if comm.is_main_process():
+        writers = default_writers(cfg.train.output_dir, cfg.train.max_iter)
+        if cfg.train.wandb.enabled:
+            PathManager.mkdirs(cfg.train.wandb.params.dir)
+            writers.append(WandbWriter(cfg))
+    else:
+        writers = None
     trainer.register_hooks(
         [
             hooks.IterationTimer(),
@@ -234,7 +269,7 @@ def do_train(args, cfg):
             else None,
             hooks.EvalHook(cfg.train.eval_period, lambda: do_test(cfg, model)),
             hooks.PeriodicWriter(
-                default_writers(cfg.train.output_dir, cfg.train.max_iter),
+                writers,
                 period=cfg.train.log_period,
             )
             if comm.is_main_process()

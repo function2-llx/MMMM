@@ -38,9 +38,9 @@ train = dict(
     # logging training info to Wandb
     # note that you should add wandb writer in `train_net.py``
     wandb=dict(
-        enabled=False,
+        enabled=True,
         params=dict(
-            dir="./wandb_output",
+            dir="./output/wandb",
             project="detrex",
             name="detrex_experiment",
         )

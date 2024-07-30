@@ -5,22 +5,16 @@
 # --------------------------------------------------------
 
 from __future__ import absolute_import
-from __future__ import print_function
 from __future__ import division
+from __future__ import print_function
 
-import warnings
 import torch
-from torch import nn
-import torch.nn.functional as F
 from torch.autograd import Function
 from torch.autograd.function import once_differentiable
-from torch.cuda.amp import custom_bwd, custom_fwd
-from torch.nn.init import xavier_uniform_, constant_
-
 
 class DCNv3Function(Function):
-    @staticmethod
-    @custom_fwd
+    # @staticmethod
+    @torch.amp.custom_fwd(device_type='cuda')
     def forward(
             ctx, input, offset, mask,
             kernel_h, kernel_w, stride_h, stride_w,
@@ -49,7 +43,7 @@ class DCNv3Function(Function):
 
     @staticmethod
     @once_differentiable
-    @custom_bwd
+    @torch.amp.custom_bwd(device_type='cuda')
     def backward(ctx, grad_output):
         input, offset, mask = ctx.saved_tensors
         grad_input, grad_offset, grad_mask = \

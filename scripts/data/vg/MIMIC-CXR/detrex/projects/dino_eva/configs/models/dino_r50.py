@@ -73,7 +73,7 @@ model = L(DINO)(
         two_stage_num_proposals="${..num_queries}",
     ),
     embed_dim=256,
-    num_classes=80,
+    num_classes=21,
     num_queries=900,
     aux_loss=True,
     criterion=L(DINOCriterion)(

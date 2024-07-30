@@ -9,6 +9,7 @@ from ..common.coco_loader_lsj_1536 import dataloader
 optimizer = get_config("common/optim.py").AdamW
 lr_multiplier = get_config("common/coco_schedule.py").lr_multiplier_12ep
 train = get_config("common/train.py").train
+train.wandb.params.name = 'VinDr-CXR'
 
 
 # modify model config

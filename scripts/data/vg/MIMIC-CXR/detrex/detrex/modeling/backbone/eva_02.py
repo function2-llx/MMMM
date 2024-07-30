@@ -6,6 +6,7 @@ import fvcore.nn.weight_init as weight_init
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.checkpoint import checkpoint
 
 from detectron2.layers import CNNBlockBase, Conv2d, get_norm
 from detectron2.modeling.backbone.fpn import _assert_strides_are_log2_contiguous
@@ -395,11 +396,6 @@ class EVA02_ViT(Backbone):
                 rope=self.rope_win if i in window_block_indexes else self.rope_glb,
                 xattn=xattn
             )
-            if use_act_checkpoint:
-                # TODO: use torch.utils.checkpoint
-                from fairscale.nn.checkpoint import checkpoint_wrapper
-
-                block = checkpoint_wrapper(block)
             self.blocks.append(block)
 
         self._out_feature_channels = {out_feature: embed_dim}
@@ -428,7 +424,8 @@ class EVA02_ViT(Backbone):
             )
 
         for blk in self.blocks:
-            x = blk(x)
+            # x = blk(x)
+            x = checkpoint(blk, x, use_reentrant=False)
 
         outputs = {self._out_features[0]: x.permute(0, 3, 1, 2)}
         return outputs
