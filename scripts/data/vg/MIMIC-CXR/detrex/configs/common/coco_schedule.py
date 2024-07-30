@@ -1,8 +1,12 @@
+import os
+
 from fvcore.common.param_scheduler import MultiStepParamScheduler
+from omegaconf import DictConfig
 
 from detectron2.config import LazyCall as L
 from detectron2.solver import WarmupParamScheduler
 
+steps_per_epoch = os.getenv('STEPS_PER_EPOCH', 300)
 
 def default_X_scheduler(num_X):
     """
@@ -37,7 +41,6 @@ def default_X_scheduler(num_X):
         warmup_factor=0.001,
     )
 
-
 def default_coco_scheduler(epochs=50, decay_epochs=40, warmup_epochs=0):
     """
     Returns the config for a default multi-step LR scheduler such as "50epochs",
@@ -53,20 +56,20 @@ def default_coco_scheduler(epochs=50, decay_epochs=40, warmup_epochs=0):
         DictConfig: configs that define the multiplier for LR during training
     """
     # total number of iterations assuming 16 batch size, using 1440000/16=90000
-    total_steps_16bs = epochs * 7500
-    decay_steps = decay_epochs * 7500
-    warmup_steps = warmup_epochs * 7500
+    # non-empty samples in VinDr-CXR is 4500
+    total_steps = epochs * steps_per_epoch
+    decay_steps = decay_epochs * steps_per_epoch
+    warmup_steps = warmup_epochs * steps_per_epoch
     scheduler = L(MultiStepParamScheduler)(
         values=[1.0, 0.1],
-        milestones=[decay_steps, total_steps_16bs],
+        milestones=[decay_steps, total_steps],
     )
     return L(WarmupParamScheduler)(
         scheduler=scheduler,
-        warmup_length=warmup_steps / total_steps_16bs,
+        warmup_length=warmup_steps / total_steps,
         warmup_method="linear",
         warmup_factor=0.001,
     )
-
 
 # default coco scheduler
 lr_multiplier_1x = default_X_scheduler(1)

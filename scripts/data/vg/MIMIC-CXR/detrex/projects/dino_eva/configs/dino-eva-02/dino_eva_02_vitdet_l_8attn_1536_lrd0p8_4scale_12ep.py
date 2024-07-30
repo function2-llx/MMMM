@@ -1,4 +1,6 @@
+import os
 from functools import partial
+
 from detrex.config import get_config
 from detrex.modeling.backbone.eva import get_vit_lr_decay_rate
 
@@ -7,7 +9,9 @@ from ..common.coco_loader_lsj_1536 import dataloader
 
 # get default config
 optimizer = get_config("common/optim.py").AdamW
-lr_multiplier = get_config("common/coco_schedule.py").lr_multiplier_12ep
+_coco_schedule_config = get_config("common/coco_schedule.py")
+num_epochs = 50
+lr_multiplier = getattr(_coco_schedule_config, f'lr_multiplier_{num_epochs}ep')
 train = get_config("common/train.py").train
 train.wandb.params.name = 'VinDr-CXR'
 
@@ -31,12 +35,12 @@ model.backbone.net.window_block_indexes = (
 
 # modify training config
 train.init_checkpoint = "/path/to/eva02_L_pt_m38m_p14to16.pt"
-train.output_dir = "./output/dino_eva_02_vitdet_l_8attn_1536_lrd0p8_4scale_12ep"
+train.output_dir = f"./output/dino_eva_02_vitdet_l_8attn_1536_lrd0p8_4scale_{num_epochs}ep"
 
 dataloader.evaluator.output_dir = f'{train.output_dir}/eval'
 
 # max training iterations
-train.max_iter = 90000
+train.max_iter = num_epochs * os.getenv('STEPS_PER_EPOCH', 300)
 
 
 # gradient clipping for training
