@@ -40,7 +40,7 @@ train.output_dir = f"./output/dino_eva_02_vitdet_l_8attn_1536_lrd0p8_4scale_{num
 dataloader.evaluator.output_dir = f'{train.output_dir}/eval'
 
 # max training iterations
-train.max_iter = num_epochs * os.getenv('STEPS_PER_EPOCH', 300)
+train.max_iter = num_epochs * int(os.getenv('STEPS_PER_EPOCH', 300))
 
 
 # gradient clipping for training
