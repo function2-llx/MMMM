@@ -10,7 +10,7 @@ from ..common.coco_loader_lsj_1536 import dataloader
 # get default config
 optimizer = get_config("common/optim.py").AdamW
 _coco_schedule_config = get_config("common/coco_schedule.py")
-num_epochs = 50
+num_epochs = int(os.getenv('NUM_EPOCHS', 50))
 lr_multiplier = getattr(_coco_schedule_config, f'lr_multiplier_{num_epochs}ep')
 train = get_config("common/train.py").train
 train.wandb.params.name = 'VinDr-CXR'

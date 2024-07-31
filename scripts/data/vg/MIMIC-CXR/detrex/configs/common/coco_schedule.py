@@ -6,7 +6,7 @@ from omegaconf import DictConfig
 from detectron2.config import LazyCall as L
 from detectron2.solver import WarmupParamScheduler
 
-steps_per_epoch = os.getenv('STEPS_PER_EPOCH', 300)
+steps_per_epoch = int(os.getenv('STEPS_PER_EPOCH', 300))
 
 def default_X_scheduler(num_X):
     """
