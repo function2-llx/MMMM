@@ -2,18 +2,15 @@ from functools import partial
 from pathlib import Path
 
 import cytoolz
-import monai.transforms as mt
-
-import nibabel as nib
-import numpy as np
 from jsonargparse import CLI
 from monai.data import MetaTensor
-import torchvision.transforms.v2.functional as tvtf
-import torch
+import monai.transforms as mt
 from monai.utils import InterpolateMode
+import torch
+import torchvision.transforms.v2.functional as tvtf
 
 from luolib.transforms import quantile
-from luolib.utils import load_pt_zst, save_pt_zst, process_map, get_cuda_device
+from luolib.utils import get_cuda_device, load_pt_zst, process_map, save_pt_zst
 from mmmm.data.dataset.misc import get_max_resize
 from mmmm.data.defs import PROCESSED_VG_DATA_ROOT
 
@@ -26,42 +23,56 @@ def process(image_path: Path):
     save_dir = parent / f'{key}-t'
     if save_dir.exists():
         return
+    seg_path = parent / f'{key}_seg.pt.zst'
     image: MetaTensor = mt.LoadImage(ensure_channel_first=True)(image_path)
-    masks: MetaTensor = load_pt_zst(parent / f'{key}_seg.pt.zst')
-    assert torch.allclose(image.affine, masks.affine)
-    image, masks = map(
-        cytoolz.compose(
-            torch.Tensor.contiguous,
-            mt.Orientation('SRA'),
-            partial(torch.Tensor.cuda, device=device),
-        ),
-        (image, masks),
+    if seg_path.exists():
+        masks: MetaTensor = load_pt_zst(parent / f'{key}_seg.pt.zst')
+        assert torch.allclose(image.affine, masks.affine)
+    else:
+        masks = None
+    convert_fn = cytoolz.compose(
+        torch.Tensor.contiguous,
+        mt.Orientation('SRA'),
+        partial(torch.Tensor.cuda, device=device),
     )
+    image = convert_fn(image)
+    if masks is not None:
+        masks = convert_fn(masks)
     min_v = quantile(image, 0.5 / 100)
     max_v = quantile(image, 99.5 / 100)
     image.clip_(min_v, max_v)
     image = (image - min_v) / (max_v - min_v)
-    cropper = mt.CropForegroundD(['image', 'masks'], source_key='image', allow_smaller=False)
-    image, masks = cytoolz.get(['image', 'masks'], cropper({'image': image, 'masks': masks}))
+    cropper = mt.CropForegroundD(['image', 'masks'], source_key='image', allow_smaller=False, allow_missing_keys=True)
+    data = {'image': image}
+    if masks is not None:
+        data['masks'] = masks
+    data = cropper(data)
+    image = data['image']
+    if masks is not None:
+        masks = data['masks']
     resize_shape = (
         min(128, image.shape[1]),
         *get_max_resize(image.shape[2:], 32, 64)
     )
-    resize = mt.ResizeD(
-        ['image', 'masks'],
+    resize = mt.Resize(
         resize_shape,
-        mode=[InterpolateMode.TRILINEAR, InterpolateMode.NEAREST_EXACT],
-        dtype=[image.dtype, torch.uint8],
+        mode=InterpolateMode.TRILINEAR,
         anti_aliasing=False,
     )
-    image, masks = cytoolz.get(['image', 'masks'], resize({'image': image, 'masks': masks}))
-    masks = masks.bool()
-    image, masks = map(MetaTensor.as_tensor, (image, masks))
+    image = resize(image).as_tensor()
+    if masks is not None:
+        mask_batch_size = 16
+        results = []
+        for i in range(0, masks.shape[0], mask_batch_size):
+            result = resize(masks[i:i + mask_batch_size])
+            results.append(result.as_tensor() > 0.5)
+        masks = torch.cat(results, dim=0)
     image = tvtf.to_dtype(image, dtype=torch.uint8, scale=True)
     tmp_save_dir = parent / f'.{key}-t'
     tmp_save_dir.mkdir(exist_ok=True)
     save_pt_zst(image.cpu(), tmp_save_dir / f'{key}.pt.zst')
-    save_pt_zst(masks.cpu(), tmp_save_dir / f'{key}_seg.pt.zst')
+    if masks is not None:
+        save_pt_zst(masks.cpu(), tmp_save_dir / f'{key}_seg.pt.zst')
     tmp_save_dir.rename(save_dir)
 
 def main(max_workers: int = 8, d_range: tuple[int | None, int | None] = (None, None)):
