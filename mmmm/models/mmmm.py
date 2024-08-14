@@ -147,12 +147,14 @@ class MMMMForCausalLM(CogVLMForCausalLM, PeftMixin, LightningModule):
         hidden_states: torch.Tensor,
         image: list[torch.Tensor],
         patch_size: list[tuple3_t[int]],
+        prompt_mask: list[torch.BoolTensor | None],
         instance_mask: list[bool] | None,
     ):
         """
         Args:
             token_ids: generated token ids
-            hidden_states: hidden states that generate tokens
+            hidden_states: hidden states that generate tokens (usually the hidden states of the last layer)
+            prompt_mask: only generate results for specific prompts
         Returns: for each sample in the batch:
             - predicted semantic masks logits
             - predicted bounding boxes
@@ -162,7 +164,12 @@ class MMMMForCausalLM(CogVLMForCausalLM, PeftMixin, LightningModule):
         if instance_mask is None:
             raise NotImplementedError
         batch_size = len(image)
+        hidden_states = hidden_states.float()
         vg_prompts = self._get_vg_prompts(token_ids, hidden_states)
+        vg_prompts = [
+            vg_prompts_ if label_mask_ is None else vg_prompts_[label_mask_]
+            for vg_prompts_, label_mask_ in zip(vg_prompts, prompt_mask)
+        ]
         if all(instance_mask):
             masks_logits = [None] * batch_size
         else:
@@ -199,9 +206,10 @@ class MMMMForCausalLM(CogVLMForCausalLM, PeftMixin, LightningModule):
         for i in range(batch_size):
             if boxes_label[i] is not None:
                 if masks_label[i] is not None:
+                    # instance segmentation is not supported yet
                     raise NotImplementedError
                 loss_, log_dict_ = self.isam_loss.compute_loss(
-                    boxes_reg[i].new_empty((*boxes_reg[i].shape[:2], 0, 0, 0)),
+                    boxes_reg[i].new_empty((*boxes_reg[i].shape[:2], 0, 0, 0)),  # dummy mask logits
                     boxes_reg[i].new_empty((*boxes_reg[i].shape[:2], 0, 0, 0)),
                     boxes_reg[i],
                     disc_logit[i],
@@ -251,22 +259,24 @@ class MMMMForCausalLM(CogVLMForCausalLM, PeftMixin, LightningModule):
             lm_loss = vlm_output.loss
             self.log('train/loss', lm_loss, sync_dist=True)
             return self.lm_loss_weight * lm_loss
-        masks_logits, boxes, disc_logit = self.visual_grounding(
-            # shift as suggested by GLaMM: https://github.com/mbzuai-oryx/groundingLMM/issues/16
-            input_ids[:, 1:],
-            vlm_output.hidden_states[-1][:, :-1],
-            batch['grounding_image'],
-            batch['patch_size'],
-            batch['instance_mask'],
-        )
-        vg_loss, vg_log_dict = self._compute_vg_loss(
-            masks_logits,
-            boxes,
-            disc_logit,
-            batch['masks'],
-            batch['boxes'],
-            batch['index_offsets'],
-        )
+        with torch.amp.autocast(self.device.type, torch.float16):
+            masks_logits, boxes, disc_logit = self.visual_grounding(
+                # shift as suggested by GLaMM: https://github.com/mbzuai-oryx/groundingLMM/issues/16
+                input_ids[:, 1:],
+                vlm_output.hidden_states[-1][:, :-1],
+                batch['grounding_image'],
+                batch['patch_size'],
+                batch['vg_label_mask'],
+                batch['instance_mask'],
+            )
+            vg_loss, vg_log_dict = self._compute_vg_loss(
+                masks_logits,
+                boxes,
+                disc_logit,
+                batch['masks'],
+                batch['boxes'],
+                batch['index_offsets'],
+            )
         # NOTE: weight for VG is controlled internally
         loss = vlm_output.loss * self.lm_loss_weight + vg_loss
         # make some custom log

@@ -36,9 +36,6 @@ class DataPoint(TypedDict):
         index_offsets: (n, 2) for each target, indicating the label index offsets for
         num_uncertain: number of uncertain instances for the target.
             -1 to ignore this target when calculating grounding loss
-        semantic_masks: merged masks
-        semantic_boxes: bounding boxes for semantic masks
-        semantic: the mask label for this class is semantic
     """
     src: tuple[str, str]
     image: torch.Tensor
@@ -48,8 +45,8 @@ class DataPoint(TypedDict):
     vlm_inputs: dict[str, torch.Tensor]
     masks: torch.BoolTensor | None
     boxes: torch.Tensor
-    semantic_masks: torch.BoolTensor | None
-    semantic_boxes: torch.Tensor | None
+    # semantic_masks: torch.BoolTensor | None
+    # semantic_boxes: torch.Tensor | None
     index_offsets: torch.LongTensor
     num_uncertain: torch.LongTensor
     semantic: torch.BoolTensor

@@ -108,7 +108,12 @@ class InstanceSamLoss(nn.Module):
         disc_weight: float,
         disc_focal_gamma: float,
         disc_focal_alpha: float | None = None,
+        match_ce: bool = True,
     ):
+        """
+        Args:
+            match_ce: whether to use 1 - p to approximate discrimination cost during mathcing
+        """
         super().__init__()
         self.mask_loss = mask_loss
         self.use_neg_mask = use_neg_mask
@@ -117,6 +122,7 @@ class InstanceSamLoss(nn.Module):
         self.disc_weight = disc_weight
         self.disc_focal_gamma = disc_focal_gamma
         self.disc_focal_alpha = disc_focal_alpha
+        self.match_ce = match_ce
 
     def box_loss(self, input: torch.Tensor, target: torch.Tensor, reduce_batch: bool = True, return_dict: bool = False):
         """input and target are in CenterSizeMode"""
@@ -186,8 +192,13 @@ class InstanceSamLoss(nn.Module):
         num_neg = max(num_queries - num_pos - num_uncertain, 0)
         if num_queries == num_neg:
             return MATCH_NEGATIVE
-        disc_cost_pos = self.disc_loss(disc_logit, True, reduce_batch=False)
-        disc_cost_neg = self.disc_loss(disc_logit, False, reduce_batch=False)
+        if self.match_ce:
+            disc_prob = disc_logit.sigmoid()
+            disc_cost_pos = self.disc_weight * (1 - disc_prob)
+            disc_cost_neg = self.disc_weight * disc_prob
+        else:
+            disc_cost_pos = self.disc_loss(disc_logit, True, reduce_batch=False)
+            disc_cost_neg = self.disc_loss(disc_logit, False, reduce_batch=False)
         # label order: pos, neg, uncertain,
         disc_cost = torch.cat(
             [
@@ -339,13 +350,14 @@ class InstanceSamLoss(nn.Module):
                         ),
                         'instance', 'disc-neg',
                     )
-                with torch.set_grad_enabled(self.use_neg_mask):
-                    neg_mask_loss = _accumulate(
-                        self.mask_loss(masks_logits[match_neg_mask][:, None], return_dict=True),
-                        'instance', 'mask-neg',
-                    )
-                    if self.use_neg_mask:
-                        loss += neg_mask_loss
+                if masks_logits.numel() > 0:
+                    with torch.set_grad_enabled(self.use_neg_mask):
+                        neg_mask_loss = _accumulate(
+                            self.mask_loss(masks_logits[match_neg_mask][:, None], return_dict=True),
+                            'instance', 'mask-neg',
+                        )
+                        if self.use_neg_mask:
+                            loss += neg_mask_loss
         return loss, log_dict
 
     def forward(

@@ -370,7 +370,7 @@ def main():
     )
 
     for dataset, num_samples_dict in [
-        ('CT-RATE', {'train': 5000, 'test': 0}),
+        ('CT-RATE', {'train': 5000, 'test': -1}),
         ('MIMIC-CXR', {'train': 20000, 'test': -1}),
     ]:
         for split, num_samples in num_samples_dict.items():

@@ -56,31 +56,32 @@ def process_volume(item: dict, meta: pd.DataFrame):
     shutil.move(tmp_save_path, save_path)
 
 def process_split(split: str, max_workers: int):
-    meta = pd.read_csv(dataset_dir / f'metadata/{split}_metadata.csv', index_col='VolumeName')
+    meta = pd.read_csv(dataset_dir / f"metadata/{'train' if split == 'train' else 'validation'}_metadata.csv", index_col='VolumeName')
     data = []
-    for item in orjson.loads((vg_dataset_dir / 'train.json').read_bytes()):
+    for item in orjson.loads((vg_dataset_dir / f'{split}.json').read_bytes()):
         for image_path in item['image']:
             volume_name = Path(image_path).name
             assert volume_name.endswith('.pt.zst')
             volume_name = volume_name[:-len('.pt.zst')] + '.nii.gz'
             case, study, scan = volume_name[:-len('.nii.gz')].rsplit('_', 2)
-            volume_suffix = f'{split}/{case}/{case}_{study}/{volume_name}'
-            save_path = save_dir / volume_suffix
+            save_path = save_dir / f'{case}_{study}/{volume_name}'
             if save_path.exists():
                 continue
             data.append({
                 'volume_name': volume_name,
-                'image_path': dataset_dir / volume_suffix,
+                'image_path': dataset_dir / ('train' if split == 'train' else 'valid') / f'{case}/{case}_{study}/{volume_name}',
                 'save_path': save_path,
             })
     process_map(
         partial(process_volume, meta=meta),
         data,
         max_workers=max_workers,
+        dynamic_ncols=True,
     )
 
 def main(max_workers: int = 8):
-    process_split('train', max_workers)
+    # process_split('train', max_workers)
+    process_split('test', max_workers)
 
 if __name__ == '__main__':
     CLI(main)

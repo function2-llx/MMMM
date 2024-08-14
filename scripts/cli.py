@@ -1,9 +1,11 @@
 from collections.abc import Callable
 from functools import partial
 from pathlib import Path
+from typing import Any, ContextManager
 
+import cytoolz
 from lightning.pytorch.cli import LightningArgumentParser
-from lightning.pytorch.plugins import FSDPPrecision
+from lightning.pytorch.plugins import FSDPPrecision, HalfPrecision, Precision, MixedPrecision
 from lightning.pytorch.strategies import FSDPStrategy
 from peft import LoraConfig, get_peft_model
 from peft.tuners import lora
@@ -15,7 +17,7 @@ from luolib.lightning.cli import LightningCLI
 from luolib.lightning.trainer import PeftTrainer
 
 from mmmm.data import MMMMDataModule
-from mmmm.models import MMMMForCausalLM
+from mmmm.models import MMMMForCausalLM, Sam, InstanceSam
 from mmmm.tokenizer import MMMMTokenizer
 from mmmm.utils import get_lora_modules_default
 
@@ -55,6 +57,29 @@ def _FSDP_convert_module(self: FSDPPrecision, module: nn.Module) -> nn.Module:
     return module.to(self._desired_input_dtype)
 
 FSDPPrecision.convert_module = _FSDP_convert_module
+
+class MyPrecision(Precision):
+    def __init__(self):
+        self.bf16 = HalfPrecision('bf16-true')
+        self.fp16_mixed = MixedPrecision('16-mixed', 'cuda')
+
+    def convert_input(self, data: dict) -> Any:
+        fp16_mixed_keys = ['grounding_image', 'boxes']
+        ret = {
+            **self.bf16.convert_input(cytoolz.dissoc(data, *fp16_mixed_keys)),
+            **self.fp16_mixed.convert_input({key: data[key] for key in fp16_mixed_keys}),
+        }
+        return ret
+
+    def convert_module(self, module: Module) -> MMMMForCausalLM:
+        assert isinstance(module, MMMMForCausalLM)
+        # NOTE: module._dtype is not set since module.to is not called
+        for param in module.parameters(recurse=False):
+            param.to(dtype=self.bf16._desired_input_dtype)
+        for child in module.children():
+            plugin = self.fp16_mixed if isinstance(child, (Sam, InstanceSam)) else self.bf16
+            plugin.convert_module(child)  # in-place
+        return module
 
 class CLI(LightningCLI):
     model: MMMMForCausalLM

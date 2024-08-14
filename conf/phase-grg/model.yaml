@@ -1,0 +1,39 @@
+class_path: mmmm.models.build
+init_args:
+  pretrained_model_name_or_path: THUDM/cogvlm-chat-hf
+  vision_override:
+    patch_size: 16
+    pos_embed_shape: [8, 32, 32]
+    pt_pos_embed_shape: [35, 35]
+  sam:
+    class_path: mmmm.models.build_sam
+    init_args:
+      patch_size: 16
+      pos_embed_shape: [8, 32, 32]
+      checkpoint: pre-trained/sam-aligned.ckpt
+      state_dict_key: state_dict
+      weight_prefix: sam.
+  mask_loss:
+    class_path: mmmm.models.loss.DiceFocalLoss
+    init_args:
+      dice_weight: 2
+      focal_weight: 2
+      focal_gamma: 2
+  isam:
+    class_path: mmmm.models.build_instance_sam
+    init_args:
+      patch_size: 16
+      num_instances: 6
+      pos_embed_shape: [8, 32, 32]
+      checkpoint: pre-trained/isam-aligned.ckpt
+      state_dict_key: state_dict
+      weight_prefix: sam.
+  isam_loss:
+    class_path: mmmm.models.segvol.modeling.sam.InstanceSamLoss
+    init_args:
+      use_neg_mask: false
+      box_l1_weight: 5
+      box_giou_weight: 2
+      disc_weight: 2
+      disc_focal_gamma: 2
+      disc_focal_alpha: 0.85

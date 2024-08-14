@@ -1,6 +1,6 @@
 from __future__ import annotations as _
 
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -15,23 +15,19 @@ import torch
 from torch.types import Device
 import torchvision.transforms.v2.functional as tvtf
 
-from luolib.transforms.box_ops import apply_affine_to_boxes_int
-from luolib.types import tuple2_t, tuple3_t
+from luolib.types import tuple2_t
 from luolib.utils import load_pt_zst
 from luolib.utils.misc import ceil_divide
 from monai import transforms as mt
-from monai.data import MetaTensor
-from monai.data.box_utils import CenterSizeMode, box_area, convert_box_mode, spatial_crop_boxes
-from monai.transforms import generate_spatial_bounding_box
-from monai.utils import GridSamplePadMode, InterpolateMode
 
 import mmmm.data.dataset._dataset as _dataset
-from mmmm.data.defs import DataPoint, PROCESSED_LOCAL_DATA_ROOT, mmmm_debug, Split
+from mmmm.data.defs import DataPoint, PROCESSED_LOCAL_DATA_ROOT, Split
 from mmmm.data.sparse import Sparse
 from mmmm.data.target_tax import TargetCategory, get_target_tax
 from mmmm.data.utils import prepare_vlm_inputs
 from mmmm.tokenizer import MMMMTokenizer
-from ..misc import gen_modality_conv, get_max_scale_for_size, intensity_norm, toss, get_max_resize
+from ..misc import gen_modality_conv, intensity_norm, toss, get_max_resize, spatial_transform_image_labels, \
+    norm_boxes
 from .template import gen_anomaly_conv, gen_general_conv
 
 __all__ = [
@@ -65,7 +61,6 @@ class LocalTransConf:
     """
     Attributes:
         neg_grounding_prob: the probability of negative targets are forced grounded
-        vlm: whether the transform is performed for VLM
     """
     max_vision_tokens: int
     max_tokens_z: int
@@ -98,12 +93,6 @@ def _get_patch_size_xy(size: npt.NDArray[np.int64], scale: float, stride: int, m
     ret[smaller_idx ^ 1] = larger_tokens * stride
     return tuple(ret.tolist())
 
-def norm_boxes(boxes: torch.LongTensor, norm_size: Sequence[int]) -> torch.DoubleTensor:
-    norm_size_t = einops.repeat(torch.tensor(norm_size), 'd -> (l2 d)', l2=2)
-    boxes_normed = boxes.double() / norm_size_t
-    boxes_normed = convert_box_mode(boxes_normed, dst_mode=CenterSizeMode)
-    return boxes_normed
-
 class LocalTransform(mt.Randomizable):
     def __init__(
         self,
@@ -131,49 +120,6 @@ class LocalTransform(mt.Randomizable):
         if len(targets) > limit:
             targets = self.R.choice(targets, limit, replace=False).tolist()
         return targets
-
-    def _spatial_transform(
-        self,
-        image: torch.Tensor,
-        masks: torch.BoolTensor | None,
-        boxes: torch.LongTensor | None,
-        resize: tuple3_t[int],
-        stride: tuple3_t[int],
-    ) -> tuple[torch.Tensor, torch.BoolTensor | None, torch.LongTensor | None]:
-        keys = ['image']
-        if masks is not None:
-            keys.append('masks')
-        affine_trans = mt.Compose(
-            [
-                mt.ResizeD(keys, resize, mode=InterpolateMode.TRILINEAR),
-                mt.DivisiblePadD(keys, stride),
-                *[
-                    mt.RandFlipD(keys, 0.5, i)
-                    for i in range(3)
-                ],
-                mt.RandRotate90D(keys, 0.75, spatial_axes=(1, 2)),
-            ],
-            lazy=True,
-            overrides={
-                'image': {'padding_mode': GridSamplePadMode.ZEROS},
-                'masks': {'padding_mode': GridSamplePadMode.ZEROS},
-            }
-        )
-        affine_trans.set_random_state(state=self.R)
-        _dict_data = {'image': image}
-        if masks is not None:
-            _dict_data['masks'] = masks
-        _dict_data = affine_trans(_dict_data)
-        image_t: MetaTensor = _dict_data['image']
-        if masks is None:
-            masks_t = None
-        else:
-            masks_t = _dict_data['masks'].round().bool().as_tensor()
-        if boxes is None:
-            boxes_t = None
-        else:
-            boxes_t = apply_affine_to_boxes_int(boxes, image_t.affine.inverse())
-        return image_t.as_tensor(), masks_t, boxes_t
 
     def __call__(self, data: dict):
         data = dict(data)
@@ -286,7 +232,9 @@ class LocalTransform(mt.Randomizable):
                     sem_masks[i] = einops.reduce(masks[slice(*target.index_offset)], 'c ... -> ...', 'any')
             boxes = None
             index_offsets = None
-        image, sem_masks, boxes = self._spatial_transform(image, sem_masks, boxes, resize_shape, stride)
+        image, sem_masks, boxes = spatial_transform_image_labels(
+            image, sem_masks, boxes, resize_shape, stride, rand_flip=True, rand_rotate=True, R=self.R,
+        )
         if boxes is not None:
             boxes = norm_boxes(boxes, image.shape[1:])
         if image.shape[0] == 1:

@@ -238,24 +238,20 @@ class AlignInstanceSam(PreTrainedModel, LightningModule):
 
     def training_step(self, batch: Batch, *args, **kwargs):
         output: InstanceSamOutput = self(batch)
-        loss, log_dict = self.loss(
+        loss, log_dict = self.loss.forward(
             output.masks_logits,
             output.masks_logits_low_res,
             output.boxes,
             output.disc_logit,
             batch['masks'],
             batch['boxes'],
-            batch['semantic_masks'],
-            batch['semantic_boxes'],
             batch['index_offsets'],
-            batch['semantic'],
-            batch['num_uncertain'],
         )
         self.log_dict(_add_prefix(log_dict, 'train'))
         dice_pos = {}
         classes = batch['classes']  # type: ignore
         for batch_idx, targets in enumerate(classes):
-            if (sem_masks := batch['semantic_masks'][batch_idx]) is not None:
+            if (sem_masks := batch['masks'][batch_idx]) is not None:
                 masks_preds = output.masks_logits[batch_idx].float().sigmoid() > 0.5
                 for i, target in enumerate(targets):
                     if (label := sem_masks[i]).any():

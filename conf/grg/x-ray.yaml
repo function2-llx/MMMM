@@ -1,9 +1,0 @@
-model:
-  sam:
-    class_path: mmmm.models.build_instance_sam
-    init_args:
-      patch_size: 16
-      num_instances: 6
-      pos_embed_shape: [8, 32, 32]
-  seg_vol_path: pre-trained/SegVol
-ckpt_path: pre-trained/isam-aligned.ckpt

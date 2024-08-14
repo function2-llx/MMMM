@@ -35,6 +35,7 @@ def parse_args():
         help='patch size on h w and d'
     )
     parser.add_argument('--range', type=tuple[int | None, int | None], default=(None, None))
+    parser.add_argument('--split', type=str, choices=['train', 'test'])
     args = parser.parse_args()
     return args
 
@@ -100,42 +101,10 @@ def parse_supported_targets(tags: list[dict]) -> list[str]:
 
 def main():
     args = parse_args()
-    torch.set_float32_matmul_precision('medium')
-    items = []
-    split = 'train'
-    data_list = orjson.loads((vg_dataset_dir / f'{split}.json').read_bytes())
-    print(f'total: {len(data_list)}')
-    data_list = data_list[slice(*args.range)]
-    print(f'filtered len: {len(data_list)}')
-    for item in data_list:
-        targets = parse_supported_targets(item['tags'])
-        if len(targets) == 0:
-            continue
-        for image_path in item['image']:
-            volume_name = min_stem(Path(image_path))
-            case, study, scan = volume_name.rsplit('_', 2)
-            volume_suffix = f'{split}/{case}/{case}_{study}/{volume_name}'
-            if (save_path := vg_dataset_dir / 'image' / f'{volume_suffix}_seg.pt.zst').exists():
-                continue
-            items.append({
-                'image': str(vg_dataset_dir / 'image' / f'{volume_suffix}.nii.gz'),
-                'save_path': save_path,
-                'modality': 'ct',
-                'dataset': 'CT-RATE',
-                'label': targets,
-            })
-
-    test_set = Inference_Dataset(items, args.max_queries)
-    test_loader = DataLoader(
-        test_set,
-        batch_size=1,
-        pin_memory=args.pin_memory,
-        num_workers=args.num_workers,
-        collate_fn=collate_fn
-    )
     fabric = Fabric(precision='16-mixed')
     torch.cuda.set_device(fabric.device)
     model = build_maskformer(args)
+    torch.set_float32_matmul_precision('medium')
     # load knowledge encoder
     text_encoder = Text_Encoder(
         text_encoder=args.text_encoder,
@@ -152,6 +121,38 @@ def main():
     )
     model = fabric.setup(model)
     text_encoder = fabric.setup(text_encoder)
+    items = []
+    split = args.split
+    data_list = orjson.loads((vg_dataset_dir / f'{split}.json').read_bytes())
+    print(f'total: {len(data_list)}')
+    data_list = data_list[slice(*args.range)]
+    print(f'filtered len: {len(data_list)}')
+    for item in data_list:
+        targets = parse_supported_targets(item['tags'])
+        if len(targets) == 0:
+            continue
+        for image_path in item['image']:
+            volume_name = min_stem(Path(image_path))
+            case, study, scan = volume_name.rsplit('_', 2)
+            volume_suffix = f'{case}/{case}_{study}/{volume_name}'
+            if (save_path := vg_dataset_dir / 'image' / f'{volume_suffix}_seg.pt.zst').exists():
+                continue
+            items.append({
+                'image': str(vg_dataset_dir / 'image' / f'{volume_suffix}.nii.gz'),
+                'save_path': save_path,
+                'modality': 'ct',
+                'dataset': 'CT-RATE',
+                'label': targets,
+            })
+
+    test_set = Inference_Dataset(items, args.max_queries)
+    test_loader = DataLoader(
+        test_set,
+        batch_size=1,
+        pin_memory=args.pin_memory,
+        num_workers=args.num_workers,
+        collate_fn=collate_fn,
+    )
     test_loader = fabric.setup_dataloaders(test_loader)
     inference(model, text_encoder, test_loader, args.sw_batch_size)
 

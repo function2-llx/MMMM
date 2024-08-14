@@ -1,0 +1,22 @@
+class_path: mmmm.data.MMMMDataModule
+init_args:
+  dataset:
+    datasets:
+    - name: MIMIC-CXR
+      type: grg
+      weight: 1
+    - name: CT-RATE
+      type: grg
+      weight: 2
+    base_vit_patch_size_z: 16
+    vit_patch_size_xy: 16
+    pool_size_xy: 2
+    base_pool_size_z: 2
+    max_seq_len: 1024
+    mimic_cxr_neg_weight: 0.05
+    grg_trans:
+      max_tokens: 256
+      max_tokens_z: 4
+    bop_weight: 5
+  dataloader:
+    train_batch_size: 8

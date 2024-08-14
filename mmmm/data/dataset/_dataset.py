@@ -7,6 +7,7 @@ from torch.utils.data import Dataset
 from monai.transforms import apply_transform
 
 from mmmm.tokenizer import MMMMTokenizer
+from .grg import get_grg_data_list, GRGTransConf, GRGTransform
 from ..defs import Split
 from .local import LocalTransConf, get_local_data_list, get_local_transform
 from .vl import VLTransConf, VLTransform, get_vl_data_list
@@ -18,7 +19,7 @@ class DatasetSpec:
         weight: scale factor of the dataset weight
     """
     name: str
-    type: Literal['local', 'vl']
+    type: Literal['local', 'vl', 'grg']
     weight: float = 1.
 
     def get_data_list(self, split: Split) -> list:
@@ -27,6 +28,8 @@ class DatasetSpec:
                 return get_local_data_list(self.name, split)
             case 'vl':
                 return get_vl_data_list(self.name, split)
+            case 'grg':
+                return get_grg_data_list(self.name, split)
             case _:
                 raise ValueError
 
@@ -42,6 +45,7 @@ class DatasetConf:
     base_pool_size_z: int
     local_trans: LocalTransConf | None = None
     vl_trans: VLTransConf | None = None
+    grg_trans: GRGTransConf | None = None
     max_seq_len: int | None = None
     bop_weight: float = 1.
     mimic_cxr_neg_weight: float | None = None
@@ -79,6 +83,8 @@ class MMMMDataset(Dataset):
             self.local_transform = get_local_transform(conf, tokenizer, inference)
         if conf.vl_trans is not None:
             self.vl_transform = VLTransform(conf, tokenizer, inference)
+        if conf.grg_trans is not None:
+            self.grg_transform = GRGTransform(conf, tokenizer, inference)
 
     @property
     def dataset_weights(self):

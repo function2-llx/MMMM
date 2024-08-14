@@ -3,26 +3,21 @@ from __future__ import annotations as _
 from dataclasses import dataclass
 from typing import TypedDict
 
-import einops
-import math
 import numpy as np
-from orjson import orjson
+import orjson
 import torch
-from torchvision.io import read_image
-from torchvision.transforms import v2 as tvt
 
-from luolib.utils import load_pt_zst
 from luolib.utils.misc import ensure_rgb
 from monai import transforms as mt
 from monai.utils import InterpolateMode, convert_to_tensor
 
 import mmmm.data.dataset._dataset as _dataset
 from mmmm.tokenizer import MMMMTokenizer
-from ..defs import ConvTurn, DataPoint, PROCESSED_VL_DATA_ROOT, Split
+from ..defs import ConvTurn, PROCESSED_VL_DATA_ROOT, Split
 from ..target_tax import get_target_tax
 from ..utils import prepare_vlm_inputs
 from .local.template import gen_general_conv
-from .misc import gen_modality_conv, get_max_resize, intensity_norm, toss
+from .misc import gen_modality_conv, get_max_resize, intensity_norm, toss, load_image_data, get_patch_size_z
 
 CAPTION_PROMPTS = [
     'Briefly describe this {}.',
@@ -167,29 +162,15 @@ class VLTransform(mt.RandomizableTransform):
         else:
             plane = None
         # 2. image transform
-        if image_path.endswith('.pt'):
-            image = torch.load(image_path)
-        elif image_path.endswith('.pt.zst'):
-            image = load_pt_zst(image_path)
-        else:
-            image = read_image(image_path)
-            image = einops.rearrange(image, 'c h w -> c 1 h w')
-        image = tvt.functional.to_dtype(image, scale=True)
-        if (size_z := image.shape[1]) <= trans_conf.max_tokens_z:
-            patch_size_z = pool_size_z = stride_z = 1
-            tokens_z = size_z
-        else:
-            pool_size_z = conf.base_pool_size_z
-            log2_patch_size_z = self.R.normal(
-                np.log2(size_z / (pool_size_z * trans_conf.max_tokens_z)),
-                trans_conf.log2_patch_size_z_std,
-            )
-            log2_patch_size_z = np.clip(
-                np.rint(log2_patch_size_z), 0, conf.base_vit_patch_size_z.bit_length() - 1,
-            )
-            patch_size_z = 1 << int(log2_patch_size_z)
-            stride_z = patch_size_z * pool_size_z
-            tokens_z = min(math.ceil(size_z / stride_z), trans_conf.max_tokens_z)
+        image = load_image_data(image_path)
+        patch_size_z, pool_size_z, stride_z, tokens_z = get_patch_size_z(
+            conf.base_vit_patch_size_z,
+            conf.base_pool_size_z,
+            size_z := image.shape[1],
+            trans_conf.max_tokens_z,
+            trans_conf.log2_patch_size_z_std,
+            self.R,
+        )
         patch_size = (patch_size_z, conf.vit_patch_size_xy, conf.vit_patch_size_xy)
         stride = (stride_z, conf.stride_xy, conf.stride_xy)
         resize_shape = (
