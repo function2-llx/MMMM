@@ -49,7 +49,7 @@ thing_class_to_idx = {
 def _dataset_func(split: str):
     data = orjson.loads(Path(f'data/processed/visual-grounding/MIMIC-CXR/{split}.json').read_bytes())
     ret = []
-    for item in tqdm(data[:100]):
+    for item in tqdm(data):
         for image_path, plane in zip(item['image'], item['plane']):
             if plane not in ('PA', 'AP'):
                 continue
