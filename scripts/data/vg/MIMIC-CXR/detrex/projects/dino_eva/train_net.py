@@ -286,52 +286,10 @@ def do_train(args, cfg):
         start_iter = 0
     trainer.train(start_iter, cfg.train.max_iter)
 
-def dataset_func(split: str, sub: bool):
-    data_dir = Path(os.getenv('DETECTRON2_DATASETS')) / 'VinDr-CXR'
-    if sub:
-        data_dir = data_dir.with_name(f'{data_dir.name}-sub')
-    data = orjson.loads((data_dir / f'{split}.json').read_bytes())
-    for item in data:
-        if 'image_id' not in item:
-            item['image_id'] = Path(item['file_name']).stem
-
-    return data
-
 def main(args):
     cfg = LazyConfig.load(args.config_file)
     cfg = LazyConfig.apply_overrides(cfg, args.opts)
     default_setup(cfg, args)
-    thing_classes = [
-        'Aortic enlargement',
-        'Atelectasis',
-        'Calcification',
-        'Cardiomegaly',
-        'Clavicle fracture',
-        'Consolidation',
-        'Edema',
-        'Emphysema',
-        'Enlarged PA',
-        'ILD',
-        'Infiltration',
-        'Lung cavity',
-        'Lung cyst',
-        'Lung Opacity',
-        'Mediastinal shift',
-        'Nodule/Mass',
-        'Pleural effusion',
-        'Pleural thickening',
-        'Pneumothorax',
-        'Pulmonary fibrosis',
-        'Rib fracture',
-    ]
-    for split in ['train', 'test']:
-        for sub in [True, False]:
-            name = f'vindr-cxr_{split}'
-            if sub:
-                name += '-sub'
-            DatasetCatalog.register(name, partial(dataset_func, split, sub))
-            meta = MetadataCatalog.get(name)
-            meta.thing_classes = thing_classes
     if args.eval_only:
         model = instantiate(cfg.model)
         model.to(cfg.train.device)

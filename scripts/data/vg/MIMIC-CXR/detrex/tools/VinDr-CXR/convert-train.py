@@ -77,8 +77,9 @@ def process_item(data_point: VinDrCXRDataPoint):
     image = image.to(device=get_cuda_device())
     image = tvtf.to_dtype(image / image.max(), dtype=torch.uint8, scale=True)
     image = tvtf.equalize(image)
-    image_path = save_dir / f'{split}/{key}.jpeg'
-    _save_image(image, image_path)
+    file_name = f'{split}/{key}.jpeg'
+    # image_path = save_dir / f'{split}/{key}.jpeg'
+    _save_image(image, save_dir / file_name)
     labels: pd.DataFrame = labels_df.loc[data_point.labels]
     objects: pd.DataFrame = objects_df.loc[data_point.objects]
     annotations = []
@@ -98,8 +99,8 @@ def process_item(data_point: VinDrCXRDataPoint):
                     'category_id': class_idx,
                 })
     return {
-        'file_name': str(image_path),
-        'image_id': image_path.stem,
+        'file_name': file_name,
+        'image_id': key,
         'height': image.shape[1],
         'width': image.shape[2],
         'annotations': annotations,
