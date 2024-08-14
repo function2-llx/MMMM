@@ -4,12 +4,13 @@ from pathlib import Path
 import orjson
 import torch
 import torchvision.transforms.v2.functional as tvtf
+from itk.support.extras import image
 from tqdm import tqdm
 
 from detectron2.checkpoint import DetectionCheckpointer
 from detectron2.config import LazyConfig, instantiate
 from detectron2.data import DatasetCatalog, MetadataCatalog
-from detectron2.engine import default_argument_parser, default_setup
+from detectron2.engine import default_argument_parser, default_setup, launch, create_ddp_model
 from detectron2.structures import Instances
 from detrex.data.datasets.register_vindr_cxr import thing_classes
 from projects.dino_eva.modeling import DINO
@@ -76,6 +77,8 @@ def _register():
         meta = MetadataCatalog.get(name)
         meta.thing_classes = thing_classes
 
+_register()
+
 score_th = 0.1
 
 def select_instances(classes: torch.Tensor, instances: Instances):
@@ -91,16 +94,15 @@ def select_instances(classes: torch.Tensor, instances: Instances):
             ret[thing_classes[class_idx]] = instances[select_mask].pred_boxes.tensor.tolist()
     return ret
 
-def main():
-    _register()
-    args = default_argument_parser().parse_args()
+def main(args):
     cfg = LazyConfig.load(args.config_file)
     cfg.dataloader.test.dataset.names = ['mimic-cxr_vg_train', 'mimic-cxr_vg_test']
-    cfg.dataloader.test.num_workers = 1
     cfg = LazyConfig.apply_overrides(cfg, args.opts)
     default_setup(cfg, args)
+
     model: DINO = instantiate(cfg.model)
     model.to(cfg.train.device).eval()
+    model = create_ddp_model(model)
     DetectionCheckpointer(model).load(cfg.train.init_checkpoint)
     dataloader = instantiate(cfg.dataloader.test)
     with torch.inference_mode():
@@ -113,12 +115,22 @@ def main():
                 origin_path: Path = input_item['file_name']
                 image_save_path = Path('data/processed/visual-grounding/MIMIC-CXR/image', *origin_path.parts[-4:])
                 image_save_path.parent.mkdir(exist_ok=True, parents=True)
+                if image_save_path.exists():
+                    image_save_path.unlink()
                 image_save_path.hardlink_to(origin_path)
                 image_save_path.with_name(f'{image_save_path.stem}_box.json').write_bytes(
                     orjson.dumps(results, option=orjson.OPT_INDENT_2),
                 )
     model.eval()
 
-
 if __name__ == "__main__":
-    main()
+    args = default_argument_parser().parse_args()
+    launch(
+        main,
+        args.num_gpus,
+        num_machines=args.num_machines,
+        machine_rank=args.machine_rank,
+        dist_url=args.dist_url,
+        args=(args,),
+    )
+
