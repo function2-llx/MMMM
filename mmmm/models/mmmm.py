@@ -59,6 +59,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, PeftMixin, LightningModule):
     # so I have to change "isam" to "isam_model" to avoid clashing with "sam"; don't name "sam" with "sam_model"!
     isam_model: InstanceSam
     isam_loss: InstanceSamLoss
+    vg_proj: nn.Module
     # check_grad = True
     _supports_param_buffer_assignment: bool = False  # otherwise, custom parameter class will be wiped out
 
@@ -123,6 +124,9 @@ class MMMMForCausalLM(CogVLMForCausalLM, PeftMixin, LightningModule):
         self.check_grad = False
         return self
 
+    def get_fp32_children(self) -> list[str]:
+        return ['sam', 'isam_model', 'vg_proj']
+
     def on_load_checkpoint(self, checkpoint: dict):
         # we handle the state dict by cls.from_pretrained (in constructor) and peft_model.load_adapter (in CLI)
         checkpoint['state_dict'] = {}
@@ -186,7 +190,6 @@ class MMMMForCausalLM(CogVLMForCausalLM, PeftMixin, LightningModule):
         if instance_mask is None:
             raise NotImplementedError
         batch_size = len(image)
-        hidden_states = hidden_states.float()
         vg_prompts = self._get_vg_prompts(token_ids, hidden_states, prompt_mask)
         if all(instance_mask):
             masks_logits = [None] * batch_size
@@ -287,16 +290,15 @@ class MMMMForCausalLM(CogVLMForCausalLM, PeftMixin, LightningModule):
             lm_loss = vlm_output.loss
             self.log('train/loss', lm_loss, sync_dist=True)
             return self.lm_loss_weight * lm_loss
-        with torch.amp.autocast(self.device.type, torch.float16):
-            masks_logits, boxes, disc_logit = self.visual_grounding(
-                # shift as suggested by GLaMM: https://github.com/mbzuai-oryx/groundingLMM/issues/16
-                input_ids[:, 1:],
-                vlm_output.hidden_states[-1][:, :-1],
-                batch['grounding_image'],
-                batch['patch_size'],
-                batch['vg_label_mask'],
-                batch['instance_mask'],
-            )
+        masks_logits, boxes, disc_logit = self.visual_grounding(
+            # shift as suggested by GLaMM: https://github.com/mbzuai-oryx/groundingLMM/issues/16
+            input_ids[:, 1:],
+            vlm_output.hidden_states[-1][:, :-1].float(),
+            batch['grounding_image'],
+            batch['patch_size'],
+            batch['vg_label_mask'],
+            batch['instance_mask'],
+        )
         vg_loss, vg_log_dict = self._compute_vg_loss(
             masks_logits,
             boxes,
