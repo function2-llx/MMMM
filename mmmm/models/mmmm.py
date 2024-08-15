@@ -252,9 +252,9 @@ class MMMMForCausalLM(CogVLMForCausalLM, PeftMixin, LightningModule):
             if all(m is None for m in masks_label):
                 loss += zero_loss(
                     self.sam(
-                        [torch.zeros(3, 1, 16, 16, device=self.device)],
+                        [torch.zeros(3, 2, 32, 32, device=self.device)],
                         [(1, 16, 16)],
-                        [torch.zeros(0, self.sam.prompt_dim, device=self.device)],
+                        [torch.zeros(1, self.sam.prompt_dim, device=self.device)],
                     )[0],
                 )
 
