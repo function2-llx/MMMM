@@ -70,6 +70,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, PeftMixin, LightningModule):
         freeze_vision: bool = False,
         lm_loss_weight: float = 1.,
         sam: Sam | None = None,
+        freeze_sam: bool = True,
         mask_loss: DiceFocalLoss | None = None,
         isam: InstanceSam | None = None,
         isam_loss: InstanceSamLoss | None = None,
@@ -93,8 +94,9 @@ class MMMMForCausalLM(CogVLMForCausalLM, PeftMixin, LightningModule):
         self.isam_loss = isam_loss
         if sam is not None:
             assert isam is not None
-            sam.requires_grad_(False)
-            sam.eval()
+            if freeze_sam:
+                sam.requires_grad_(False)
+                sam.eval()
             isam.requires_grad_(False)
             isam.eval()
             assert sam.prompt_dim == isam.prompt_dim
