@@ -176,8 +176,8 @@ class GRGTransform(mt.RandomizableTransform):
                     boxes_list.append(boxes)
                     index_offsets.append((index_offset, index_offset := index_offset + boxes.shape[0]))
                 if len(boxes_list) == 0:
-                    boxes = torch.empty(0, 6, dtype=torch.int64)
-                    index_offsets = torch.empty(0, 2, dtype=torch.int64)
+                    boxes = None
+                    index_offsets = None
                 else:
                     boxes = round_boxes(torch.cat(boxes_list, dim=0))
                     index_offsets = torch.tensor(index_offsets)
@@ -206,7 +206,7 @@ class GRGTransform(mt.RandomizableTransform):
                 if len(masks_list) > 0:
                     masks = torch.stack(masks_list, dim=0)
                 else:
-                    masks = torch.empty(0, *image.shape[1:], dtype=torch.bool)
+                    masks = None
             else:
                 masks = None
 
