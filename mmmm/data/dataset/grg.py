@@ -187,8 +187,8 @@ class GRGTransform(mt.RandomizableTransform):
         else:
             boxes = None
             index_offsets = None
-            if grounding:
-                targets: list[str] = json.loads((base_dir / f'{key}_seg.json').read_bytes())
+            if grounding and (seg_path := base_dir / f'{key}_seg.json').exists():
+                targets: list[str] = json.loads(seg_path.read_bytes())
                 ref_masks: torch.BoolTensor = load_pt_zst(image_path.with_name(f'{key}_seg.pt.zst'))
                 target_to_idx = {
                     target: i
