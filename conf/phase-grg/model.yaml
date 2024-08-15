@@ -37,3 +37,4 @@ init_args:
       disc_weight: 2
       disc_focal_gamma: 2
       disc_focal_alpha: 0.85
+  tokenizer: ../tokenizer.yaml

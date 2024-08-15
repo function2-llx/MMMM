@@ -297,14 +297,14 @@ class MMMMForCausalLM(CogVLMForCausalLM, PeftMixin, LightningModule):
                 batch['vg_label_mask'],
                 batch['instance_mask'],
             )
-            vg_loss, vg_log_dict = self._compute_vg_loss(
-                masks_logits,
-                boxes,
-                disc_logit,
-                batch['masks'],
-                batch['boxes'],
-                batch['index_offsets'],
-            )
+        vg_loss, vg_log_dict = self._compute_vg_loss(
+            masks_logits,
+            boxes,
+            disc_logit,
+            batch['masks'],
+            batch['boxes'],
+            batch['index_offsets'],
+        )
         # NOTE: weight for VG is controlled internally
         loss = vlm_output.loss * self.lm_loss_weight + vg_loss
         # make some custom log
