@@ -2,7 +2,7 @@ data: data.yaml
 tokenizer: ../tokenizer.yaml
 logger: logger.yaml
 trainer:
-  max_steps: 5000
+  max_steps: 10000
   log_every_n_steps: 20
   gradient_clip_val: 1
   gradient_clip_algorithm: norm

@@ -137,10 +137,18 @@ class MMMMForCausalLM(CogVLMForCausalLM, PeftMixin, LightningModule):
             modules_to_save.extend(c_modules_to_save)
         return target_modules, modules_to_save
 
-    def _get_vg_prompts(self, token_ids: torch.LongTensor, hidden_states: torch.Tensor) -> list[torch.Tensor]:
+    def _get_vg_prompts(
+        self, token_ids: torch.LongTensor, hidden_states: torch.Tensor, prompt_mask: list[torch.BoolTensor | None],
+    ) -> list[torch.Tensor]:
         eop_mask: torch.BoolTensor = token_ids == self.tokenizer.eop_token_id  # type: ignore
         vg_hidden_states: torch.Tensor = self.vg_proj(hidden_states[eop_mask])
-        return vg_hidden_states.split(eop_mask.sum(dim=-1).tolist())
+        vg_prompts = vg_hidden_states.split(eop_mask.sum(dim=-1).tolist())
+        ret = []
+        for vg_prompts_, prompt_mask_ in zip(vg_prompts, prompt_mask):
+            if prompt_mask_ is not None:
+                vg_prompts_ = vg_prompts_[prompt_mask_[:vg_prompts_.shape[0]]]
+            ret.append(vg_prompts_)
+        return ret
 
     def visual_grounding(
         self,
@@ -166,11 +174,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, PeftMixin, LightningModule):
             raise NotImplementedError
         batch_size = len(image)
         hidden_states = hidden_states.float()
-        vg_prompts = self._get_vg_prompts(token_ids, hidden_states)
-        vg_prompts = [
-            vg_prompts_ if prompt_mask_ is None else vg_prompts_[prompt_mask_]
-            for vg_prompts_, prompt_mask_ in zip(vg_prompts, prompt_mask)
-        ]
+        vg_prompts = self._get_vg_prompts(token_ids, hidden_states, prompt_mask)
         if all(instance_mask):
             masks_logits = [None] * batch_size
         else:
