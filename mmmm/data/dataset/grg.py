@@ -1,3 +1,5 @@
+from __future__ import annotations as _  # postpone typing evaluation to avoid circular imports
+
 from dataclasses import dataclass
 import json
 from pathlib import Path
@@ -34,16 +36,6 @@ def get_grg_data_list(name: str, split: Split) -> list:
         item['dataset'] = name
     return data
 
-@dataclass
-class GRGTransConf:
-    max_tokens: int
-    max_tokens_z: int
-    log2_patch_size_z_std: float = 0.25
-    ac_ratio: float = 0.2
-    modality_prob: float = 0.2
-    plane_prob: float = 0.2
-    report_ratio: float = 0.8
-
 class GRGDataPoint(TypedDict):
     image: list[str]
     modality: list[str]
@@ -71,10 +63,6 @@ class GRGTransConf:
     max_tokens: int
     max_tokens_z: int
     log2_patch_size_z_std: float = 0.25
-    ac_ratio: float = 0.2
-    modality_prob: float = 0.2
-    plane_prob: float = 0.2
-    report_ratio: float = 0.8
     grounding_prob: float = 0.99
     max_num_vg: int = 12
     equalize: bool = False

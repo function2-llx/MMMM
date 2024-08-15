@@ -182,7 +182,8 @@ def save_as_nifti(path: PathLike, output_path: PathLike | None = None):
 
 def to_nrrd(seg_path: PathLike):
     seg_path = Path(seg_path)
-    seg: MetaTensor = load_pt_zst(seg_path)
+    seg = load_pt_zst(seg_path)
+    seg = einops.rearrange(seg, '... d h w -> ... h w d')
     saver = mt.SaveImage(output_ext='.nrrd', output_dtype=np.uint8)
     saver(seg, filename=seg_path.with_name(min_stem(seg_path)))
 
