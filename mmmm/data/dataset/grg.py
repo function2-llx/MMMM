@@ -83,6 +83,12 @@ class GRGTransConf:
     grounding_prob: float = 0.99
     max_num_vg: int = 12
 
+def handle_truncation_(data: dict, tokenizer: MMMMTokenizer):
+    input_ids: torch.LongTensor = data['vlm_inputs']['input_ids']
+    num_trunc_targets: int = (input_ids[1:] == tokenizer.eop_token_id).sum().item()
+    for label_key in 'masks', 'boxes', 'index_offsets', 'vg_label_mask':
+        data[label_key] = data[label_key][:num_trunc_targets]
+
 class GRGTransform(mt.RandomizableTransform):
     def __init__(
         self,
@@ -266,4 +272,5 @@ class GRGTransform(mt.RandomizableTransform):
             'instance_mask': boxes is not None,
             'vg_label_mask': vg_label_mask,
         }
+        handle_truncation_(data, tokenizer)
         return data

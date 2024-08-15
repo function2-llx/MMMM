@@ -262,13 +262,13 @@ class InstanceSamLoss(nn.Module):
     ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
         num_targets = disc_logit.shape[0]
         # tokens for vg might be truncated by max_seq_len
-        assert num_targets <= index_offsets.shape[0]
+        assert num_targets == index_offsets.shape[0]
         loss = zero_loss(disc_logit)
         log_dict = {}
         if num_targets > 0:
             # convert to float since it is used for loss calculation
             masks_logits = masks_logits.float()
-            index_offsets = index_offsets[:num_targets]
+            # index_offsets = index_offsets[:num_targets]
             # num_uncertain = num_uncertain[:num_targets]
 
             def _accumulate(loss_log_dict: dict[str, torch.Tensor], task: Literal['semantic', 'instance'], prefix: str):

@@ -146,7 +146,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, PeftMixin, LightningModule):
         ret = []
         for vg_prompts_, prompt_mask_ in zip(vg_prompts, prompt_mask):
             if prompt_mask_ is not None:
-                vg_prompts_ = vg_prompts_[prompt_mask_[:vg_prompts_.shape[0]]]
+                vg_prompts_ = vg_prompts_[prompt_mask_]
             ret.append(vg_prompts_)
         return ret
 

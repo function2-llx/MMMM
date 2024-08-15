@@ -15,8 +15,9 @@ init_args:
     max_seq_len: 1024
     mimic_cxr_neg_weight: 0.05
     grg_trans:
-      max_tokens: 256
+      max_tokens: 144
       max_tokens_z: 4
+      max_num_vg: 12
     bop_weight: 5
   dataloader:
     train_batch_size: 8
