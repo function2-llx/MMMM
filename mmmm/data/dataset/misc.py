@@ -76,7 +76,7 @@ def get_max_resize(size: Sequence[int], stride: int, max_tokens: int) -> tuple2_
     resize = np.multiply(size, scale).round().astype(np.int64)
     return tuple(resize.tolist())
 
-def load_image_byte_as_float(image_path: PathLike) -> torch.Tensor:
+def load_image_byte(image_path: PathLike, as_float: bool = True) -> torch.Tensor:
     image_path = Path(image_path)
     if image_path.name.endswith('.pt'):
         image = torch.load(image_path)
@@ -86,7 +86,8 @@ def load_image_byte_as_float(image_path: PathLike) -> torch.Tensor:
         image = read_image(str(image_path))
         image = einops.rearrange(image, 'c h w -> c 1 h w')
     assert image.dtype == torch.uint8
-    image = tvtf.to_dtype(image, torch.float32, scale=True)
+    if as_float:
+        image = tvtf.to_dtype(image, torch.float32, scale=True)
     return image
 
 def get_patch_size_z(

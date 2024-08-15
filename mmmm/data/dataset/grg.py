@@ -1,27 +1,22 @@
-from __future__ import annotations as _
-
-import json
 from dataclasses import dataclass
-from idlelib.pyparse import trans
-from operator import index
+import json
 from pathlib import Path
 from typing import TypedDict
 
+from monai import transforms as mt
 import numpy as np
 import orjson
 import torch
 import torchvision.transforms.v2.functional as tvtf
-from monai import transforms as mt
 
-import mmmm.data.dataset._dataset as _dataset
 from luolib.transforms.box_ops import round_boxes
 from luolib.utils import load_pt_zst
 from luolib.utils.misc import ensure_rgb
+import mmmm.data.dataset._dataset as _dataset
 from mmmm.tokenizer import MMMMTokenizer
-from .misc import get_max_resize, intensity_norm, toss, load_image_byte_as_float, get_patch_size_z, \
-    spatial_transform_image_labels, norm_boxes
+from .misc import get_max_resize, get_patch_size_z, intensity_norm, load_image_byte, norm_boxes, spatial_transform_image_labels, toss
 from .vl import REFERRINGS, REPORT_PROMPTS
-from ..defs import ConvTurn, Split, PROCESSED_VG_DATA_ROOT
+from ..defs import ConvTurn, PROCESSED_VG_DATA_ROOT, Split
 from ..target_tax import get_target_tax
 from ..utils import prepare_vlm_inputs
 
@@ -71,7 +66,7 @@ def resolve_image_path(vl_path: str, dataset_name: str) -> tuple[Path, str, Path
         grg_path = base_dir / f'{key}-t/{key}.pt.zst'
     return grg_path, key, base_dir
 
-@dataclass
+@dataclass(kw_only=True)
 class GRGTransConf:
     max_tokens: int
     max_tokens_z: int
@@ -82,6 +77,7 @@ class GRGTransConf:
     report_ratio: float = 0.8
     grounding_prob: float = 0.99
     max_num_vg: int = 12
+    equalize: bool = False
 
 def handle_truncation_(data: dict, tokenizer: MMMMTokenizer):
     input_ids: torch.LongTensor = data['vlm_inputs']['input_ids']
@@ -131,7 +127,10 @@ class GRGTransform(mt.RandomizableTransform):
         image_path, key, base_dir = resolve_image_path(vl_image_path, dataset)
 
         # 2. load image, calculate patch size, resize
-        image = load_image_byte_as_float(image_path)
+        image = load_image_byte(image_path, as_float=False)
+        if trans_conf.equalize:
+            image = tvtf.equalize(image)
+        image = tvtf.to_dtype(image, torch.float32, scale=True)
         patch_size_z, pool_size_z, stride_z, tokens_z = get_patch_size_z(
             conf.base_vit_patch_size_z,
             conf.base_pool_size_z,
