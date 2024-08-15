@@ -2,6 +2,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from lightning.pytorch.strategies import ParallelStrategy
 import torch
 from jsonargparse import class_from_function
 from peft import PeftModel
@@ -244,6 +245,16 @@ class MMMMForCausalLM(CogVLMForCausalLM, PeftMixin, LightningModule):
             for k, v in log_dict_.items():
                 log_dict.setdefault(k, []).append(v)
         loss = torch.stack(loss_list).mean()
+        if self.trainer.is_parallel:
+            if all(m is None for m in masks_label):
+                loss += zero_loss(
+                    self.sam(
+                        [torch.zeros(3, 1, 16, 16, device=self.device)],
+                        [(1, 16, 16)],
+                        [torch.zeros(0, self.sam.prompt_dim, device=self.device)],
+                    )[0],
+                )
+
         with torch.no_grad():
             log_dict = {
                 k: torch.stack(v).mean()

@@ -74,7 +74,10 @@ def handle_truncation_(data: dict, tokenizer: MMMMTokenizer):
     num_targets = vg_label_mask.sum().item()
     for label_key in 'masks', 'boxes', 'index_offsets':
         if (value := data.get(label_key)) is not None:
-            data[label_key] = value[:num_targets]
+            if num_targets > 0:
+                data[label_key] = value[:num_targets]
+            else:
+                data[label_key] = None
     data['vg_label_mask'] = vg_label_mask
 
 class GRGTransform(mt.RandomizableTransform):
@@ -147,6 +150,7 @@ class GRGTransform(mt.RandomizableTransform):
         else:
             vg_label_mask = torch.zeros(0, dtype=torch.bool)
         if (box_path := (base_dir / f'{key}_box.json')).exists():
+            instance_mask = True
             masks = None
             if grounding:
                 target_boxes: dict[str, ...] = orjson.loads(box_path.read_bytes())
@@ -182,6 +186,7 @@ class GRGTransform(mt.RandomizableTransform):
                 boxes = None
                 index_offsets = None
         else:
+            instance_mask = False
             boxes = None
             index_offsets = None
             if grounding and (seg_path := base_dir / f'{key}_seg.json').exists():
@@ -260,7 +265,7 @@ class GRGTransform(mt.RandomizableTransform):
             'masks': masks,
             'boxes': None if boxes is None else boxes.float(),
             'index_offsets': index_offsets,
-            'instance_mask': boxes is not None,
+            'instance_mask': instance_mask,
             'vg_label_mask': vg_label_mask,
         }
         handle_truncation_(data, tokenizer)
