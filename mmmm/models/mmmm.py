@@ -26,7 +26,6 @@ __all__ = [
     'build',
 ]
 
-
 @dataclass
 class VisionArgs:
     pos_embed_shape: tuple3_t[int]
@@ -55,9 +54,18 @@ class MMMMForCausalLM(CogVLMForCausalLM, PeftMixin, LightningModule):
     tokenizer: MMMMTokenizer
     sam: Sam
     mask_loss: DiceFocalLoss | None
-    isam: InstanceSam
+    # PEFT is so clever, they match suffix and does not fully support regex of "^"
+    # so I have to change "isam" to "isam_model" to avoid clashing with "sam"; don't name "sam" with "sam_model"!
+    isam_model: InstanceSam
     isam_loss: InstanceSamLoss
+    # check_grad = True
     _supports_param_buffer_assignment: bool = False  # otherwise, custom parameter class will be wiped out
+
+    def _freeze_sam_unused(self):
+        sam = self.sam
+        sam.prompt_encoder.point_embeddings.requires_grad_(False)
+        sam.prompt_encoder.not_a_point_embed.requires_grad_(False)
+        sam.prompt_encoder.mask_downscaling.requires_grad_(False)
 
     @classmethod
     def build(
@@ -90,13 +98,15 @@ class MMMMForCausalLM(CogVLMForCausalLM, PeftMixin, LightningModule):
         self.lm_loss_weight = lm_loss_weight
         self.sam = sam
         self.mask_loss = mask_loss
-        self.isam = isam
+        self.isam_model = isam
         self.isam_loss = isam_loss
         if sam is not None:
             assert isam is not None
             if freeze_sam:
                 sam.requires_grad_(False)
                 sam.eval()
+            else:
+                self._freeze_sam_unused()
             isam.requires_grad_(False)
             isam.eval()
             assert sam.prompt_dim == isam.prompt_dim
@@ -187,7 +197,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, PeftMixin, LightningModule):
                     masks_logits.insert(i, None)
         if any(instance_mask):
             args_list = (args for i, args in enumerate(zip(image, patch_size, vg_prompts)) if instance_mask[i])
-            output: InstanceSamOutput = self.isam(*zip(*args_list))
+            output: InstanceSamOutput = self.isam_model(*zip(*args_list))
             boxes, disc_logit = output.boxes, output.disc_logit
             for i, instance_mask_ in enumerate(instance_mask):
                 if not instance_mask_:
