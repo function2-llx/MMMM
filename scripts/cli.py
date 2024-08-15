@@ -4,6 +4,8 @@ from pathlib import Path
 from typing import Any, ContextManager
 
 import cytoolz
+from jsonargparse import lazy_instance
+from lightning import Trainer
 from lightning.pytorch.cli import LightningArgumentParser
 from lightning.pytorch.plugins import FSDPPrecision, HalfPrecision, Precision, MixedPrecision
 from lightning.pytorch.strategies import FSDPStrategy
@@ -113,6 +115,10 @@ def main():
         model_class=MMMMForCausalLM,
         datamodule_class=MMMMDataModule,
         trainer_class=PeftTrainer,
+        trainer_defaults={
+            'precision': None,
+            'plugins': lazy_instance(MyPrecision),
+        }
     )
 
 if __name__ == '__main__':

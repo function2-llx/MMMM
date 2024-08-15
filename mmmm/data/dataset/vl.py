@@ -17,7 +17,7 @@ from ..defs import ConvTurn, PROCESSED_VL_DATA_ROOT, Split
 from ..target_tax import get_target_tax
 from ..utils import prepare_vlm_inputs
 from .local.template import gen_general_conv
-from .misc import gen_modality_conv, get_max_resize, intensity_norm, toss, load_image_data, get_patch_size_z
+from .misc import gen_modality_conv, get_max_resize, intensity_norm, toss, load_image_byte_as_float, get_patch_size_z
 
 CAPTION_PROMPTS = [
     'Briefly describe this {}.',
@@ -162,7 +162,7 @@ class VLTransform(mt.RandomizableTransform):
         else:
             plane = None
         # 2. image transform
-        image = load_image_data(image_path)
+        image = load_image_byte_as_float(image_path)
         patch_size_z, pool_size_z, stride_z, tokens_z = get_patch_size_z(
             conf.base_vit_patch_size_z,
             conf.base_pool_size_z,

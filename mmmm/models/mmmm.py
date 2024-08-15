@@ -57,6 +57,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, PeftMixin, LightningModule):
     mask_loss: DiceFocalLoss | None
     isam: InstanceSam
     isam_loss: InstanceSamLoss
+    _supports_param_buffer_assignment: bool = False  # otherwise, custom parameter class will be wiped out
 
     @classmethod
     def build(
@@ -167,8 +168,8 @@ class MMMMForCausalLM(CogVLMForCausalLM, PeftMixin, LightningModule):
         hidden_states = hidden_states.float()
         vg_prompts = self._get_vg_prompts(token_ids, hidden_states)
         vg_prompts = [
-            vg_prompts_ if label_mask_ is None else vg_prompts_[label_mask_]
-            for vg_prompts_, label_mask_ in zip(vg_prompts, prompt_mask)
+            vg_prompts_ if prompt_mask_ is None else vg_prompts_[prompt_mask_]
+            for vg_prompts_, prompt_mask_ in zip(vg_prompts, prompt_mask)
         ]
         if all(instance_mask):
             masks_logits = [None] * batch_size

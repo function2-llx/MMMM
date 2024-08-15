@@ -99,9 +99,8 @@ def prepare_vlm_inputs(
         # the open tag <p> presents after all, predict the close tag as well for negative targets
         labels_ex_eos[eonp_mask] = tokenizer.eop_token_id
         # give prediction for <p> different weights
-        if grounding:
-            weight = torch.ones_like(labels, dtype=torch.float)
-            weight[:-1][text_ids[1:] == tokenizer.bop_token_id] = bop_weight
+        weight = torch.ones_like(labels, dtype=torch.float)
+        weight[:-1][text_ids[1:] == tokenizer.bop_token_id] = bop_weight
     num_image_tokens += 2  # to include boi and eoi
     input_ids = torch.cat([
         torch.tensor([tokenizer.bos_token_id]),
@@ -136,11 +135,10 @@ def prepare_vlm_inputs(
             torch.full((1 + num_image_tokens + 1, ), CE_IGNORE_INDEX),
             labels,
         ])
-        if grounding:
-            inputs['weight'] = torch.cat([
-                torch.full((1 + num_image_tokens + 1, ), 0.),
-                weight,
-            ])
+        inputs['weight'] = torch.cat([
+            torch.full((1 + num_image_tokens + 1, ), 0.),
+            weight,
+        ])
     if max_seq_len is not None:
         for k, v in inputs.items():
             inputs[k] = v[:max_seq_len]

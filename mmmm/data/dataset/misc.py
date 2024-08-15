@@ -1,7 +1,3 @@
-from __future__ import annotations
-
-from collections.abc import Sequence
-
 import math
 from pathlib import Path
 from typing import Sequence
@@ -10,16 +6,16 @@ import einops
 import monai.transforms as mt
 import numpy as np
 import torch
+from PIL.ImageOps import scale
 from monai.data import MetaTensor, convert_box_mode
 from monai.data.box_utils import CenterSizeMode
 from monai.utils import InterpolateMode, GridSamplePadMode
 from torchvision.io import read_image
-from torchvision.transforms import v2 as tvt
+import torchvision.transforms.v2.functional as tvtf
 
 from luolib.transforms.box_ops import apply_affine_to_boxes_int
 from luolib.types import tuple2_t, tuple3_t, PathLike
 from luolib.utils import load_pt_zst
-
 from mmmm.data.defs import ConvTurn
 
 PROMPTS = [
@@ -80,7 +76,7 @@ def get_max_resize(size: Sequence[int], stride: int, max_tokens: int) -> tuple2_
     resize = np.multiply(size, scale).round().astype(np.int64)
     return tuple(resize.tolist())
 
-def load_image_data(image_path: PathLike) -> torch.Tensor:
+def load_image_byte_as_float(image_path: PathLike) -> torch.Tensor:
     image_path = Path(image_path)
     if image_path.name.endswith('.pt'):
         image = torch.load(image_path)
@@ -89,6 +85,8 @@ def load_image_data(image_path: PathLike) -> torch.Tensor:
     else:
         image = read_image(str(image_path))
         image = einops.rearrange(image, 'c h w -> c 1 h w')
+    assert image.dtype == torch.uint8
+    image = tvtf.to_dtype(image, torch.float32, scale=True)
     return image
 
 def get_patch_size_z(

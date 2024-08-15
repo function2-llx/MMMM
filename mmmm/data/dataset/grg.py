@@ -2,79 +2,28 @@ from __future__ import annotations as _
 
 import json
 from dataclasses import dataclass
+from idlelib.pyparse import trans
+from operator import index
 from pathlib import Path
 from typing import TypedDict
 
-import cytoolz
-from monai import transforms as mt
-from monai.data import MetaTensor
-from monai.utils import convert_to_tensor
 import numpy as np
 import orjson
 import torch
 import torchvision.transforms.v2.functional as tvtf
+from monai import transforms as mt
 
 import mmmm.data.dataset._dataset as _dataset
-from luolib.transforms import quantile
 from luolib.transforms.box_ops import round_boxes
 from luolib.utils import load_pt_zst
 from luolib.utils.misc import ensure_rgb
 from mmmm.tokenizer import MMMMTokenizer
-from .local.template import gen_general_conv
-from .misc import gen_modality_conv, get_max_resize, intensity_norm, toss, load_image_data, get_patch_size_z, \
+from .misc import get_max_resize, intensity_norm, toss, load_image_byte_as_float, get_patch_size_z, \
     spatial_transform_image_labels, norm_boxes
+from .vl import REFERRINGS, REPORT_PROMPTS
 from ..defs import ConvTurn, Split, PROCESSED_VG_DATA_ROOT
 from ..target_tax import get_target_tax
 from ..utils import prepare_vlm_inputs
-
-REPORT_PROMPTS = [
-    'Can you provide a report consists of findings and impression for this {}?',
-    'Please report on this {} with findings and impression.',
-    'Describe this {} with findings and impression.',
-    'Please write a report consists of findings and impression for this {}.',
-    'Please provide a report consists of findings and impression for this {}.',
-    'Can you provide a summary consists of findings and impression of this {}?',
-    'What are the findings and impression presented in this {}?',
-    'Please write a report consists of findings and impression for this {}.',
-    'Can you provide a description consists of findings and impression of this {}?',
-    'Please report on this {} with finding and impression.',
-    'Analyze this {} and provide a detailed report with both findings and impression.',
-    'Examine the {} and construct a report that includes findings and impression.',
-    'Based on your analysis, what would be an accurate report for this {}, including both findings and impression?',
-    'What is the most appropriate report for this {}, detailing both the findings and impression?',
-    'Can you provide a radiology report for this {}?',
-    'Please write a radiology report for this {}.',
-    'Please generate a radiology report for this {}.',
-    'Please provide a report for this {}.',
-    'Please generate a detailed radiology report for this {}, including a description of the findings and your impression.',
-    'Evaluate the {} and generate a detailed report.',
-    'Review the {} and provide a thorough clinical report.',
-    'Report on this {}.',
-    'Detail findings and impression from this {}.',
-    'Analyze the {} with findings and impression.',
-    'Generate a detailed radiology report for the given {}.',
-    "Create a detailed report for this {}.",
-    "Give a detailed radiology report for this {}.",
-]
-
-FINDINGS_PROMPTS = [
-    'What are the findings presented in this {}?',
-    'Can you provide the findings for this {}?',
-    'Please report on this {} with findings.',
-    'Describe this {} with findings.',
-    'Please write a report consists of findings for this {}.',
-    'Please provide a findings section of the report for this {}.',
-    'Can you provide a summary consists of findings of this {}?',
-    'Please write findings for this {}.',
-    'Can you provide a description consists of findings of this {}?',
-    'Please report on this {} with finding.',
-    'Analyze this {} and provide a detailed findings section.',
-    'Examine the {} and construct a findings section in the report.',
-    'Based on your analysis, what would be the findings for this {}?',
-    'What are the findings presented in this {}?',
-]
-
-REFERRINGS = ['image', 'medical image', 'radiograph', 'scan', 'radiology image', 'radiology scan', 'medical scan']
 
 def get_grg_data_list(name: str, split: Split) -> list:
     dataset_dir = PROCESSED_VG_DATA_ROOT / name
@@ -108,20 +57,19 @@ class GRGDataPoint(TypedDict):
     anomaly_pos: list[str]
     anomaly_neg: list[str]
 
-def resolve_image_path(vl_path: str, dataset_name: str) -> tuple[Path, str]:
+def resolve_image_path(vl_path: str, dataset_name: str) -> tuple[Path, str, Path]:
     suffix = '.pt.zst'
     assert vl_path.endswith(suffix)
     vl_path = Path(vl_path)
     key = vl_path.name[:-len(suffix)]
     # sorry
     if dataset_name == 'MIMIC-CXR':
-        num_parts = 6
-        suffix = '.jpg'
+        base_dir = Path(PROCESSED_VG_DATA_ROOT, *Path(vl_path).parts[-6:-1])
+        grg_path = base_dir / f'{key}.jpg'
     else:
-        num_parts = 4
-        suffix = '.nii.gz'
-    grg_path = Path(PROCESSED_VG_DATA_ROOT, *Path(vl_path).parts[-num_parts:-1], f'{key}{suffix}')
-    return grg_path, key
+        base_dir = Path(PROCESSED_VG_DATA_ROOT, *Path(vl_path).parts[-4:-1])
+        grg_path = base_dir / f'{key}-t/{key}.pt.zst'
+    return grg_path, key, base_dir
 
 @dataclass
 class GRGTransConf:
@@ -148,10 +96,18 @@ class GRGTransform(mt.RandomizableTransform):
         self.inference = inference
         self.target_tax = get_target_tax()
 
+    def _reduce_items_(self, mask: torch.BoolTensor, max_num: int):
+        if (num := mask.sum().item()) <= max_num:
+            return
+        indexes, = torch.where(mask)
+        neg = self.R.choice(indexes.numpy(), num - max_num, replace=False)
+        mask[neg] = False
+
     def __call__(self, data: dict):
         conf = self.conf
         trans_conf = conf.grg_trans
         dataset: str = data['dataset']
+
         # 1. sample image & resolve image path
         image_candidates = np.arange(len(data['image']))
         if dataset == 'MIMIC-CXR':
@@ -162,66 +118,10 @@ class GRGTransform(mt.RandomizableTransform):
             image_candidates = image_candidates[frontal_mask]
         image_idx = self.R.choice(image_candidates).item()
         vl_image_path = data['image'][image_idx]
-        image_path, key = resolve_image_path(vl_image_path, dataset)
+        image_path, key, base_dir = resolve_image_path(vl_image_path, dataset)
 
-        # 2. load localization labels
-        tags: list[dict] = data['tags']
-        vg_label_mask = torch.zeros(len(tags), dtype=torch.bool)
-        if (box_path := image_path.with_name(f'{key}_box.json')).exists():
-            target_boxes: dict[str, ...] = orjson.loads(box_path.read_bytes())
-            for name, boxes in target_boxes.items():
-                # mode: XY(Z)XY(Z)
-                boxes = torch.tensor(boxes, dtype=torch.float64)
-                if boxes.shape[1] == 4:
-                    boxes_3d = torch.empty(boxes.shape[0], 6, dtype=torch.float64)
-                    boxes_3d[:, 0] = 0
-                    boxes_3d[:, 3] = 1
-                    boxes_3d[:, [1, 2, 4, 5]] = boxes
-                    boxes = boxes_3d
-                target_boxes[name] = boxes
-            masks = None
-            boxes_list = []
-            index_offset = 0
-            index_offsets = []
-            for i, tag in enumerate(tags):
-                if (boxes := target_boxes.get(tag['target'])) is None:
-                    continue
-                boxes_list.append(boxes)
-                index_offsets.append((index_offset, index_offset := index_offset + boxes.shape[0]))
-                vg_label_mask[i] = True
-            boxes = round_boxes(torch.cat(boxes_list, dim=0))
-            index_offsets = torch.tensor(index_offsets)
-        else:
-            boxes = None
-            index_offsets = None
-            targets: list[str] = json.loads(image_path.with_name(f'{key}_seg.json').read_bytes())
-            ref_masks: torch.BoolTensor = load_pt_zst(image_path.with_name(f'{key}_seg.pt.zst'))
-            target_to_idx = {
-                target: i
-                for i, target in enumerate(targets)
-            }
-            masks_list = []
-            for i, tag in enumerate(tags):
-                if (target_idx := target_to_idx.get(tag['target'])) is None:
-                    continue
-                vg_label_mask[i] = True
-                masks_list.append(ref_masks[target_idx])
-            masks = torch.stack(masks_list, dim=0)
-
-        # 3. load image, calculate patch size, resize; FIXME: orientation
-        if image_path.name.endswith('.nii.gz'):
-            image: MetaTensor = mt.LoadImage(ensure_channel_first=True)(image_path)
-            assert isinstance(masks, MetaTensor)
-            assert torch.allclose(image.affine, masks.affine)
-            image, masks = map(cytoolz.compose(torch.Tensor.contiguous, mt.Orientation('SRA')), (image, masks))
-            min_v = quantile(image, 0.5 / 100)
-            max_v = quantile(image, 99.5 / 100)
-            image.clip_(min_v, max_v)
-            image = (image - min_v) / (max_v - min_v)
-        else:
-            image = load_image_data(image_path)
-            assert image.dtype == torch.uint8
-            image = tvtf.to_dtype(image, torch.float32, scale=True)
+        # 2. load image, calculate patch size, resize
+        image = load_image_byte_as_float(image_path)
         patch_size_z, pool_size_z, stride_z, tokens_z = get_patch_size_z(
             conf.base_vit_patch_size_z,
             conf.base_pool_size_z,
@@ -240,6 +140,77 @@ class GRGTransform(mt.RandomizableTransform):
                 trans_conf.max_tokens // tokens_z,
             ),
         )
+
+        # 3. load localization labels
+        tags: list[dict] = data['tags']
+        grounding = toss(self.R, trans_conf.grounding_prob)
+        # vg_label_mask: torch.BoolTensor
+        if grounding:
+            vg_label_mask = torch.zeros(len(tags), dtype=torch.bool)
+        else:
+            vg_label_mask = torch.zeros(0, dtype=torch.bool)
+        if (box_path := (base_dir / f'{key}_box.json')).exists():
+            masks = None
+            if grounding:
+                target_boxes: dict[str, ...] = orjson.loads(box_path.read_bytes())
+                for name, boxes in target_boxes.items():
+                    # mode: XY(Z)XY(Z)
+                    boxes = torch.tensor(boxes, dtype=torch.float64)
+                    if boxes.shape[1] == 4:
+                        boxes_3d = torch.empty(boxes.shape[0], 6, dtype=torch.float64)
+                        boxes_3d[:, 0] = 0
+                        boxes_3d[:, 3] = 1
+                        boxes_3d[:, [1, 2, 4, 5]] = boxes
+                        boxes = boxes_3d
+                    target_boxes[name] = boxes
+                for i, tag in enumerate(tags):
+                    if target_boxes.get(tag['target']) is not None:
+                        vg_label_mask[i] = True
+                self._reduce_items_(vg_label_mask, trans_conf.max_num_vg)
+                boxes_list = []
+                index_offset = 0
+                index_offsets = []
+                for i, tag in enumerate(tags):
+                    if not vg_label_mask[i]:
+                        continue
+                    boxes_list.append(boxes)
+                    index_offsets.append((index_offset, index_offset := index_offset + boxes.shape[0]))
+                if len(boxes_list) == 0:
+                    boxes = torch.empty(0, 6, dtype=torch.int64)
+                    index_offsets = torch.empty(0, 2, dtype=torch.int64)
+                else:
+                    boxes = round_boxes(torch.cat(boxes_list, dim=0))
+                    index_offsets = torch.tensor(index_offsets)
+            else:
+                boxes = None
+                index_offsets = None
+        else:
+            boxes = None
+            index_offsets = None
+            if grounding:
+                targets: list[str] = json.loads((base_dir / f'{key}_seg.json').read_bytes())
+                ref_masks: torch.BoolTensor = load_pt_zst(image_path.with_name(f'{key}_seg.pt.zst'))
+                target_to_idx = {
+                    target: i
+                    for i, target in enumerate(targets)
+                }
+                for i, tag in enumerate(tags):
+                    if tag['target'] in target_to_idx:
+                        vg_label_mask[i] = True
+                self._reduce_items_(vg_label_mask, trans_conf.max_num_vg)
+                masks_list = []
+                for i, tag in enumerate(tags):
+                    if not vg_label_mask[i]:
+                        continue
+                    masks_list.append(ref_masks[target_to_idx[tag['target']]])
+                if len(masks_list) > 0:
+                    masks = torch.stack(masks_list, dim=0)
+                else:
+                    masks = torch.empty(0, *image.shape[1:], dtype=torch.bool)
+            else:
+                masks = None
+
+        # 4. prepare data
         image, masks, boxes = spatial_transform_image_labels(image, masks, boxes, resize_shape, stride, R=self.R)
         if boxes is not None:
             boxes = norm_boxes(boxes, image.shape[1:])
@@ -247,13 +218,12 @@ class GRGTransform(mt.RandomizableTransform):
         # no normalization for grounding image, see `LocalTransform`
         grounding_image = image
         image = intensity_norm(image)
-        # 3. generate conversation
+        # 5. generate conversation
         referring: str = self.R.choice(REFERRINGS)
         conversation = []
         report: str = data['ref_report']
         # inject bracket tokens
         tokenizer = self.tokenizer
-        grounding = toss(self.R, trans_conf.grounding_prob)
         if grounding:
             last_end = 0
             report_pieces = []
