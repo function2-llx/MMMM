@@ -1,26 +1,28 @@
-import os
 from dataclasses import dataclass, field
+import os
 from pathlib import Path
+from typing import Any
 
-from lightning.pytorch.strategies import ParallelStrategy
-import torch
+import cytoolz
 from jsonargparse import class_from_function
+from lightning.pytorch.plugins import HalfPrecision, Precision
 from peft import PeftModel
+import torch
 from torch import nn
-from torch.nn import functional as nnf
+from torch.nn import Module, functional as nnf
 from transformers.modeling_outputs import CausalLMOutputWithPast
+from transformers.utils import ModelOutput
 
 from luolib.lightning import LightningModule
 from luolib.lightning.peft import PeftMixin
 from luolib.losses import zero_loss
 from luolib.types import PathLike, param3_t, tuple2_t, tuple3_t
-
 from mmmm.tokenizer import MMMMTokenizer
 from mmmm.utils import apply_prefix, get_lora_modules_default, get_lora_modules_finetune_all
 from .cogvlm import CogVLMConfig, CogVLMForCausalLM
 from .loss import DiceFocalLoss
 from .segvol import InstanceSam
-from .segvol.modeling.sam import Sam, InstanceSamLoss, InstanceSamOutput
+from .segvol.modeling.sam import InstanceSamLoss, InstanceSamOutput, Sam
 
 __all__ = [
     'MMMMForCausalLM',
@@ -332,6 +334,19 @@ class MMMMForCausalLM(CogVLMForCausalLM, PeftMixin, LightningModule):
         )
         return loss
 
+    def _update_model_kwargs_for_generation(
+        self,
+        outputs: ModelOutput,
+        model_kwargs: dict[str, ...],
+        *args,
+        **kwargs,
+    ):
+        position_ids = model_kwargs.pop('position_ids')
+        model_kwargs = super()._update_model_kwargs_for_generation(outputs, model_kwargs, *args, **kwargs)
+        position_ids = torch.cat([position_ids, position_ids[:, -1:] + 1], dim=1)
+        model_kwargs['position_ids'] = position_ids
+        return model_kwargs
+
     # noinspection PyMethodOverriding
     def prepare_inputs_for_generation(
         self,
@@ -347,7 +362,10 @@ class MMMMForCausalLM(CogVLMForCausalLM, PeftMixin, LightningModule):
         pool_size,
         **kwargs,
     ):
+        # we only have access to `input_ids` here, not in `_update_model_kwargs_for_generation`, humor hf
         if past_key_values:
+            keep_position = (input_ids[:, -2] == self.tokenizer.bop_token_id) | (input_ids[:, -1] == self.tokenizer.eop_token_id)
+            position_ids[:, -1] -= keep_position.long()  # modify `position_ids` in-place, hope it keeps working
             input_ids = input_ids[:, -1:]
             token_type_ids = token_type_ids[:, -1:]
             position_ids = position_ids[:, -1:]
@@ -358,18 +376,16 @@ class MMMMForCausalLM(CogVLMForCausalLM, PeftMixin, LightningModule):
         else:
             model_inputs = {"input_ids": input_ids}
 
-        model_inputs.update(
-            {
-                "image": image,
-                "token_type_ids": token_type_ids,
-                "position_ids": position_ids,
-                "past_key_values": past_key_values,
-                "attention_mask": attention_mask,
-                'patch_size': patch_size,
-                'pool_size': pool_size,
-                "use_cache": kwargs.get("use_cache"),
-            },
-        )
+        model_inputs.update({
+            "image": image,
+            "token_type_ids": token_type_ids,
+            "position_ids": position_ids,
+            "past_key_values": past_key_values,
+            "attention_mask": attention_mask,
+            'patch_size': patch_size,
+            'pool_size': pool_size,
+            "use_cache": kwargs.get("use_cache"),
+        })
         return model_inputs
 
     def _inference_path(self, input_ids, token_type_ids, global_enc_images, attention_masks):
@@ -431,3 +447,29 @@ def from_pretrained(conf_path: PathLike, adapter_dir: PathLike, trainable: bool 
     model.set_peft_model(peft_model)
     tokenizer = model.tokenizer
     return model, tokenizer
+
+class MyPrecision(Precision):
+    def __init__(self):
+        self._bf16 = HalfPrecision('bf16-true')
+
+    def convert_input(self, data: dict) -> Any:
+        fp16_mixed_keys = ['grounding_image', 'boxes']
+        ret = {
+            **self._bf16.convert_input(cytoolz.dissoc(data, *fp16_mixed_keys)),
+            **{
+                key: value for key in fp16_mixed_keys
+                if (value := data.get(key)) is not None
+            },
+        }
+        return ret
+
+    def convert_module(self, module: Module) -> MMMMForCausalLM:
+        assert isinstance(module, MMMMForCausalLM)
+        # NOTE: module._dtype is not set since module.to is not called
+        for param in module.parameters(recurse=False):
+            param.to(dtype=self._bf16._desired_input_dtype)
+        fp32_children = set(module.get_fp32_children())
+        for name, child in module.named_children():
+            if name not in fp32_children:
+                self._bf16.convert_module(child)
+        return module

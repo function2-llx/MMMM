@@ -213,7 +213,9 @@ class GRGTransform(mt.RandomizableTransform):
                 masks = None
 
         # 4. prepare data
-        image, masks, boxes = spatial_transform_image_labels(image, masks, boxes, resize_shape, stride, R=self.R)
+        image, masks, boxes = spatial_transform_image_labels(
+            image, masks, boxes, resize_shape, stride, R=self.R,
+        )
         if boxes is not None:
             boxes = norm_boxes(boxes, image.shape[1:])
         image, _ = ensure_rgb(image, contiguous=True)
