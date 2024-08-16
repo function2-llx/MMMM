@@ -60,11 +60,11 @@ class Batch(TypedDict):
     vlm_inputs: dict[str, torch.Tensor]
     masks: list[torch.BoolTensor | None]
     boxes: list[torch.Tensor]
-    semantic_masks: list[torch.BoolTensor | None]
-    semantic_boxes: list[torch.Tensor | None]
+    # semantic_masks: list[torch.BoolTensor | None]
+    # semantic_boxes: list[torch.Tensor | None]
     index_offsets: list[torch.LongTensor]
-    num_uncertain: list[torch.LongTensor]
-    semantic: list[torch.BoolTensor]
+    # num_uncertain: list[torch.LongTensor]
+    # semantic: list[torch.BoolTensor]
 
 class Split(StrEnum):
     TRAIN = 'train'

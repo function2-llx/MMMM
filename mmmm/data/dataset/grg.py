@@ -155,14 +155,14 @@ class GRGTransform(mt.RandomizableTransform):
             if grounding:
                 target_boxes: dict[str, ...] = orjson.loads(box_path.read_bytes())
                 for name, boxes in target_boxes.items():
-                    # mode: XY(Z)XY(Z)
+                    # mode: XY(Z)XY(Z) -> DHWDHW
                     boxes = torch.tensor(boxes, dtype=torch.float64)
-                    if boxes.shape[1] == 4:
-                        boxes_3d = torch.empty(boxes.shape[0], 6, dtype=torch.float64)
-                        boxes_3d[:, 0] = 0
-                        boxes_3d[:, 3] = 1
-                        boxes_3d[:, [1, 2, 4, 5]] = boxes
-                        boxes = boxes_3d
+                    assert boxes.shape[1] == 4
+                    boxes_3d = torch.empty(boxes.shape[0], 6, dtype=torch.float64)
+                    boxes_3d[:, 0] = 0
+                    boxes_3d[:, 3] = 1
+                    boxes_3d[:, [2, 1, 5, 4]] = boxes
+                    boxes = boxes_3d
                     target_boxes[name] = boxes
                 for i, tag in enumerate(tags):
                     if target_boxes.get(tag['target']) is not None:

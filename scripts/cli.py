@@ -71,6 +71,7 @@ class CLI(LightningCLI):
         # dataclass as class: https://github.com/omni-us/jsonargparse/issues/287
         parser.add_class_arguments(LoraConfig, 'lora')
         parser.add_argument('--lora_adapter_path', type=Path | None, default=None)
+        parser.link_arguments('trainer.max_steps', 'optim.lr_scheduler.scheduler.init_args.t_initial')
 
     def instantiate_classes(self) -> None:
         super().instantiate_classes()

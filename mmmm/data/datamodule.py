@@ -15,9 +15,9 @@ __all__ = [
     'MMMMDataModule',
 ]
 
-from .defs import CE_IGNORE_INDEX, Split
+from .defs import Batch, CE_IGNORE_INDEX, Split
 
-def _collate_fn(batch: list[dict]):
+def _collate_fn(batch: list[dict]) -> Batch:
     vlm_inputs: list[dict | None] = []
     ret = {}
     for x in batch:

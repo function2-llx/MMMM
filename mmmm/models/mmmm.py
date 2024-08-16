@@ -343,7 +343,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, PeftMixin, LightningModule):
     ):
         position_ids = model_kwargs.pop('position_ids')
         model_kwargs = super()._update_model_kwargs_for_generation(outputs, model_kwargs, *args, **kwargs)
-        position_ids = torch.cat([position_ids, position_ids[:, -1:] + 1], dim=1)
+        position_ids = torch.cat([position_ids, position_ids[:, -1:] + 1], dim=1)  # `position_ids` will be corrected based on `input_ids` later in `prepare_inputs_for_generation`
         model_kwargs['position_ids'] = position_ids
         return model_kwargs
 
