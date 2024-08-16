@@ -33,7 +33,7 @@ optim:
     scheduler:
       class_path: timm.scheduler.CosineLRScheduler
       init_args:
-        t_initial: ${trainer.max_steps}
+#        t_initial: ${trainer.max_steps}
         t_in_epochs: false
         warmup_t: 0
         warmup_prefix: true
