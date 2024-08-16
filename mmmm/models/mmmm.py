@@ -72,6 +72,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, PeftMixin, LightningModule):
         isam.prompt_encoder.point_embeddings.requires_grad_(False)
         isam.prompt_encoder.not_a_point_embed.requires_grad_(False)
         isam.prompt_encoder.mask_downscaling.requires_grad_(False)
+        isam.mask_decoder.requires_grad_(False)
 
     @classmethod
     def build(
@@ -126,7 +127,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, PeftMixin, LightningModule):
         if freeze_vision:
             self.model.vision.requires_grad_(False)
         self.model.config.lora_lang = not freeze_vision
-        self.check_grad = False
+        # self.check_grad = False
         return self
 
     def get_fp32_children(self) -> list[str]:
@@ -263,14 +264,12 @@ class MMMMForCausalLM(CogVLMForCausalLM, PeftMixin, LightningModule):
                     )[0],
                 )
             if all(b is None for b in boxes_label):
-                loss += zero_loss(
-                    self.isam_model(
-                        [torch.zeros(3, 2, 32, 32, device=self.device)],
-                        [(1, 16, 16)],
-                        [torch.zeros(1, self.sam.prompt_dim, device=self.device)],
-                    )[0],
+                output: InstanceSamOutput = self.isam_model(
+                    [torch.zeros(3, 2, 32, 32, device=self.device)],
+                    [(1, 16, 16)],
+                    [torch.zeros(1, self.sam.prompt_dim, device=self.device)],
                 )
-
+                loss += zero_loss(output.disc_logit[0], output.boxes[0])
 
         with torch.no_grad():
             log_dict = {
