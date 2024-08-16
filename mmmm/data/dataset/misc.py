@@ -13,7 +13,7 @@ from monai.utils import InterpolateMode, GridSamplePadMode
 from torchvision.io import read_image
 import torchvision.transforms.v2.functional as tvtf
 
-from luolib.transforms.box_ops import apply_affine_to_boxes_int
+from luolib.transforms.box_ops import apply_affine_to_boxes_int, round_boxes
 from luolib.types import tuple2_t, tuple3_t, PathLike
 from luolib.utils import load_pt_zst
 from mmmm.data.defs import ConvTurn
@@ -170,7 +170,14 @@ def spatial_transform_image_labels(
     return image_t.as_tensor(), masks_t, boxes_t
 
 def norm_boxes(boxes: torch.LongTensor, norm_size: Sequence[int]) -> torch.DoubleTensor:
-    norm_size_t = einops.repeat(torch.tensor(norm_size), 'd -> (l2 d)', l2=2)
+    norm_size_t = einops.repeat(torch.as_tensor(norm_size, device=boxes.device), 'd -> (l2 d)', l2=2)
     boxes_normed = boxes.double() / norm_size_t
     boxes_normed = convert_box_mode(boxes_normed, dst_mode=CenterSizeMode)
     return boxes_normed
+
+def map_boxes(boxes_normed: torch.Tensor, size: Sequence[int]) -> torch.LongTensor:
+    boxes_normed = convert_box_mode(boxes_normed, src_mode=CenterSizeMode)
+    size_t = einops.repeat(torch.as_tensor(size, device=boxes_normed.device), 'd -> (l2 d)', l2=2)
+    boxes = boxes_normed.double() * size_t
+    boxes = round_boxes(boxes)
+    return boxes

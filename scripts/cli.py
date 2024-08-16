@@ -72,6 +72,7 @@ class CLI(LightningCLI):
         parser.add_class_arguments(LoraConfig, 'lora')
         parser.add_argument('--lora_adapter_path', type=Path | None, default=None)
         # parser.link_arguments('trainer.max_steps', 'optim.lr_scheduler.scheduler.init_args.t_initial')
+        parser.add_argument('--swap_xy', type=bool, default=False)
 
     def instantiate_classes(self) -> None:
         super().instantiate_classes()
@@ -85,6 +86,10 @@ class CLI(LightningCLI):
             if (lora_adapter_path := config.lora_adapter_path) is not None:
                 peft_model.load_adapter(str(lora_adapter_path), 'default', is_trainable=self.subcommand == 'fit')
                 print(f'load adapter from {lora_adapter_path}')
+        if config.swap_xy:
+            output_layer = model.isam_model.box_head[-1]
+            assert isinstance(output_layer, nn.Linear)
+            output_layer.weight[[1, 2, 4, 5], :] = output_layer.weight[[2, 1, 5, 4], :]
 
 def main():
     CLI(
