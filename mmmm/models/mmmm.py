@@ -46,8 +46,6 @@ class VisualGroundingOutput:
 MATCH_NEGATIVE = -1
 MATCH_UNCERTAIN = -2
 
-EPS = 1e-8
-
 def _add_prefix(log_dict: dict[str, ...], prefix: str) -> dict[str, ...]:
     if prefix != '' and not prefix.endswith('/'):
         prefix += '/'
@@ -70,6 +68,10 @@ class MMMMForCausalLM(CogVLMForCausalLM, PeftMixin, LightningModule):
         sam.prompt_encoder.point_embeddings.requires_grad_(False)
         sam.prompt_encoder.not_a_point_embed.requires_grad_(False)
         sam.prompt_encoder.mask_downscaling.requires_grad_(False)
+        isam = self.isam_model
+        isam.prompt_encoder.point_embeddings.requires_grad_(False)
+        isam.prompt_encoder.not_a_point_embed.requires_grad_(False)
+        isam.prompt_encoder.mask_downscaling.requires_grad_(False)
 
     @classmethod
     def build(
@@ -85,6 +87,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, PeftMixin, LightningModule):
         freeze_sam: bool = True,
         mask_loss: DiceFocalLoss | None = None,
         isam: InstanceSam | None = None,
+        freeze_isam: bool = True,
         isam_loss: InstanceSamLoss | None = None,
     ):
         """make jsonargparse happy
@@ -109,10 +112,10 @@ class MMMMForCausalLM(CogVLMForCausalLM, PeftMixin, LightningModule):
             if freeze_sam:
                 sam.requires_grad_(False)
                 sam.eval()
-            else:
-                self._freeze_sam_unused()
-            isam.requires_grad_(False)
-            isam.eval()
+            if freeze_isam:
+                isam.requires_grad_(False)
+                isam.eval()
+            self._freeze_sam_unused()
             assert sam.prompt_dim == isam.prompt_dim
             self.vg_proj = nn.Sequential(
                 nn.Linear(self.config.hidden_size, self.config.hidden_size),
@@ -259,6 +262,15 @@ class MMMMForCausalLM(CogVLMForCausalLM, PeftMixin, LightningModule):
                         [torch.zeros(1, self.sam.prompt_dim, device=self.device)],
                     )[0],
                 )
+            if all(b is None for b in boxes_label):
+                loss += zero_loss(
+                    self.isam_model(
+                        [torch.zeros(3, 2, 32, 32, device=self.device)],
+                        [(1, 16, 16)],
+                        [torch.zeros(1, self.sam.prompt_dim, device=self.device)],
+                    )[0],
+                )
+
 
         with torch.no_grad():
             log_dict = {

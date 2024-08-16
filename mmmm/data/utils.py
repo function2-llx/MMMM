@@ -177,7 +177,7 @@ def save_as_nifti(path: PathLike, output_path: PathLike | None = None):
         output_path = path.with_name(path.name[:-len('.pt.zst')] + '.nii.gz')
     nib.save(
         nib.Nifti1Image(image.numpy(), np.eye(4)),
-        output_path
+        output_path,
     )
 
 def to_nrrd(seg_path: PathLike, rearrange: bool = True):
