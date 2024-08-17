@@ -70,7 +70,7 @@ class CLI(LightningCLI):
         parser.link_arguments('tokenizer', f'{self.model_prefix}.tokenizer', apply_on='instantiate')
         # dataclass as class: https://github.com/omni-us/jsonargparse/issues/287
         parser.add_class_arguments(LoraConfig, 'lora')
-        parser.add_argument('--lora_adapter_path', type=Path | None, default=None)
+        parser.add_argument('--adapter_path', type=Path | None, default=None)
         # parser.link_arguments('trainer.max_steps', 'optim.lr_scheduler.scheduler.init_args.t_initial')
         parser.add_argument('--swap_xy', type=bool, default=False)
 
@@ -83,9 +83,9 @@ class CLI(LightningCLI):
         if len(lora_config.target_modules) > 0:
             peft_model = get_peft_model(model, lora_config)
             model.set_peft_model(peft_model)
-            if (lora_adapter_path := config.lora_adapter_path) is not None:
-                peft_model.load_adapter(str(lora_adapter_path), 'default', is_trainable=self.subcommand == 'fit')
-                print(f'load adapter from {lora_adapter_path}')
+            if (adapter_path := config.adapter_path) is not None:
+                peft_model.load_adapter(str(adapter_path), 'default', is_trainable=self.subcommand == 'fit')
+                print(f'load adapter from {adapter_path}')
         if config.swap_xy:
             output_layer = model.isam_model.box_head[-1]
             assert isinstance(output_layer, nn.Linear)

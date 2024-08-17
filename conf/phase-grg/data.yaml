@@ -17,7 +17,9 @@ init_args:
     grg_trans:
       max_tokens: 144
       max_tokens_z: 4
-      max_num_vg: 12
+      max_num_vg_mask: 8
+      max_num_vg_box: 12
+      equalize: true
     bop_weight: 5
   dataloader:
     train_batch_size: 8

@@ -64,7 +64,8 @@ class GRGTransConf:
     max_tokens_z: int
     log2_patch_size_z_std: float = 0.25
     grounding_prob: float = 0.99
-    max_num_vg: int = 12
+    max_num_vg_mask: int
+    max_num_vg_box: int
     equalize: bool = False
 
 def handle_truncation_(data: dict, tokenizer: MMMMTokenizer):
@@ -167,7 +168,7 @@ class GRGTransform(mt.RandomizableTransform):
                 for i, tag in enumerate(tags):
                     if target_boxes.get(tag['target']) is not None:
                         vg_label_mask[i] = True
-                self._reduce_items_(vg_label_mask, trans_conf.max_num_vg)
+                self._reduce_items_(vg_label_mask, trans_conf.max_num_vg_box)
                 boxes_list = []
                 index_offset = 0
                 index_offsets = []
@@ -199,7 +200,7 @@ class GRGTransform(mt.RandomizableTransform):
                 for i, tag in enumerate(tags):
                     if tag['target'] in target_to_idx:
                         vg_label_mask[i] = True
-                self._reduce_items_(vg_label_mask, trans_conf.max_num_vg)
+                self._reduce_items_(vg_label_mask, trans_conf.max_num_vg_mask)
                 masks_list = []
                 for i, tag in enumerate(tags):
                     if not vg_label_mask[i]:

@@ -19,6 +19,7 @@ from luolib.losses import zero_loss
 from luolib.types import PathLike, param3_t, tuple2_t, tuple3_t
 from mmmm.tokenizer import MMMMTokenizer
 from mmmm.utils import apply_prefix, get_lora_modules_default, get_lora_modules_finetune_all
+from mmmm.data.defs import mmmm_debug
 from .cogvlm import CogVLMConfig, CogVLMForCausalLM
 from .loss import DiceFocalLoss
 from .segvol import InstanceSam
@@ -60,19 +61,23 @@ class MMMMForCausalLM(CogVLMForCausalLM, PeftMixin, LightningModule):
     isam_model: InstanceSam
     isam_loss: InstanceSamLoss
     vg_proj: nn.Module
-    # check_grad = True
     _supports_param_buffer_assignment: bool = False  # otherwise, custom parameter class will be wiped out
 
     def _freeze_sam_unused(self):
         sam = self.sam
-        sam.prompt_encoder.point_embeddings.requires_grad_(False)
-        sam.prompt_encoder.not_a_point_embed.requires_grad_(False)
-        sam.prompt_encoder.mask_downscaling.requires_grad_(False)
         isam = self.isam_model
-        isam.prompt_encoder.point_embeddings.requires_grad_(False)
-        isam.prompt_encoder.not_a_point_embed.requires_grad_(False)
-        isam.prompt_encoder.mask_downscaling.requires_grad_(False)
-        isam.mask_decoder.requires_grad_(False)
+        for module in (
+            sam.prompt_encoder.point_embeddings,
+            sam.prompt_encoder.not_a_point_embed,
+            sam.prompt_encoder.mask_downscaling,
+            isam.prompt_encoder.point_embeddings,
+            isam.prompt_encoder.not_a_point_embed,
+            isam.prompt_encoder.mask_downscaling,
+            isam.mask_decoder.output_upscaling,
+            isam.mask_decoder.output_hypernetworks_mlps,
+            isam.mask_decoder.txt_align_upscaled_embedding,
+        ):
+            module.requires_grad_(False)
 
     @classmethod
     def build(
@@ -127,7 +132,6 @@ class MMMMForCausalLM(CogVLMForCausalLM, PeftMixin, LightningModule):
         if freeze_vision:
             self.model.vision.requires_grad_(False)
         self.model.config.lora_lang = not freeze_vision
-        # self.check_grad = False
         return self
 
     def get_fp32_children(self) -> list[str]:
@@ -244,18 +248,20 @@ class MMMMForCausalLM(CogVLMForCausalLM, PeftMixin, LightningModule):
                     boxes_label[i],
                     index_offsets[i],
                 )
+                loss_ += zero_loss(masks_logits[i])
             elif masks_label[i] is not None and masks_label[i].shape[0] > 0:
                 log_dict_ = self.mask_loss(masks_logits[i][:, None], masks_label[i][:, None], return_dict=True)
                 loss_ = log_dict_.pop('total')
+                loss_ += zero_loss(disc_logit[i] ,boxes_reg[i])
             else:
-                loss_ = zero_loss(masks_logits[i] if disc_logit[i] is None else disc_logit[i])
+                loss_ = zero_loss(masks_logits[i], disc_logit[i], boxes_reg[i])
                 log_dict_ = {}
             loss_list.append(loss_)
             for k, v in log_dict_.items():
                 log_dict.setdefault(k, []).append(v)
         loss = torch.stack(loss_list).mean()
-        if self.trainer.is_parallel:
-            if all(m is None for m in masks_label):
+        if self.trainer.is_parallel or mmmm_debug():
+            if all(m is None for m in masks_logits):
                 loss += zero_loss(
                     self.sam(
                         [torch.zeros(3, 2, 32, 32, device=self.device)],
@@ -263,7 +269,7 @@ class MMMMForCausalLM(CogVLMForCausalLM, PeftMixin, LightningModule):
                         [torch.zeros(1, self.sam.prompt_dim, device=self.device)],
                     )[0],
                 )
-            if all(b is None for b in boxes_label):
+            if all(b is None for b in boxes_reg):
                 output: InstanceSamOutput = self.isam_model(
                     [torch.zeros(3, 2, 32, 32, device=self.device)],
                     [(1, 16, 16)],
