@@ -72,6 +72,7 @@ class PatchEmbedding(nn.Module):
                 dim=1,
             )
             x_list.append(x)
+        # device issue: https://github.com/facebookresearch/xformers/issues/1064
         attn_mask, x = BlockDiagonalMask.from_tensor_list(x_list)
         return x, attn_mask, shape_list
 

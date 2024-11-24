@@ -174,3 +174,9 @@ VinDr-CXR-plot
 /SegVol
 /output-data
 /detectron2-datasets
+
+/grg-plot*
+/results*
+/vg-plot
+/example-plot
+/grg-more

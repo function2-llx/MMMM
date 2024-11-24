@@ -1,7 +1,8 @@
 from functools import partial
-from typing import Optional
-from jsonargparse import CLI
 from pathlib import Path
+from typing import Optional
+
+from jsonargparse import CLI
 from torch.utils.data import DataLoader
 
 from utils import (

@@ -1,25 +1,22 @@
-import os
-from pathlib import Path
-import sys
-from typing import OrderedDict
-import evaluate
 import json
-
-from monai.transforms import apply_transform
-import numpy as np
-import pandas as pd
+import os
 import pickle as pkl
-from radgraph import F1RadGraph
 import random
+import sys
+from pathlib import Path
+
+import evaluate
+import numpy as np
+import numpy.typing as npt
+import pandas as pd
+import torch
+from radgraph import F1RadGraph
 from scipy.special import expit
 from sklearn.metrics import f1_score
-import torch
 from torch.utils.data import Dataset
 from tqdm import tqdm
 from transformers import AutoTokenizer, BertTokenizer
 
-
-from mmmm.data.defs import ORIGIN_VL_DATA_ROOT, PROCESSED_VL_DATA_ROOT
 from constants import (
     LLAMA3_PATH,
     LLAMA_SYSTEM_PROMPT,
@@ -32,6 +29,8 @@ from constants import (
     RADBERT_CONDITIONS,
     CHEXPERT_5,
 )
+from mmmm.data.defs import ORIGIN_VL_DATA_ROOT, PROCESSED_VL_DATA_ROOT
+from monai.transforms import apply_transform
 
 
 def setup_seed(seed):
@@ -288,6 +287,25 @@ class LlamaMetrics:
         with open(str(run) + '.json', 'w') as f:
             json.dump(summary, f, indent=4)
 
+def compute_proportion(numerator: np.ndarray, denominator: np.ndarray) -> tuple[np.ndarray, float, float]:
+    """
+    multi-label format
+    Args:
+        numerator: (c, )
+        denominator: (c, )
+    Returns:
+        - (c, ) proportion for each class
+        - macro average
+        - micro average
+    """
+    return numerator / denominator, (numerator / denominator).mean().item(), (numerator.sum() / denominator.sum()).item()
+
+def false_negative_rate(ref: np.ndarray, pred: np.ndarray):
+    ref = ref.astype(np.bool_)
+    pred = pred.astype(np.bool_)
+    fn = (ref & ~pred).sum(axis=0)
+    n: npt.NDArray[np.int64] = (~pred).sum(axis=0)
+    return compute_proportion(fn, n)
 
 class CXRMetrics:
     def setup_chexbert(self):
@@ -296,7 +314,7 @@ class CXRMetrics:
         model = bert_encoder(False)
 
         checkpoint = torch.load(CHEXBERT_PATH, map_location='cpu')
-        state_dict = OrderedDict()
+        state_dict = dict()
         for key in checkpoint['model_state_dict']:
             state_dict[key[7:]] = checkpoint['model_state_dict'][key]
         model.load_state_dict(state_dict)
@@ -308,9 +326,7 @@ class CXRMetrics:
         self.chexbert_tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
 
     def setup_radcliq(self):
-        sys.path.append('third-party/CXR-Report-Metric/')
-        sys.path.append('third-party/CXR-Report-Metric/CXRMetric/')
-        from run_eval import CompositeMetric
+        from CXRMetric.run_eval import CompositeMetric
 
         class RadCliQUnpickler(pkl.Unpickler):
             def find_class(self, module, name):
@@ -437,7 +453,7 @@ class CXRMetrics:
         similarities = []
         prediction_labels = []
         reference_labels = []
-        for _, row in tqdm(df.iterrows(), total=df.shape[0]):
+        for _, row in tqdm(df.iterrows(), total=df.shape[0], desc='computing CheXbert'):
             self.chexbert_model.logits = True
             prediction = self.chexbert_tokenize(
                 str(row['prediction']) if pd.notna(row['prediction']) else ''
@@ -503,18 +519,26 @@ class CXRMetrics:
             self.compute_chexbert(df)
         )
         f1s = f1_score(reference_labels, prediction_labels, average=None)
-        for i, condition in enumerate(CHEXPERT_CONDITIONS):
-            df[condition.lower() + ' chexbert prediction'] = prediction_labels[:,i]
-            df[condition.lower() + ' chexbert reference'] = reference_labels[:, i]
-            summary[condition.lower() + ' chexbert f1'] = f1s[i]
 
         summary['macro chexbert 14 f1'] = f1_score(reference_labels, prediction_labels, average='macro')
         summary['micro chexbert 14 f1'] = f1_score(reference_labels, prediction_labels, average='micro')
+        fnr, summary['macro chexbert 14 fnr'], summary['micro chexbert 14 fnr'] = false_negative_rate(reference_labels, prediction_labels)
+
+        for i, condition in enumerate(CHEXPERT_CONDITIONS):
+            condition = condition.lower()
+            df[condition + ' chexbert prediction'] = prediction_labels[:, i]
+            df[condition + ' chexbert reference'] = reference_labels[:, i]
+            summary[condition + ' chexbert f1'] = f1s[i]
+            summary[condition + ' chexbert fnr'] = fnr[i]
 
         summary['macro chexbert 5 f1'] = f1_score(reference_labels[:, CHEXPERT_5], prediction_labels[:, CHEXPERT_5], average='macro')
         summary['micro chexbert 5 f1'] = f1_score(reference_labels[:, CHEXPERT_5], prediction_labels[:, CHEXPERT_5], average='micro')
+        # yes, lazy me
+        _, summary['macro chexbert 5 fnr'], summary['micro chexbert 5 fnr'] = false_negative_rate(
+            reference_labels[:, CHEXPERT_5], prediction_labels[:, CHEXPERT_5],
+        )
 
-        for _, row in tqdm(df.iterrows(), total=df.shape[0]):
+        for _, row in tqdm(df.iterrows(), total=df.shape[0], desc='computing CXRMetrics'):
             score = self.compute(
                 str(row['prediction']) if pd.notna(row['prediction']) else '',
                 str(row['answer']),
@@ -573,7 +597,7 @@ class CTMetrics:
             1, len(RADBERT_CONDITIONS)
         )
 
-        for _, row in tqdm(df.iterrows(), total=df.shape[0]):
+        for _, row in tqdm(df.iterrows(), total=df.shape[0], desc='computing RadBERT'):
             inputs = self.tokenizer(
                 row['prediction'].replace('\n', ' '),
                 return_tensors='pt',
@@ -596,11 +620,7 @@ class CTMetrics:
         prediction_labels[prediction_labels < 0.5] = 0
 
         reference_labels = pd.read_csv(
-            ORIGIN_VL_DATA_ROOT
-            / 'CT-RATE'
-            / 'dataset'
-            / 'multi_abnormality_labels'
-            / 'valid_predicted_labels.csv'
+            ORIGIN_VL_DATA_ROOT / 'CT-RATE' / 'dataset' / 'multi_abnormality_labels' / 'valid_predicted_labels.csv'
         ).set_index(['VolumeName'])[RADBERT_CONDITIONS]
 
         with open(PROCESSED_VL_DATA_ROOT / 'CT-RATE' / 'test-processed.json') as f:
@@ -612,13 +632,16 @@ class CTMetrics:
         reference_labels = reference_labels.loc[file_names].values
 
         f1s = f1_score(prediction_labels, reference_labels, average=None)
-        for i, condition in enumerate(RADBERT_CONDITIONS):
-            df[condition.lower() + ' radbert prediction'] = prediction_labels[:, i]
-            df[condition.lower() + ' radbert reference'] = reference_labels[:, i]
-            summary[condition.lower() + ' radbert f1'] = f1s[i]
-
         summary['macro radbert f1'] = f1_score(prediction_labels, reference_labels, average='macro')
         summary['micro radbert f1'] = f1_score(prediction_labels, reference_labels, average='micro')
+        fnr, summary['macro radbert fnr'], summary['micro radbert fnr'] = false_negative_rate(reference_labels, prediction_labels)
+
+        for i, condition in enumerate(RADBERT_CONDITIONS):
+            condition = condition.lower()
+            df[condition + ' radbert prediction'] = prediction_labels[:, i]
+            df[condition + ' radbert reference'] = reference_labels[:, i]
+            summary[condition + ' radbert f1'] = f1s[i]
+            summary[condition + ' radbert fnr'] = fnr[i]
 
         df.to_csv(str(run) + '.csv', index=False)
         with open(str(run) + '.json', 'w') as f:

@@ -47,3 +47,4 @@ dependencies:
   - radgraph
   - rouge_score
   - bert_score
+  - fast-bleu

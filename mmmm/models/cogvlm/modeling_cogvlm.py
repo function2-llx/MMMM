@@ -117,6 +117,7 @@ def attention_fn(
     if padding_mask.shape[1] == query_layer.shape[1]:
         from xformers.ops.fmha.attn_bias import BlockDiagonalCausalMask
         output = torch.zeros_like(query_layer)
+        # device issue: https://github.com/facebookresearch/xformers/issues/1064
         attn_bias, query_layer, key_layer, value_layer = BlockDiagonalCausalMask.from_tensor_lists_qkv(
             _to_tensor_list(query_layer, padding_mask),
             _to_tensor_list(key_layer, padding_mask),
