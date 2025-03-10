@@ -60,7 +60,9 @@ For MIMIC-CXR, we train a DINO model for disease detection and use the bounding 
 
 ## Pre-trained Checkpoints
 
-We have released checkpoint for Stage 2 (see the [release page](https://github.com/function2-llx/MMMM/releases/tag/s2)). The checkpoint for Stage 3 will be released soon. 
+We have released checkpoint for Stage 2 (see the [release page](https://github.com/function2-llx/MMMM/releases/tag/s2)). The checkpoint for Stage 3 will be released soon.
+
+Our released checkpoints are in the format of [PEFT's LoRA](https://huggingface.co/docs/peft/en/package_reference/lora) adapters. Please follow the official instructions to load the adapter and merge it with the base model.
 
 ## Downstream Tasks
 
