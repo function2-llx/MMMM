@@ -1,6 +1,10 @@
-# MMMM
+# [NAACL 2025] VividMed
 
-## Setup
+This is the official repository for the paper _VividMed: Vision Language Model with Versatile Visual Grounding for Medicine_.
+
+[arXiv preprint](https://arxiv.org/abs/2410.12694)
+
+## Environment Setup
 
 ```zsh
 git clone --recursive https://github.com/function2-llx/MMMM.git
